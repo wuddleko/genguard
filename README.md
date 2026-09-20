@@ -24,7 +24,18 @@ groups:
 regen check
 ```
 
-If outputs drift, `regen check` prints what changed and exits non-zero.
+If outputs drift, `regen check` prints what changed and exits non-zero:
+
+```
+Summary
+  protobuf: drift (1 modified)
+1 group: 0 ok, 1 drift, 0 error
+
+Drift
+[modified] protobuf: gen/foo.pb.go
+
+diff --git a/gen/foo.pb.go ...
+```
 
 ```
 regen check [-c|--config path/to/regen.yaml]
@@ -43,6 +54,8 @@ For each group, `regen check`:
 2. Runs `command` from the directory that contains the config file (`sh -c` on Unix)
 3. Compares git HEAD to the working tree under the declared `outputs`
 4. Records OK, drift, or error for that group
+
+This is a **reproducibility check**: it asks whether re-running the generator on the current branch reproduces what is already committed. It does not compare your branch to a PR target branch or merge base.
 
 Later groups see the working tree as earlier groups left it, including files wiped by `clean`. Prefer disjoint `outputs` so a failed or drifting group cannot look like drift in the next one. After every group has run, regen exits `1` if any group drifted or `2` if any group had a command error (command errors take priority).
 
@@ -110,9 +123,11 @@ If you omit `--config` / `-c`, regen walks up from the current directory until i
 Each group has:
 
 - **`name`** — optional; label used in error output. Defaults to `groups[N]`.
-- **`command`** — shell command that regenerates files (run from the config directory)
+- **`command`** — shell command that regenerates files (run from the config directory via `sh -c` on Unix). Treat it like CI workflow code: regen executes whatever the config declares.
 - **`outputs`** — git pathspecs, relative to the config file's directory, for generated files to check
 - **`clean`** — optional; default `false`. If `true`, delete those outputs before running `command`, so files the generator no longer writes fail the check. Also valid at the top level of the config as the default for every group.
+
+Without `clean`, a generator that stops producing `old.go` leaves the stale file in place and a plain `git diff` may not notice. With `clean: true`, regen deletes `gen/` first, re-runs the generator, and reports the missing `old.go` as drift.
 
 `clean` is destructive. Use it only on generated-only directories. It refuses `.`, `..`, globs, absolute paths, paths that escape the config directory, symlinks, and any tree that would delete `.git` or the config file (`regen.yaml` / `regen.yml`). If `command` fails after a wipe, the error says so; outputs are not restored.
 
@@ -142,6 +157,14 @@ Tests require `git` and `python3` (used by the test fixtures' sample generator).
 ## What regen is for
 
 regen is a small, language-agnostic guardrail: declare how files are generated, declare where they land, and let CI prove they stay in sync.
+
+You could run `make generate && git diff --exit-code HEAD`, but regen adds:
+
+- **Scoped outputs** — check only the paths you declare, not the whole repo
+- **Multiple generators** — one config, one CI step, per-group status
+- **Missing and untracked detection** — not just modified files
+- **Stale artifact detection** — with `clean: true`, files a generator stopped writing are caught
+- **Structured CI output** — summary, drift kinds, and diffs in one place
 
 It is not a replacement for secret scanning or tool-specific commands like `sqlc diff` or `buf breaking`. Those solve different problems. regen is the generic "re-run the generator and compare git" step that fits any stack.
 

@@ -2,7 +2,7 @@
 
 `regen check` is meant to run in CI after checkout, inside a git work tree. It re-runs your declared generator commands and fails if `git diff HEAD` would show changes under the declared `outputs` (working tree vs committed files, including staged but uncommitted generated output). Gitignored files under `outputs` are not reported as untracked — commit the generated files.
 
-Groups run in order. Every group runs even when an earlier one fails or drifts; regen prints a per-group summary before drift details. Later groups see the working tree as earlier groups left it, including files wiped by `clean`. Prefer disjoint `outputs` so a failed or drifting group cannot look like drift in the next one.
+Groups run in order. Every group runs even when an earlier one fails or drifts; on failure regen prints a **Summary** (one line per group, with drift kinds), then **Drift** details and diffs. Later groups see the working tree as earlier groups left it, including files wiped by `clean`. Prefer disjoint `outputs` so a failed or drifting group cannot look like drift in the next one.
 
 Exit codes:
 
