@@ -64,11 +64,7 @@ func (g GroupResult) SummaryLine() string {
 	case GroupOK:
 		return fmt.Sprintf("  %s: OK", g.Name)
 	case GroupDrift:
-		n := len(g.Drifts)
-		if n == 1 {
-			return fmt.Sprintf("  %s: drift (1 file)", g.Name)
-		}
-		return fmt.Sprintf("  %s: drift (%d files)", g.Name, n)
+		return fmt.Sprintf("  %s: drift (%s)", g.Name, driftKindSummary(g.Drifts))
 	case GroupError:
 		return fmt.Sprintf("  %s: error (%s)", g.Name, oneLineError(g.Err))
 	default:

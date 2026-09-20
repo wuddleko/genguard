@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"github.com/wuddleko/regen/internal/check"
 	"github.com/wuddleko/regen/internal/config"
@@ -88,29 +87,11 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	for _, line := range result.SummaryLines() {
-		fmt.Fprintln(stderr, line)
-	}
-	fmt.Fprintln(stderr)
-
-	drifts := result.AllDrifts()
-	for _, item := range drifts {
-		fmt.Fprintf(stderr, "[%s] %s: %s\n", item.Kind, item.Group, item.Path)
-	}
-	if len(drifts) > 0 {
-		diff, err := check.DriftDiff(cfg.Root(), drifts)
-		if err != nil {
-			fmt.Fprintf(stderr, "error: %v\n", err)
-			return 2
-		}
-		if strings.TrimSpace(diff) != "" {
-			fmt.Fprintln(stderr)
-			fmt.Fprintln(stderr, diff)
-		}
-	}
-
-	if line := result.FinalErrorLine(); line != "" {
-		fmt.Fprintln(stderr, line)
+	report, err := check.FormatFailureReport(result, cfg.Root())
+	fmt.Fprint(stderr, report)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
 	}
 	return result.ExitCode()
 }

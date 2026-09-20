@@ -118,22 +118,47 @@ func TestSummaryLine(t *testing.T) {
 			want: "  greeting: OK",
 		},
 		{
-			name: "one file",
+			name: "one modified",
 			g: check.GroupResult{
 				Name:   "greeting",
 				Status: check.GroupDrift,
-				Drifts: []check.Drift{{Path: "a"}},
+				Drifts: []check.Drift{{Kind: "modified", Path: "a"}},
 			},
-			want: "  greeting: drift (1 file)",
+			want: "  greeting: drift (1 modified)",
 		},
 		{
-			name: "several files",
+			name: "mixed kinds",
 			g: check.GroupResult{
 				Name:   "greeting",
 				Status: check.GroupDrift,
-				Drifts: []check.Drift{{Path: "a"}, {Path: "b"}, {Path: "c"}},
+				Drifts: []check.Drift{
+					{Kind: "modified", Path: "a"},
+					{Kind: "modified", Path: "b"},
+					{Kind: "untracked", Path: "c"},
+				},
 			},
-			want: "  greeting: drift (3 files)",
+			want: "  greeting: drift (2 modified, 1 untracked)",
+		},
+		{
+			name: "one missing",
+			g: check.GroupResult{
+				Name:   "greeting",
+				Status: check.GroupDrift,
+				Drifts: []check.Drift{{Kind: "missing", Path: "a"}},
+			},
+			want: "  greeting: drift (1 missing)",
+		},
+		{
+			name: "unknown kind kept",
+			g: check.GroupResult{
+				Name:   "greeting",
+				Status: check.GroupDrift,
+				Drifts: []check.Drift{
+					{Kind: "modified", Path: "a"},
+					{Kind: "other", Path: "b"},
+				},
+			},
+			want: "  greeting: drift (1 modified, 1 other)",
 		},
 		{
 			name: "zero files",
@@ -185,13 +210,13 @@ func TestSummaryLine(t *testing.T) {
 func TestSummaryLinesCount(t *testing.T) {
 	result := check.ConfigResult{Groups: []check.GroupResult{
 		{Name: "one", Status: check.GroupOK},
-		{Name: "two", Status: check.GroupDrift, Drifts: []check.Drift{{Path: "a"}}},
+		{Name: "two", Status: check.GroupDrift, Drifts: []check.Drift{{Kind: "modified", Path: "a"}}},
 	}}
 	lines := result.SummaryLines()
 	if len(lines) != 3 {
 		t.Fatalf("lines = %v", lines)
 	}
-	if lines[0] != "  one: OK" || lines[1] != "  two: drift (1 file)" {
+	if lines[0] != "  one: OK" || lines[1] != "  two: drift (1 modified)" {
 		t.Fatalf("lines = %v", lines)
 	}
 	if lines[2] != "2 groups: 1 ok, 1 drift, 0 error" {
@@ -199,7 +224,9 @@ func TestSummaryLinesCount(t *testing.T) {
 	}
 
 	one := check.ConfigResult{Groups: []check.GroupResult{
-		{Name: "openapi", Status: check.GroupDrift, Drifts: []check.Drift{{Path: "generated/models.py"}}},
+		{Name: "openapi", Status: check.GroupDrift, Drifts: []check.Drift{
+			{Kind: "modified", Path: "generated/models.py"},
+		}},
 	}}
 	lines = one.SummaryLines()
 	if lines[len(lines)-1] != "1 group: 0 ok, 1 drift, 0 error" {

@@ -35,7 +35,7 @@ regen version
 
 ## How it works
 
-Groups run in order. Every group runs even when an earlier one fails or drifts. On failure, regen prints a per-group summary before drift details.
+Groups run in order. Every group runs even when an earlier one fails or drifts. On failure, regen prints a **Summary** (one line per group, with drift kinds), then **Drift** details and diffs.
 
 For each group, `regen check`:
 

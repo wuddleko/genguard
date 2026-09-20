@@ -127,12 +127,14 @@ Do **not** rely on CI to mutate the repo. `regen check` leaves the working tree 
 
 ## When check fails in CI
 
-The log shows a per-group summary, drift lines, and a git diff, for example:
+The log shows a **Summary** (per-group status), **Drift** lines, and a git diff, for example:
 
 ```
-  openapi: drift (1 file)
+Summary
+  openapi: drift (1 modified)
 1 group: 0 ok, 1 drift, 0 error
 
+Drift
 [modified] openapi: generated/models.py
 
 diff --git a/generated/models.py ...

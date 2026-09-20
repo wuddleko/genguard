@@ -326,7 +326,10 @@ func TestCLIDriftExit1(t *testing.T) {
 	if !strings.Contains(stderr, "error: 1 generated path drifted") {
 		t.Fatalf("stderr = %q", stderr)
 	}
-	if !strings.Contains(stderr, "greeting: drift") {
+	if !strings.Contains(stderr, "Summary") || !strings.Contains(stderr, "greeting: drift (1 modified)") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "Drift") || !strings.Contains(stderr, "[modified] greeting: generated/hello.txt") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 }
