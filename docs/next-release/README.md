@@ -1,3 +1,13 @@
+<!--
+Post-v0.1.0 docs. The published v0.1.0 binary fail-fasts and prints
+[kind] lines without a Summary section.
+
+When you tag the next release:
+  cp docs/next-release/README.md README.md
+  cp docs/next-release/ci.md docs/ci.md
+Then delete this comment (and the one in ci.md).
+-->
+
 # regen
 
 **Keep generated files honest in CI.**
@@ -27,6 +37,11 @@ regen check
 If outputs drift, `regen check` prints what changed and exits non-zero:
 
 ```
+Summary
+  protobuf: drift (1 modified)
+1 group: 0 ok, 1 drift, 0 error
+
+Drift
 [modified] protobuf: gen/foo.pb.go
 
 diff --git a/gen/foo.pb.go ...
@@ -41,18 +56,20 @@ regen version
 
 ## How it works
 
-Groups run in order. If a group's `command` fails, later groups are not run.
+Groups run in order. Every group runs even when an earlier one fails or drifts. On failure, regen prints a **Summary** (one line per group, with drift kinds), then **Drift** details and diffs.
 
 For each group, `regen check`:
 
 1. If `clean` is true, deletes the declared `outputs` (then recreates empty directories)
 2. Runs `command` from the directory that contains the config file (`sh -c` on Unix)
 3. Compares git HEAD to the working tree under the declared `outputs`
-4. Reports drift and exits `1` if anything changed
+4. Records OK, drift, or error for that group
 
 This is a **reproducibility check**: it asks whether re-running the generator on the current branch reproduces what is already committed. It does not compare your branch to a PR target branch or merge base.
 
-The working tree is left as the generator left it — same idea as `make generate && git diff --exit-code HEAD`, but with explicit output paths and clearer errors. The check does not run `git add`. Staged generated files still fail until they are committed.
+Later groups see the working tree as earlier groups left it, including files wiped by `clean`. Prefer disjoint `outputs` so a failed or drifting group cannot look like drift in the next one. After every group has run, regen exits `1` if any group drifted or `2` if any group had a command error (command errors take priority).
+
+The working tree is left as the generators left it — same idea as `make generate && git diff --exit-code HEAD`, but with explicit output paths and clearer errors. The check does not run `git add`. Staged generated files still fail until they are committed.
 
 Generated paths must be tracked. Gitignored files under `outputs` are not reported as untracked.
 
@@ -154,10 +171,10 @@ regen is a small, language-agnostic guardrail: declare how files are generated, 
 You could run `make generate && git diff --exit-code HEAD`, but regen adds:
 
 - **Scoped outputs** — check only the paths you declare, not the whole repo
-- **Multiple generators** — one config, one CI step
+- **Multiple generators** — one config, one CI step, per-group status
 - **Missing and untracked detection** — not just modified files
 - **Stale artifact detection** — with `clean: true`, files a generator stopped writing are caught
-- **Clearer CI output** — drift kinds and diffs for the paths you declared
+- **Structured CI output** — summary, drift kinds, and diffs in one place
 
 It is not a replacement for secret scanning or tool-specific commands like `sqlc diff` or `buf breaking`. Those solve different problems. regen is the generic "re-run the generator and compare git" step that fits any stack.
 

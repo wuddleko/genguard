@@ -192,13 +192,13 @@ func driftForGroup(root string, group config.Group) ([]Drift, error) {
 		found = append(found, Drift{Group: group.Name, Path: path, Kind: kind})
 	}
 
-	modified, err := gitNames(root, append([]string{"diff", "--name-only", "HEAD", "--"}, group.Outputs...)...)
+	modified, err := gitNames(root, append([]string{"diff", "--name-only", "-z", "HEAD", "--"}, group.Outputs...)...)
 	if err != nil {
 		return nil, err
 	}
 	untracked, err := gitNames(
 		root,
-		append([]string{"ls-files", "--others", "--exclude-standard", "--"}, group.Outputs...)...,
+		append([]string{"ls-files", "--others", "--exclude-standard", "-z", "--"}, group.Outputs...)...,
 	)
 	if err != nil {
 		return nil, err
@@ -256,15 +256,21 @@ func gitNames(root string, args ...string) ([]string, error) {
 		}
 		return nil, newRegenError("%s", detail)
 	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	names := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			names = append(names, line)
+	return parseGitNameList(out), nil
+}
+
+func parseGitNameList(out string) []string {
+	if out == "" {
+		return nil
+	}
+	parts := strings.Split(out, "\x00")
+	names := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			names = append(names, part)
 		}
 	}
-	return names, nil
+	return names
 }
 
 func git(root string, args ...string) (string, int, error) {

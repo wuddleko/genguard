@@ -562,6 +562,48 @@ func TestDriftForGroupReportsMissingFileSpec(t *testing.T) {
 	}
 }
 
+func TestDriftForGroupHandlesNewlineInFilename(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	rel := "generated/hello\nworld.txt"
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteRegenConfig(root, rel, "true", "", []testutil.GroupSpec{
+		{Name: "greeting", Command: "true", Outputs: []string{"generated/"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drifts, err := check.DriftForGroup(root, config.Group{
+		Name:    "greeting",
+		Command: "true",
+		Outputs: []string{"generated/"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := check.Drift{Group: "greeting", Path: rel, Kind: "modified"}
+	if len(drifts) != 1 || drifts[0] != want {
+		t.Fatalf("drifts = %v, want [%+v]", drifts, want)
+	}
+}
+
 func TestDriftForGroupDeletedTrackedFileIsMissingOnce(t *testing.T) {
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
 	if err != nil {
