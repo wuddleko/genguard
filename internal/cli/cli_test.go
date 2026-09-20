@@ -18,6 +18,36 @@ func runCLI(args []string) (stdout, stderr string, code int) {
 	return outBuf.String(), errBuf.String(), code
 }
 
+func commitPath(t *testing.T, root, rel, content string) {
+	t.Helper()
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", rel); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", rel); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func commitNameChange(t *testing.T, root string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("regen\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "name.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "rename"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCLISuccessMessage(t *testing.T) {
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
 	if err != nil {
@@ -59,6 +89,43 @@ func TestCLIInvalidConfigExit2(t *testing.T) {
 	}
 }
 
+func TestCLIRunsAllGroupsAfterCommandFailure(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}},
+		{Name: "greeting", Command: "python3 scripts/gen.py", Outputs: []string{"generated/hello.txt"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("regen\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "name.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "rename"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "regen.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stderr, "broken: error") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "greeting: drift") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "2 groups: 0 ok, 1 drift, 1 error") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "error: 1 group failed; 1 group drifted") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
 func TestCLICommandFailureExit2(t *testing.T) {
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
 	if err != nil {
@@ -66,16 +133,111 @@ func TestCLICommandFailureExit2(t *testing.T) {
 	}
 	content := "groups:\n" +
 		"  - name: greeting\n" +
-		"    command: python3 -c \"import sys; sys.exit(3)\"\n" +
+		"    command: python3 -c \"import sys; sys.stderr.write('line1'+chr(10)+'line2'+chr(10)); sys.exit(3)\"\n" +
 		"    outputs:\n" +
 		"      - generated/hello.txt\n"
 	if err := os.WriteFile(filepath.Join(root, "regen.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, code := runCLI([]string{"check", "--config", filepath.Join(root, "regen.yaml")})
+	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "regen.yaml")})
 	if code != 2 {
-		t.Fatalf("code = %d, want 2", code)
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stderr, "1 group: 0 ok, 0 drift, 1 error") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stderr, "[modified]") || strings.Contains(stderr, "[missing]") || strings.Contains(stderr, "[untracked]") {
+		t.Fatalf("unexpected drift lines: %q", stderr)
+	}
+	if strings.Contains(stderr, "diff --git") {
+		t.Fatalf("unexpected diff: %q", stderr)
+	}
+	if !strings.Contains(stderr, "error: command failed") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+
+	found := false
+	for _, line := range strings.Split(stderr, "\n") {
+		if !strings.Contains(line, "greeting: error") {
+			continue
+		}
+		found = true
+		if !strings.Contains(line, "line1 line2") {
+			t.Fatalf("summary line not flattened: %q", line)
+		}
+	}
+	if !found {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestCLIErrorThenOKGroup(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}},
+		{Name: "other", Command: "true", Outputs: []string{"other/out.txt"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitPath(t, root, "other/out.txt", "ok\n")
+
+	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "regen.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stderr, "broken: error") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "other: OK") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "2 groups: 1 ok, 0 drift, 1 error") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stderr, "[modified]") || strings.Contains(stderr, "[missing]") || strings.Contains(stderr, "[untracked]") {
+		t.Fatalf("unexpected drift lines: %q", stderr)
+	}
+	if strings.Contains(stderr, "diff --git") {
+		t.Fatalf("unexpected diff: %q", stderr)
+	}
+}
+
+func TestCLIErrorOKAndDrift(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}},
+		{Name: "other", Command: "true", Outputs: []string{"other/out.txt"}},
+		{Name: "greeting", Command: "python3 scripts/gen.py", Outputs: []string{"generated/hello.txt"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitPath(t, root, "other/out.txt", "ok\n")
+	commitNameChange(t, root)
+
+	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "regen.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stderr, "broken: error") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "other: OK") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "greeting: drift") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "3 groups: 1 ok, 1 drift, 1 error") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "[modified] greeting: generated/hello.txt") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "error: 1 group failed; 1 group drifted") {
+		t.Fatalf("stderr = %q", stderr)
 	}
 }
 
@@ -158,7 +320,13 @@ func TestCLIDriftExit1(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("code = %d, want 1", code)
 	}
-	if !strings.Contains(stderr, "error: 1 generated path(s) drifted") {
+	if !strings.Contains(stderr, "1 group: 0 ok, 1 drift, 0 error") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "error: 1 generated path drifted") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "greeting: drift") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 }

@@ -78,34 +78,41 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	drifts, err := check.CheckConfig(cfg)
+	result, err := check.CheckConfig(cfg)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
 	}
-	if len(drifts) == 0 {
+	if result.ExitCode() == 0 {
 		fmt.Fprintln(stdout, "Generated files match the generators.")
 		return 0
 	}
 
+	for _, line := range result.SummaryLines() {
+		fmt.Fprintln(stderr, line)
+	}
+	fmt.Fprintln(stderr)
+
+	drifts := result.AllDrifts()
 	for _, item := range drifts {
 		fmt.Fprintf(stderr, "[%s] %s: %s\n", item.Kind, item.Group, item.Path)
 	}
-	diff, err := check.DriftDiff(cfg.Root(), drifts)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
+	if len(drifts) > 0 {
+		diff, err := check.DriftDiff(cfg.Root(), drifts)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		if strings.TrimSpace(diff) != "" {
+			fmt.Fprintln(stderr)
+			fmt.Fprintln(stderr, diff)
+		}
 	}
-	if strings.TrimSpace(diff) != "" {
-		fmt.Fprintln(stderr)
-		fmt.Fprintln(stderr, diff)
+
+	if line := result.FinalErrorLine(); line != "" {
+		fmt.Fprintln(stderr, line)
 	}
-	fmt.Fprintf(
-		stderr,
-		"error: %d generated path(s) drifted; commit the generator output or fix the command\n",
-		len(drifts),
-	)
-	return 1
+	return result.ExitCode()
 }
 
 func printUsage(w io.Writer) {

@@ -35,16 +35,18 @@ regen version
 
 ## How it works
 
-Groups run in order. If a group's `command` fails, later groups are not run.
+Groups run in order. Every group runs even when an earlier one fails or drifts. On failure, regen prints a per-group summary before drift details.
 
 For each group, `regen check`:
 
 1. If `clean` is true, deletes the declared `outputs` (then recreates empty directories)
 2. Runs `command` from the directory that contains the config file (`sh -c` on Unix)
 3. Compares git HEAD to the working tree under the declared `outputs`
-4. Reports drift and exits `1` if anything changed
+4. Records OK, drift, or error for that group
 
-The working tree is left as the generator left it — same idea as `make generate && git diff --exit-code HEAD`, but with explicit output paths and clearer errors. The check does not run `git add`. Staged generated files still fail until they are committed.
+Later groups see the working tree as earlier groups left it, including files wiped by `clean`. Prefer disjoint `outputs` so a failed or drifting group cannot look like drift in the next one. After every group has run, regen exits `1` if any group drifted or `2` if any group had a command error (command errors take priority).
+
+The working tree is left as the generators left it — same idea as `make generate && git diff --exit-code HEAD`, but with explicit output paths and clearer errors. The check does not run `git add`. Staged generated files still fail until they are committed.
 
 Generated paths must be tracked. Gitignored files under `outputs` are not reported as untracked.
 

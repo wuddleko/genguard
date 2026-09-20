@@ -36,6 +36,49 @@ func runCLICheck(root string) int {
 	return code
 }
 
+func commitPath(t *testing.T, root, rel, content string) {
+	t.Helper()
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", rel); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", rel); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func commitNameChange(t *testing.T, root string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("regen\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "name.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "rename"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustCheckConfig(t *testing.T, root string) check.ConfigResult {
+	t.Helper()
+	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := check.CheckConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
 func TestCheckFailsWhenSourceChanged(t *testing.T) {
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
 	if err != nil {
@@ -288,38 +331,145 @@ func TestRunCommandFailure(t *testing.T) {
 func TestCheckMultipleGroupsOnlyOneDrifts(t *testing.T) {
 	groups := []testutil.GroupSpec{
 		{Name: "greeting", Command: "python3 scripts/gen.py", Outputs: []string{"generated/hello.txt"}},
-		{Name: "noop", Command: "true", Outputs: []string{"generated/hello.txt"}},
+		{Name: "noop", Command: "true", Outputs: []string{"other/out.txt"}},
 	}
-	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("regen\n"), 0o644); err != nil {
+	commitPath(t, root, "other/out.txt", "ok\n")
+	commitNameChange(t, root)
+
+	result := mustCheckConfig(t, root)
+	drifts := result.AllDrifts()
+	if len(drifts) != 1 || drifts[0].Group != "greeting" || drifts[0].Kind != "modified" {
+		t.Fatalf("drifts = %v", drifts)
+	}
+	if result.Groups[1].Status != check.GroupOK {
+		t.Fatalf("noop status = %q", result.Groups[1].Status)
+	}
+}
+
+func TestCheckOverlappingOutputsBothReportDrift(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "greeting", Command: "python3 scripts/gen.py", Outputs: []string{"generated/hello.txt"}},
+		{Name: "noop", Command: "true", Outputs: []string{"generated/hello.txt"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := testutil.Git(root, "add", "name.txt"); err != nil {
-		t.Fatal(err)
+	commitNameChange(t, root)
+
+	result := mustCheckConfig(t, root)
+	drifts := result.AllDrifts()
+	if len(drifts) != 2 {
+		t.Fatalf("drifts = %v", drifts)
 	}
-	if err := testutil.Git(root, "commit", "-m", "rename"); err != nil {
+	if drifts[0].Group != "greeting" || drifts[0].Path != "generated/hello.txt" {
+		t.Fatalf("first drift = %v", drifts[0])
+	}
+	if drifts[1].Group != "noop" || drifts[1].Path != "generated/hello.txt" {
+		t.Fatalf("second drift = %v", drifts[1])
+	}
+}
+
+func TestCheckTwoCommandFailures(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "first", Command: "exit 3", Outputs: []string{"generated/hello.txt"}},
+		{Name: "second", Command: "exit 4", Outputs: []string{"other/out.txt"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	result := mustCheckConfig(t, root)
+	if len(result.Groups) != 2 {
+		t.Fatalf("groups = %d", len(result.Groups))
+	}
+	if result.Groups[0].Status != check.GroupError || result.Groups[1].Status != check.GroupError {
+		t.Fatalf("statuses = %q, %q", result.Groups[0].Status, result.Groups[1].Status)
+	}
+	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "exit 3") {
+		t.Fatalf("first err = %v", result.Groups[0].Err)
+	}
+	if result.Groups[1].Err == nil || !strings.Contains(result.Groups[1].Err.Error(), "exit 4") {
+		t.Fatalf("second err = %v", result.Groups[1].Err)
+	}
+	if result.ExitCode() != 2 {
+		t.Fatalf("exit code = %d, want 2", result.ExitCode())
+	}
+}
+
+func TestCheckDriftThenError(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "greeting", Command: "python3 scripts/gen.py", Outputs: []string{"generated/hello.txt"}},
+		{Name: "broken", Command: "exit 3", Outputs: []string{"other/out.txt"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
 	if err != nil {
 		t.Fatal(err)
 	}
-	drifts, err := check.CheckConfig(cfg)
+	commitNameChange(t, root)
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupDrift {
+		t.Fatalf("greeting status = %q", result.Groups[0].Status)
+	}
+	if result.Groups[1].Status != check.GroupError {
+		t.Fatalf("broken status = %q", result.Groups[1].Status)
+	}
+	if result.ExitCode() != 2 {
+		t.Fatalf("exit code = %d, want 2", result.ExitCode())
+	}
+}
+
+func TestCheckReportsGitDiffFailureAsGroupError(t *testing.T) {
+	root := t.TempDir()
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteRegenConfig(root, "generated/hello.txt", "true", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "generated"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "generated", "hello.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if len(result.Groups) != 1 || result.Groups[0].Status != check.GroupError {
+		t.Fatalf("groups = %+v", result.Groups)
+	}
+	if result.Groups[0].Err == nil {
+		t.Fatal("expected git error")
+	}
+	if result.ExitCode() != 2 {
+		t.Fatalf("exit code = %d, want 2", result.ExitCode())
+	}
+}
+
+func TestCheckFlattensCommandOutput(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "broken",
+		Command: `python3 -c "import sys; sys.stderr.write('line1'+chr(10)+'line2'+chr(10)); sys.exit(3)"`,
+		Outputs: []string{"generated/hello.txt"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var greeting []check.Drift
-	for _, drift := range drifts {
-		if drift.Group == "greeting" {
-			greeting = append(greeting, drift)
-		}
+
+	result := mustCheckConfig(t, root)
+	line := result.Groups[0].SummaryLine()
+	if strings.Contains(line, "\n") {
+		t.Fatalf("summary contains newline: %q", line)
 	}
-	if len(greeting) != 1 || greeting[0].Kind != "modified" {
-		t.Fatalf("greeting drifts = %v", greeting)
+	if !strings.Contains(line, "line1 line2") {
+		t.Fatalf("summary = %q", line)
 	}
 }
 
@@ -337,12 +487,12 @@ func TestCheckMultipleGroupsAllPass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	drifts, err := check.CheckConfig(cfg)
+	result, err := check.CheckConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(drifts) != 0 {
-		t.Fatalf("drifts = %v", drifts)
+	if len(result.AllDrifts()) != 0 {
+		t.Fatalf("drifts = %v", result.AllDrifts())
 	}
 }
 
@@ -522,12 +672,12 @@ func TestCheckWithoutCleanIgnoresOrphan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	drifts, err := check.CheckConfig(cfg)
+	result, err := check.CheckConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(drifts) != 0 {
-		t.Fatalf("drifts = %v, want none", drifts)
+	if len(result.AllDrifts()) != 0 {
+		t.Fatalf("drifts = %v, want none", result.AllDrifts())
 	}
 }
 
@@ -590,15 +740,103 @@ func TestCheckCleanCommandFailureAfterWipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = check.CheckConfig(cfg)
-	if err == nil {
-		t.Fatal("expected error")
+	result, err := check.CheckConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "after cleaning outputs") {
-		t.Fatalf("error = %q", err)
+	if len(result.Groups) != 1 {
+		t.Fatal("expected one group")
 	}
-	if !strings.Contains(err.Error(), "exit 3") {
-		t.Fatalf("error = %q", err)
+	if result.Groups[0].Status != check.GroupError {
+		t.Fatalf("status = %q, want error", result.Groups[0].Status)
+	}
+	if result.Groups[0].Err == nil {
+		t.Fatal("expected group error")
+	}
+	if !strings.Contains(result.Groups[0].Err.Error(), "after cleaning outputs") {
+		t.Fatalf("error = %q", result.Groups[0].Err.Error())
+	}
+	if !strings.Contains(result.Groups[0].Err.Error(), "exit 3") {
+		t.Fatalf("error = %q", result.Groups[0].Err.Error())
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "generated", "hello.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("hello.txt should have been wiped: %v", statErr)
+	}
+}
+
+func TestCheckRunsLaterGroupAfterCleanCommandFailure(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}, Clean: true},
+		{Name: "other", Command: "true", Outputs: []string{"other/out.txt"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other", "out.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "other/out.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "other output"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := check.CheckConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Groups) != 2 {
+		t.Fatalf("groups = %d, want 2", len(result.Groups))
+	}
+	if result.Groups[0].Status != check.GroupError {
+		t.Fatalf("broken status = %q", result.Groups[0].Status)
+	}
+	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "after cleaning outputs") {
+		t.Fatalf("broken err = %v", result.Groups[0].Err)
+	}
+	if result.Groups[1].Status != check.GroupOK {
+		t.Fatalf("other status = %q, err = %v", result.Groups[1].Status, result.Groups[1].Err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "generated", "hello.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("hello.txt should have been wiped: %v", statErr)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "other", "out.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "ok\n" {
+		t.Fatalf("other output = %q", got)
+	}
+}
+
+func TestCheckCleanFailureMakesOverlappingGroupDrift(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}, Clean: true},
+		{Name: "other", Command: "true", Outputs: []string{"generated/hello.txt"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupError {
+		t.Fatalf("broken status = %q", result.Groups[0].Status)
+	}
+	if result.Groups[1].Status != check.GroupDrift {
+		t.Fatalf("other status = %q, err = %v, drifts = %v", result.Groups[1].Status, result.Groups[1].Err, result.Groups[1].Drifts)
+	}
+	if len(result.Groups[1].Drifts) != 1 || result.Groups[1].Drifts[0].Kind != "missing" {
+		t.Fatalf("other drifts = %v", result.Groups[1].Drifts)
 	}
 	if _, statErr := os.Stat(filepath.Join(root, "generated", "hello.txt")); !os.IsNotExist(statErr) {
 		t.Fatalf("hello.txt should have been wiped: %v", statErr)
@@ -633,12 +871,18 @@ func TestCheckCleanRefusesUnsafeOutputs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = check.CheckConfig(cfg)
-			if err == nil {
-				t.Fatal("expected error")
+			result, err := check.CheckConfig(cfg)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !strings.Contains(err.Error(), tc.match) {
-				t.Fatalf("error = %q, want substring %q", err, tc.match)
+			if len(result.Groups) != 1 {
+				t.Fatal("expected one group")
+			}
+			if result.Groups[0].Status != check.GroupError {
+				t.Fatalf("status = %q, want error", result.Groups[0].Status)
+			}
+			if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), tc.match) {
+				t.Fatalf("error = %q, want substring %q", result.Groups[0].Err, tc.match)
 			}
 		})
 	}
@@ -664,11 +908,17 @@ func TestCheckCleanRefusesNestedGit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = check.CheckConfig(cfg)
-	if err == nil {
-		t.Fatal("expected error")
+	result, err := check.CheckConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "mixed tree") {
-		t.Fatalf("error = %q", err)
+	if len(result.Groups) != 1 {
+		t.Fatal("expected one group")
+	}
+	if result.Groups[0].Status != check.GroupError {
+		t.Fatalf("status = %q, want error", result.Groups[0].Status)
+	}
+	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "mixed tree") {
+		t.Fatalf("error = %q", result.Groups[0].Err)
 	}
 }

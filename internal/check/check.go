@@ -30,32 +30,54 @@ func newRegenError(format string, args ...any) error {
 	return &RegenError{msg: fmt.Sprintf(format, args...)}
 }
 
-func CheckConfig(cfg config.Config) ([]Drift, error) {
+func CheckConfig(cfg config.Config) (ConfigResult, error) {
 	root := cfg.Root()
 	if err := requireGitRepo(root); err != nil {
-		return nil, err
+		return ConfigResult{}, err
 	}
 
-	var drifts []Drift
+	result := ConfigResult{}
 	for _, group := range cfg.Groups {
-		if group.Clean {
-			if err := cleanOutputs(root, group); err != nil {
-				return nil, err
-			}
-		}
-		if err := runCommand(root, group.Command); err != nil {
-			if group.Clean {
-				return nil, newRegenError("command failed after cleaning outputs: %s", err.Error())
-			}
-			return nil, err
-		}
-		found, err := driftForGroup(root, group)
-		if err != nil {
-			return nil, err
-		}
-		drifts = append(drifts, found...)
+		result.Groups = append(result.Groups, checkGroup(root, group))
 	}
-	return drifts, nil
+	return result, nil
+}
+
+func checkGroup(root string, group config.Group) GroupResult {
+	result := GroupResult{Name: group.Name}
+
+	if group.Clean {
+		if err := cleanOutputs(root, group); err != nil {
+			result.Status = GroupError
+			result.Err = err
+			return result
+		}
+	}
+
+	if err := runCommand(root, group.Command); err != nil {
+		result.Status = GroupError
+		if group.Clean {
+			result.Err = newRegenError("command failed after cleaning outputs: %s", err.Error())
+		} else {
+			result.Err = err
+		}
+		return result
+	}
+
+	found, err := driftForGroup(root, group)
+	if err != nil {
+		result.Status = GroupError
+		result.Err = err
+		return result
+	}
+	if len(found) > 0 {
+		result.Status = GroupDrift
+		result.Drifts = found
+		return result
+	}
+
+	result.Status = GroupOK
+	return result
 }
 
 func RequireGitRepo(root string) error {

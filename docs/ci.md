@@ -2,7 +2,7 @@
 
 `regen check` is meant to run in CI after checkout, inside a git work tree. It re-runs your declared generator commands and fails if `git diff HEAD` would show changes under the declared `outputs` (working tree vs committed files, including staged but uncommitted generated output). Gitignored files under `outputs` are not reported as untracked — commit the generated files.
 
-Groups run in order. If a group's `command` fails, later groups are skipped and the process exits `2`.
+Groups run in order. Every group runs even when an earlier one fails or drifts; regen prints a per-group summary before drift details. Later groups see the working tree as earlier groups left it, including files wiped by `clean`. Prefer disjoint `outputs` so a failed or drifting group cannot look like drift in the next one.
 
 Exit codes:
 
@@ -127,12 +127,17 @@ Do **not** rely on CI to mutate the repo. `regen check` leaves the working tree 
 
 ## When check fails in CI
 
-The log shows drift lines and a git diff, for example:
+The log shows a per-group summary, drift lines, and a git diff, for example:
 
 ```
+  openapi: drift (1 file)
+1 group: 0 ok, 1 drift, 0 error
+
 [modified] openapi: generated/models.py
 
 diff --git a/generated/models.py ...
+
+error: 1 generated path drifted; commit the generator output or fix the command
 ```
 
 Fix locally:
