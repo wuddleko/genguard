@@ -89,7 +89,7 @@ make install
 # or, from this repository
 go install ./cmd/regen
 # or, from a published module version
-go install github.com/regen-check/regen/cmd/regen@latest
+go install github.com/wuddleko/regen/cmd/regen@latest
 ```
 
 Ensure `$(go env GOPATH)/bin` is on your `PATH`.

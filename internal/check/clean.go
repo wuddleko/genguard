@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/regen-check/regen/internal/config"
+	"github.com/wuddleko/regen/internal/config"
 )
 
 func cleanOutputs(root string, group config.Group) error {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/regen-check/regen/internal/config"
-	"github.com/regen-check/regen/internal/testutil"
+	"github.com/wuddleko/regen/internal/config"
+	"github.com/wuddleko/regen/internal/testutil"
 )
 
 func TestLoadConfigHappyPath(t *testing.T) {

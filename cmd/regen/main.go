@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/regen-check/regen/internal/cli"
+	"github.com/wuddleko/regen/internal/cli"
 )
 
 var version = "dev"

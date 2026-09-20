@@ -8,8 +8,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/regen-check/regen/internal/check"
-	"github.com/regen-check/regen/internal/config"
+	"github.com/wuddleko/regen/internal/check"
+	"github.com/wuddleko/regen/internal/config"
 )
 
 // Version is shown by `regen version` and `--version`. Releases overwrite it

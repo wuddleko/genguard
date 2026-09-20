@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/regen-check/regen/internal/cli"
-	"github.com/regen-check/regen/internal/testutil"
+	"github.com/wuddleko/regen/internal/cli"
+	"github.com/wuddleko/regen/internal/testutil"
 )
 
 func runCLI(args []string) (stdout, stderr string, code int) {

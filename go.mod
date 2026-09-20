@@ -1,4 +1,4 @@
-module github.com/regen-check/regen
+module github.com/wuddleko/regen
 
 go 1.22
 

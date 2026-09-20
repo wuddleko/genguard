@@ -74,7 +74,7 @@ Fine when the job already uses Go and you want a tagged module version without d
           go-version: "1.22"
 
       - name: Install regen
-        run: go install github.com/regen-check/regen/cmd/regen@v0.1.0
+        run: go install github.com/wuddleko/regen/cmd/regen@v0.1.0
 
       - name: Verify generated files
         run: regen check
@@ -86,7 +86,7 @@ Ensure `$(go env GOPATH)/bin` is on `PATH` (true by default on GitHub-hosted run
 
 ```yaml
       - uses: actions/checkout@v4
-      - run: go install github.com/regen-check/regen/cmd/regen@v0.1.0
+      - run: go install github.com/wuddleko/regen/cmd/regen@v0.1.0
       - run: regen check
 ```
 
@@ -98,7 +98,7 @@ Run one check per config (`-c` is the same flag):
 
 ```yaml
       - uses: actions/checkout@v4
-      - run: go install github.com/regen-check/regen/cmd/regen@v0.1.0
+      - run: go install github.com/wuddleko/regen/cmd/regen@v0.1.0
       - run: regen check --config services/api/regen.yaml
       - run: regen check -c services/worker/regen.yaml
 ```

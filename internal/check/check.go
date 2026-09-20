@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/regen-check/regen/internal/config"
+	"github.com/wuddleko/regen/internal/config"
 )
 
 const globChars = "*?[]"
