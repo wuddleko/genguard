@@ -6,14 +6,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wuddleko/regen/internal/config"
-	"github.com/wuddleko/regen/internal/testutil"
+	"github.com/wuddleko/genguard/internal/config"
+	"github.com/wuddleko/genguard/internal/testutil"
 )
 
 func TestLoadConfigHappyPath(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	configPath, err := testutil.WriteRegenConfig(root, "generated/hello.txt", "", "", nil)
+	configPath, err := testutil.WriteGenguardConfig(root, "generated/hello.txt", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,10 +43,10 @@ func TestLoadConfigHappyPath(t *testing.T) {
 	}
 }
 
-func TestLoadConfigAcceptsRegenYml(t *testing.T) {
+func TestLoadConfigAcceptsGenguardYml(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	configPath, err := testutil.WriteRegenConfig(root, "generated/hello.txt", "", "regen.yml", nil)
+	configPath, err := testutil.WriteGenguardConfig(root, "generated/hello.txt", "", "genguard.yml", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestLoadConfigAcceptsRegenYml(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Base(cfg.Path) != "regen.yml" {
+	if filepath.Base(cfg.Path) != "genguard.yml" {
 		t.Fatalf("path = %q", cfg.Path)
 	}
 }
@@ -63,7 +63,7 @@ func TestLoadConfigAcceptsRegenYml(t *testing.T) {
 func TestLoadConfigDefaultGroupName(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	configPath := filepath.Join(root, "regen.yaml")
+	configPath := filepath.Join(root, "genguard.yaml")
 	content := "groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n"
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -85,11 +85,11 @@ func TestLoadConfigMultipleGroups(t *testing.T) {
 		{Name: "one", Command: "make one", Outputs: []string{"out/one/"}},
 		{Name: "two", Command: "make two", Outputs: []string{"out/two.txt"}},
 	}
-	if _, err := testutil.WriteRegenConfig(root, "", "", "", groups); err != nil {
+	if _, err := testutil.WriteGenguardConfig(root, "", "", "", groups); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestLoadConfigRootIsConfigParent(t *testing.T) {
 	if err := os.MkdirAll(service, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	configPath, err := testutil.WriteRegenConfig(service, "generated/hello.txt", "", "", nil)
+	configPath, err := testutil.WriteGenguardConfig(service, "generated/hello.txt", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestLoadConfigRootIsConfigParent(t *testing.T) {
 func TestLoadConfigFiltersBlankOutputEntries(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	configPath := filepath.Join(root, "regen.yaml")
+	configPath := filepath.Join(root, "genguard.yaml")
 	content := "groups:\n" +
 		"  - name: greeting\n" +
 		"    command: python3 scripts/gen.py\n" +
@@ -177,7 +177,7 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 		t.Run(tc.match, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
-			configPath := filepath.Join(root, "regen.yaml")
+			configPath := filepath.Join(root, "genguard.yaml")
 			if err := os.WriteFile(configPath, []byte(tc.content), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -194,7 +194,7 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 
 func TestFindConfigInCurrentDirectory(t *testing.T) {
 	root := t.TempDir()
-	if _, err := testutil.WriteRegenConfig(root, "generated/hello.txt", "", "", nil); err != nil {
+	if _, err := testutil.WriteGenguardConfig(root, "generated/hello.txt", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	testutil.Chdir(t, root)
@@ -203,14 +203,14 @@ func TestFindConfigInCurrentDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if found != filepath.Join(root, "regen.yaml") {
+	if found != filepath.Join(root, "genguard.yaml") {
 		t.Fatalf("found = %q", found)
 	}
 }
 
 func TestFindConfigInParentDirectory(t *testing.T) {
 	root := t.TempDir()
-	if _, err := testutil.WriteRegenConfig(root, "generated/hello.txt", "", "", nil); err != nil {
+	if _, err := testutil.WriteGenguardConfig(root, "generated/hello.txt", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	nested := filepath.Join(root, "nested", "deep")
@@ -223,21 +223,21 @@ func TestFindConfigInParentDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if found != filepath.Join(root, "regen.yaml") {
+	if found != filepath.Join(root, "genguard.yaml") {
 		t.Fatalf("found = %q", found)
 	}
 }
 
 func TestFindConfigPrefersNearest(t *testing.T) {
 	root := t.TempDir()
-	if _, err := testutil.WriteRegenConfig(root, "generated/hello.txt", "", "regen.yaml", nil); err != nil {
+	if _, err := testutil.WriteGenguardConfig(root, "generated/hello.txt", "", "genguard.yaml", nil); err != nil {
 		t.Fatal(err)
 	}
 	nested := filepath.Join(root, "nested")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testutil.WriteRegenConfig(nested, "generated/hello.txt", "", "regen.yml", nil); err != nil {
+	if _, err := testutil.WriteGenguardConfig(nested, "generated/hello.txt", "", "genguard.yml", nil); err != nil {
 		t.Fatal(err)
 	}
 	testutil.Chdir(t, nested)
@@ -246,7 +246,7 @@ func TestFindConfigPrefersNearest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if found != filepath.Join(nested, "regen.yml") {
+	if found != filepath.Join(nested, "genguard.yml") {
 		t.Fatalf("found = %q", found)
 	}
 }
@@ -254,7 +254,7 @@ func TestFindConfigPrefersNearest(t *testing.T) {
 func TestLoadConfigGroupClean(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	configPath := filepath.Join(root, "regen.yaml")
+	configPath := filepath.Join(root, "genguard.yaml")
 	content := "groups:\n" +
 		"  - name: greeting\n" +
 		"    command: python3 scripts/gen.py\n" +
@@ -276,7 +276,7 @@ func TestLoadConfigGroupClean(t *testing.T) {
 func TestLoadConfigTopLevelClean(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	configPath := filepath.Join(root, "regen.yaml")
+	configPath := filepath.Join(root, "genguard.yaml")
 	content := "clean: true\n" +
 		"groups:\n" +
 		"  - name: greeting\n" +
@@ -298,7 +298,7 @@ func TestLoadConfigTopLevelClean(t *testing.T) {
 func TestLoadConfigGroupCleanOverridesTopLevel(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	configPath := filepath.Join(root, "regen.yaml")
+	configPath := filepath.Join(root, "genguard.yaml")
 	content := "clean: true\n" +
 		"groups:\n" +
 		"  - name: greeting\n" +

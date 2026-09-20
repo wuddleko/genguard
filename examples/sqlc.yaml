@@ -1,4 +1,4 @@
-# Copy to your repo as regen.yaml (next to sqlc.yaml).
+# Copy to your repo as genguard.yaml (next to sqlc.yaml).
 # Requires: sqlc — https://docs.sqlc.dev/en/latest/overview/install.html
 
 groups:

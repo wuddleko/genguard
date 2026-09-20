@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var configNames = []string{"regen.yaml", "regen.yml"}
+var configNames = []string{"genguard.yaml", "genguard.yml"}
 
 type Group struct {
 	Name    string

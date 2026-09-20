@@ -27,7 +27,7 @@ jobs:
         run: go test ./...
 
       - name: Build
-        run: go build -o bin/regen ./cmd/regen
+        run: go build -o bin/genguard ./cmd/genguard
 
       - name: Validate example configs
         run: make validate-examples

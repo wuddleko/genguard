@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wuddleko/regen/internal/check"
-	"github.com/wuddleko/regen/internal/config"
-	"github.com/wuddleko/regen/internal/testutil"
+	"github.com/wuddleko/genguard/internal/check"
+	"github.com/wuddleko/genguard/internal/config"
+	"github.com/wuddleko/genguard/internal/testutil"
 )
 
 func TestCheckRunsAllGroupsAfterCommandFailure(t *testing.T) {
@@ -21,7 +21,7 @@ func TestCheckRunsAllGroupsAfterCommandFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("regen\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("genguard\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := testutil.Git(root, "add", "name.txt"); err != nil {
@@ -31,7 +31,7 @@ func TestCheckRunsAllGroupsAfterCommandFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestCheckConfigExitCodeDriftOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("regen\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("genguard\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := testutil.Git(root, "add", "name.txt"); err != nil {
@@ -75,7 +75,7 @@ func TestCheckConfigExitCodeDriftOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestCheckConfigExitCodeAllOK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

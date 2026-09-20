@@ -1,4 +1,4 @@
-module github.com/wuddleko/regen
+module github.com/wuddleko/genguard
 
 go 1.22
 

@@ -7,11 +7,11 @@ import (
 	"io"
 	"os"
 
-	"github.com/wuddleko/regen/internal/check"
-	"github.com/wuddleko/regen/internal/config"
+	"github.com/wuddleko/genguard/internal/check"
+	"github.com/wuddleko/genguard/internal/config"
 )
 
-// Version is shown by `regen version` and `--version`. Releases overwrite it
+// Version is shown by `genguard version` and `--version`. Releases overwrite it
 // via main.version ldflags; local builds keep "dev".
 var Version = "dev"
 
@@ -43,8 +43,8 @@ func RunWithIO(args []string, stdout, stderr io.Writer) int {
 func runCheck(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	configPath := fs.String("config", "", "Path to regen.yaml (default: walk parents from cwd)")
-	configShort := fs.String("c", "", "Path to regen.yaml (default: walk parents from cwd)")
+	configPath := fs.String("config", "", "Path to genguard.yaml (default: walk parents from cwd)")
+	configShort := fs.String("c", "", "Path to genguard.yaml (default: walk parents from cwd)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -65,7 +65,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		if found == "" {
-			fmt.Fprint(stderr, "error: no regen.yaml found (pass --config)\n")
+			fmt.Fprint(stderr, "error: no genguard.yaml found (pass --config)\n")
 			return 2
 		}
 		path = found
@@ -97,11 +97,11 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprint(w, `regen — fail CI when committed generated outputs drift from their generators
+	fmt.Fprint(w, `genguard — fail CI when committed generated outputs drift from their generators
 
 Usage:
-  regen check [-c|--config path/to/regen.yaml]
-  regen version
+  genguard check [-c|--config path/to/genguard.yaml]
+  genguard version
 
 `)
 }

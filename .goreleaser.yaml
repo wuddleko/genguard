@@ -1,6 +1,6 @@
 version: 2
 
-project_name: regen
+project_name: genguard
 
 before:
   hooks:
@@ -8,9 +8,9 @@ before:
     - go test ./...
 
 builds:
-  - id: regen
-    main: ./cmd/regen
-    binary: regen
+  - id: genguard
+    main: ./cmd/genguard
+    binary: genguard
     env:
       - CGO_ENABLED=0
     goos:
@@ -50,6 +50,6 @@ changelog:
 release:
   github:
     owner: wuddleko
-    name: regen
+    name: genguard
   draft: false
   prerelease: auto

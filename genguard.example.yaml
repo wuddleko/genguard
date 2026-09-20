@@ -1,6 +1,6 @@
 # Re-run generators in CI. Fail if committed outputs are not bit-identical.
 #
-#   regen check
+#   genguard check
 #
 # Paths are git pathspecs relative to this file's directory.
 # See examples/ for stack-specific templates (buf, sqlc, go generate, etc.).

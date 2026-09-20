@@ -1,4 +1,4 @@
-# Copy to your repo as regen.yaml.
+# Copy to your repo as genguard.yaml.
 # Requires: a Makefile target that runs all generators in this tree.
 
 groups:

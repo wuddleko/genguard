@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/wuddleko/regen/internal/config"
+	"github.com/wuddleko/genguard/internal/config"
 )
 
 const globChars = "*?[]"
@@ -18,16 +18,16 @@ type Drift struct {
 	Kind  string
 }
 
-type RegenError struct {
+type GenguardError struct {
 	msg string
 }
 
-func (e *RegenError) Error() string {
+func (e *GenguardError) Error() string {
 	return e.msg
 }
 
-func newRegenError(format string, args ...any) error {
-	return &RegenError{msg: fmt.Sprintf(format, args...)}
+func newGenguardError(format string, args ...any) error {
+	return &GenguardError{msg: fmt.Sprintf(format, args...)}
 }
 
 func CheckConfig(cfg config.Config) (ConfigResult, error) {
@@ -57,7 +57,7 @@ func checkGroup(root string, group config.Group) GroupResult {
 	if err := runCommand(root, group.Command); err != nil {
 		result.Status = GroupError
 		if group.Clean {
-			result.Err = newRegenError("command failed after cleaning outputs: %s", err.Error())
+			result.Err = newGenguardError("command failed after cleaning outputs: %s", err.Error())
 		} else {
 			result.Err = err
 		}
@@ -141,7 +141,7 @@ func requireGitRepo(root string) error {
 		return err
 	}
 	if code != 0 || strings.TrimSpace(out) != "true" {
-		return newRegenError("%s is not a git work tree", root)
+		return newGenguardError("%s is not a git work tree", root)
 	}
 	return nil
 }
@@ -149,7 +149,7 @@ func requireGitRepo(root string) error {
 func runCommand(root, command string) error {
 	command = strings.TrimSpace(command)
 	if command == "" {
-		return newRegenError("command is empty")
+		return newGenguardError("command is empty")
 	}
 
 	name, args := shellInvocation(command)
@@ -169,7 +169,7 @@ func runCommand(root, command string) error {
 	if errorsAsExit(err, &exitErr) {
 		exitCode = exitErr.ExitCode()
 	}
-	return newRegenError("command failed (exit %d): %s", exitCode, detail)
+	return newGenguardError("command failed (exit %d): %s", exitCode, detail)
 }
 
 func errorsAsExit(err error, target **exec.ExitError) bool {
@@ -239,7 +239,7 @@ func gitDiffText(root string, args ...string) (string, error) {
 		if detail == "" {
 			detail = "git diff failed"
 		}
-		return "", newRegenError("%s", detail)
+		return "", newGenguardError("%s", detail)
 	}
 	return out, nil
 }
@@ -254,7 +254,7 @@ func gitNames(root string, args ...string) ([]string, error) {
 		if detail == "" {
 			detail = "git failed"
 		}
-		return nil, newRegenError("%s", detail)
+		return nil, newGenguardError("%s", detail)
 	}
 	return parseGitNameList(out), nil
 }

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wuddleko/regen/internal/check"
-	"github.com/wuddleko/regen/internal/testutil"
+	"github.com/wuddleko/genguard/internal/check"
+	"github.com/wuddleko/genguard/internal/testutil"
 )
 
 func TestFormatFailureReportSections(t *testing.T) {

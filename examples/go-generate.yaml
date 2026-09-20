@@ -1,4 +1,4 @@
-# Copy to your repo as regen.yaml (next to the files you generate).
+# Copy to your repo as genguard.yaml (next to the files you generate).
 # Requires: Go toolchain with //go:generate directives in your module.
 
 groups:

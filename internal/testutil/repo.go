@@ -64,10 +64,10 @@ func InitGitRepo(root string) error {
 	if err := Git(root, "init"); err != nil {
 		return err
 	}
-	if err := Git(root, "config", "user.email", "regen@example.test"); err != nil {
+	if err := Git(root, "config", "user.email", "genguard@example.test"); err != nil {
 		return err
 	}
-	return Git(root, "config", "user.name", "regen")
+	return Git(root, "config", "user.name", "genguard")
 }
 
 func WriteGenerator(root string) error {
@@ -95,7 +95,7 @@ func yamlScalar(value string) string {
 	return value
 }
 
-func WriteRegenConfig(root string, outputs, command, configName string, groups []GroupSpec) (string, error) {
+func WriteGenguardConfig(root string, outputs, command, configName string, groups []GroupSpec) (string, error) {
 	if command == "" {
 		command = "python3 scripts/gen.py"
 	}
@@ -110,7 +110,7 @@ func WriteRegenConfig(root string, outputs, command, configName string, groups [
 		}}
 	}
 	if configName == "" {
-		configName = "regen.yaml"
+		configName = "genguard.yaml"
 	}
 
 	var b strings.Builder
@@ -138,7 +138,7 @@ func MakeRepo(tmp string, outputs, configName string, groups []GroupSpec) (strin
 	if err := WriteGenerator(root); err != nil {
 		return "", err
 	}
-	if _, err := WriteRegenConfig(root, outputs, "", configName, groups); err != nil {
+	if _, err := WriteGenguardConfig(root, outputs, "", configName, groups); err != nil {
 		return "", err
 	}
 	cmd := exec.Command("python3", "scripts/gen.py")

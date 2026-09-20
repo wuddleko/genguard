@@ -1,6 +1,6 @@
 # CI cookbook
 
-`regen check` is meant to run in CI after checkout, inside a git work tree. It re-runs your declared generator commands and fails if `git diff HEAD` would show changes under the declared `outputs` (working tree vs committed files, including staged but uncommitted generated output). Gitignored files under `outputs` are not reported as untracked — commit the generated files.
+`genguard check` is meant to run in CI after checkout, inside a git work tree. It re-runs your declared generator commands and fails if `git diff HEAD` would show changes under the declared `outputs` (working tree vs committed files, including staged but uncommitted generated output). Gitignored files under `outputs` are not reported as untracked — commit the generated files.
 
 Groups run in order. If a group's `command` fails, later groups are skipped and the process exits `2`.
 
@@ -14,7 +14,7 @@ Exit codes:
 
 ## GitHub Actions (install from release)
 
-Pin a tag and download the matching archive for your runner OS/arch. Archive names use the version **without** the `v` prefix (`regen_0.1.0_linux_amd64.tar.gz`); the GitHub download path still uses the tag (`v0.1.0`). Releases also include `checksums.txt`.
+Pin a tag and download the matching archive for your runner OS/arch. Archive names use the version **without** the `v` prefix (`genguard_0.1.0_linux_amd64.tar.gz`); the GitHub download path still uses the tag (`v0.1.0`). Releases also include `checksums.txt`.
 
 ```yaml
 name: Generated files
@@ -25,43 +25,43 @@ on:
     branches: [main]
 
 jobs:
-  regen:
+  genguard:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install regen
+      - name: Install genguard
         env:
-          REGEN_TAG: v0.1.0
+          GENGUARD_TAG: v0.1.0
         run: |
-          REGEN_VERSION=${REGEN_TAG#v}
+          GENGUARD_VERSION=${GENGUARD_TAG#v}
           curl -fsSL \
-            "https://github.com/wuddleko/regen/releases/download/${REGEN_TAG}/regen_${REGEN_VERSION}_linux_amd64.tar.gz" \
-            -o regen.tar.gz
-          tar xzf regen.tar.gz regen
-          sudo install regen /usr/local/bin/regen
+            "https://github.com/wuddleko/genguard/releases/download/${GENGUARD_TAG}/genguard_${GENGUARD_VERSION}_linux_amd64.tar.gz" \
+            -o genguard.tar.gz
+          tar xzf genguard.tar.gz genguard
+          sudo install genguard /usr/local/bin/genguard
 
       - name: Verify generated files
-        run: regen check
+        run: genguard check
 ```
 
-Replace `REGEN_TAG` with a [release tag](https://github.com/wuddleko/regen/releases). Archive names follow `regen_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows; binary `regen.exe`).
+Replace `GENGUARD_TAG` with a [release tag](https://github.com/wuddleko/genguard/releases). Archive names follow `genguard_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows; binary `genguard.exe`).
 
 ### macOS runners
 
 Use `darwin_arm64` on `macos-latest`, or `darwin_amd64` for Intel:
 
 ```yaml
-      - name: Install regen
+      - name: Install genguard
         env:
-          REGEN_TAG: v0.1.0
+          GENGUARD_TAG: v0.1.0
         run: |
-          REGEN_VERSION=${REGEN_TAG#v}
+          GENGUARD_VERSION=${GENGUARD_TAG#v}
           curl -fsSL \
-            "https://github.com/wuddleko/regen/releases/download/${REGEN_TAG}/regen_${REGEN_VERSION}_darwin_arm64.tar.gz" \
-            -o regen.tar.gz
-          tar xzf regen.tar.gz regen
-          sudo install regen /usr/local/bin/regen
+            "https://github.com/wuddleko/genguard/releases/download/${GENGUARD_TAG}/genguard_${GENGUARD_VERSION}_darwin_arm64.tar.gz" \
+            -o genguard.tar.gz
+          tar xzf genguard.tar.gz genguard
+          sudo install genguard /usr/local/bin/genguard
 ```
 
 ## GitHub Actions (Go install)
@@ -73,11 +73,11 @@ Fine when the job already uses Go and you want a tagged module version without d
         with:
           go-version: "1.22"
 
-      - name: Install regen
-        run: go install github.com/wuddleko/regen/cmd/regen@v0.1.0
+      - name: Install genguard
+        run: go install github.com/wuddleko/genguard/cmd/genguard@v0.1.0
 
       - name: Verify generated files
-        run: regen check
+        run: genguard check
 ```
 
 Ensure `$(go env GOPATH)/bin` is on `PATH` (true by default on GitHub-hosted runners after `setup-go`).
@@ -86,11 +86,11 @@ Ensure `$(go env GOPATH)/bin` is on `PATH` (true by default on GitHub-hosted run
 
 ```yaml
       - uses: actions/checkout@v4
-      - run: go install github.com/wuddleko/regen/cmd/regen@v0.1.0
-      - run: regen check
+      - run: go install github.com/wuddleko/genguard/cmd/genguard@v0.1.0
+      - run: genguard check
 ```
 
-Place `regen.yaml` or `regen.yml` at the repository root. Paths in `outputs` are relative to that file.
+Place `genguard.yaml` or `genguard.yml` at the repository root. Paths in `outputs` are relative to that file.
 
 ## Monorepo with config per service
 
@@ -98,9 +98,9 @@ Run one check per config (`-c` is the same flag):
 
 ```yaml
       - uses: actions/checkout@v4
-      - run: go install github.com/wuddleko/regen/cmd/regen@v0.1.0
-      - run: regen check --config services/api/regen.yaml
-      - run: regen check -c services/worker/regen.yaml
+      - run: go install github.com/wuddleko/genguard/cmd/genguard@v0.1.0
+      - run: genguard check --config services/api/genguard.yaml
+      - run: genguard check -c services/worker/genguard.yaml
 ```
 
 Each config’s commands run in that config’s directory, not the workflow’s working directory.
@@ -120,10 +120,10 @@ This repository validates that every file under `examples/*.yaml` parses:
 ## What to commit
 
 - Source files your generator reads (`.proto`, OpenAPI spec, SQL queries, etc.)
-- The generator command in `regen.yaml` or `regen.yml`
+- The generator command in `genguard.yaml` or `genguard.yml`
 - The generated output paths listed under `outputs` (tracked, not gitignored)
 
-Do **not** rely on CI to mutate the repo. `regen check` leaves the working tree as the generator wrote it and does not `git add`. With `clean: true`, it also deletes declared outputs before regenerating. Developers regenerate locally, commit, and push.
+Do **not** rely on CI to mutate the repo. `genguard check` leaves the working tree as the generator wrote it and does not `git add`. With `clean: true`, it also deletes declared outputs before regenerating. Developers regenerate locally, commit, and push.
 
 ## When check fails in CI
 
@@ -138,7 +138,7 @@ diff --git a/generated/models.py ...
 Fix locally:
 
 ```bash
-# run the same command from regen.yaml, or your usual make target
+# run the same command from genguard.yaml, or your usual make target
 make generate
 git add generated/
 git commit -m "regenerate"
@@ -166,9 +166,9 @@ groups:
       - gen/
 ```
 
-See [examples/README.md](../examples/README.md) for copy-paste `regen.yaml` templates (`buf`, `sqlc`, `go generate`, etc.).
+See [examples/README.md](../examples/README.md) for copy-paste `genguard.yaml` templates (`buf`, `sqlc`, `go generate`, etc.).
 
-## Releasing regen itself
+## Releasing genguard itself
 
 Tag a version to trigger GoReleaser:
 
@@ -177,4 +177,4 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The [release workflow](../.github/workflows/release.yml) publishes archives for Linux and macOS (`amd64`, `arm64`) and Windows (`amd64`), plus `checksums.txt`. Archive filenames use the tag without the `v` (`regen_0.1.0_linux_amd64.tar.gz`). On Windows the binary is `regen.exe`; group commands use `sh`/`bash` when present, otherwise `%COMSPEC% /C` (typically `cmd.exe`).
+The [release workflow](../.github/workflows/release.yml) publishes archives for Linux and macOS (`amd64`, `arm64`) and Windows (`amd64`), plus `checksums.txt`. Archive filenames use the tag without the `v` (`genguard_0.1.0_linux_amd64.tar.gz`). On Windows the binary is `genguard.exe`; group commands use `sh`/`bash` when present, otherwise `%COMSPEC% /C` (typically `cmd.exe`).

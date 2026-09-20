@@ -1,4 +1,4 @@
-# Copy to your repo as regen.yaml (next to your OpenAPI spec).
+# Copy to your repo as genguard.yaml (next to your OpenAPI spec).
 # Requires: openapi-generator-cli on PATH.
 # Adjust -i, -g, and -o for your spec path, language, and output directory.
 

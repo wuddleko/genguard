@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wuddleko/regen/internal/check"
-	"github.com/wuddleko/regen/internal/cli"
-	"github.com/wuddleko/regen/internal/config"
-	"github.com/wuddleko/regen/internal/testutil"
+	"github.com/wuddleko/genguard/internal/check"
+	"github.com/wuddleko/genguard/internal/cli"
+	"github.com/wuddleko/genguard/internal/config"
+	"github.com/wuddleko/genguard/internal/testutil"
 )
 
 func runCLI(args []string) (stdout, stderr string, code int) {
@@ -32,7 +32,7 @@ func TestCheckPassesWhenOutputMatches(t *testing.T) {
 }
 
 func runCLICheck(root string) int {
-	_, _, code := runCLI([]string{"check", "--config", filepath.Join(root, "regen.yaml")})
+	_, _, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
 	return code
 }
 
@@ -55,7 +55,7 @@ func commitPath(t *testing.T, root, rel, content string) {
 
 func commitNameChange(t *testing.T, root string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("regen\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("genguard\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := testutil.Git(root, "add", "name.txt"); err != nil {
@@ -68,7 +68,7 @@ func commitNameChange(t *testing.T, root string) {
 
 func mustCheckConfig(t *testing.T, root string) check.ConfigResult {
 	t.Helper()
-	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestCheckFailsWhenSourceChanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("regen\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("genguard\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := testutil.Git(root, "add", "name.txt"); err != nil {
@@ -94,21 +94,21 @@ func TestCheckFailsWhenSourceChanged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "regen.yaml")})
+	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
 	if code != 1 {
 		t.Fatalf("code = %d, want 1", code)
 	}
 	if !strings.Contains(stderr, "[modified] greeting: generated/hello.txt") {
 		t.Fatalf("stderr = %q", stderr)
 	}
-	if !strings.Contains(stderr, "-hello world") || !strings.Contains(stderr, "+hello regen") {
+	if !strings.Contains(stderr, "-hello world") || !strings.Contains(stderr, "+hello genguard") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "hello regen\n" {
+	if string(got) != "hello genguard\n" {
 		t.Fatalf("generated = %q", string(got))
 	}
 }
@@ -118,7 +118,7 @@ func TestCheckFailsWhenGeneratedDriftIsStaged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("regen\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("genguard\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := testutil.Git(root, "add", "name.txt"); err != nil {
@@ -137,14 +137,14 @@ func TestCheckFailsWhenGeneratedDriftIsStaged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "regen.yaml")})
+	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
 	if code != 1 {
 		t.Fatalf("code = %d, want 1; stderr = %q", code, stderr)
 	}
 	if !strings.Contains(stderr, "[modified] greeting: generated/hello.txt") {
 		t.Fatalf("stderr = %q", stderr)
 	}
-	if !strings.Contains(stderr, "-hello world") || !strings.Contains(stderr, "+hello regen") {
+	if !strings.Contains(stderr, "-hello world") || !strings.Contains(stderr, "+hello genguard") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 }
@@ -170,7 +170,7 @@ func TestCheckFailsOnUntrackedOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "regen.yaml")})
+	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
 	if code != 1 {
 		t.Fatalf("code = %d, want 1", code)
 	}
@@ -210,7 +210,7 @@ func TestCheckFailsOnMissingOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "regen.yaml")})
+	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
 	if code != 1 {
 		t.Fatalf("code = %d, want 1", code)
 	}
@@ -224,7 +224,7 @@ func TestDriftDiffDeduplicatesPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("regen\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("genguard\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := testutil.Git(root, "add", "name.txt"); err != nil {
@@ -295,8 +295,8 @@ func TestDriftDiffUntrackedDirectoryMessage(t *testing.T) {
 func TestRequireGitRepoRaisesOutsideGit(t *testing.T) {
 	root := t.TempDir()
 	err := check.RequireGitRepo(root)
-	var regenErr *check.RegenError
-	if !errors.As(err, &regenErr) {
+	var genguardErr *check.GenguardError
+	if !errors.As(err, &genguardErr) {
 		t.Fatalf("err = %v", err)
 	}
 	if !strings.Contains(err.Error(), "not a git work tree") {
@@ -307,8 +307,8 @@ func TestRequireGitRepoRaisesOutsideGit(t *testing.T) {
 func TestRunCommandEmptyCommand(t *testing.T) {
 	root := t.TempDir()
 	err := check.RunCommand(root, "   ")
-	var regenErr *check.RegenError
-	if !errors.As(err, &regenErr) {
+	var genguardErr *check.GenguardError
+	if !errors.As(err, &genguardErr) {
 		t.Fatalf("err = %v", err)
 	}
 	if !strings.Contains(err.Error(), "command is empty") {
@@ -319,8 +319,8 @@ func TestRunCommandEmptyCommand(t *testing.T) {
 func TestRunCommandFailure(t *testing.T) {
 	root := t.TempDir()
 	err := check.RunCommand(root, "exit 4")
-	var regenErr *check.RegenError
-	if !errors.As(err, &regenErr) {
+	var genguardErr *check.GenguardError
+	if !errors.As(err, &genguardErr) {
 		t.Fatalf("err = %v", err)
 	}
 	if !strings.Contains(err.Error(), "command failed (exit 4)") {
@@ -430,7 +430,7 @@ func TestCheckReportsGitDiffFailureAsGroupError(t *testing.T) {
 	if err := testutil.InitGitRepo(root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testutil.WriteRegenConfig(root, "generated/hello.txt", "true", "", nil); err != nil {
+	if _, err := testutil.WriteGenguardConfig(root, "generated/hello.txt", "true", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, "generated"), 0o755); err != nil {
@@ -483,7 +483,7 @@ func TestCheckMultipleGroupsAllPass(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +541,7 @@ func TestDriftForGroupReportsMissingFileSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	configPath, err := testutil.WriteRegenConfig(root, "generated/missing.txt", "", "", []testutil.GroupSpec{
+	configPath, err := testutil.WriteGenguardConfig(root, "generated/missing.txt", "", "", []testutil.GroupSpec{
 		{Name: "greeting", Command: "true", Outputs: []string{"generated/missing.txt"}},
 	})
 	if err != nil {
@@ -575,7 +575,7 @@ func TestDriftForGroupHandlesNewlineInFilename(t *testing.T) {
 	if err := os.WriteFile(path, []byte("v1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testutil.WriteRegenConfig(root, rel, "true", "", []testutil.GroupSpec{
+	if _, err := testutil.WriteGenguardConfig(root, rel, "true", "", []testutil.GroupSpec{
 		{Name: "greeting", Command: "true", Outputs: []string{"generated/"}},
 	}); err != nil {
 		t.Fatal(err)
@@ -637,7 +637,7 @@ func TestCheckRunsFromConfigRoot(t *testing.T) {
 	if err := testutil.WriteGenerator(service); err != nil {
 		t.Fatal(err)
 	}
-	configPath, err := testutil.WriteRegenConfig(service, "generated/hello.txt", "", "", nil)
+	configPath, err := testutil.WriteGenguardConfig(service, "generated/hello.txt", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -652,7 +652,7 @@ func TestCheckRunsFromConfigRoot(t *testing.T) {
 	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(service, "name.txt"), []byte("regen\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(service, "name.txt"), []byte("genguard\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := testutil.Git(root, "add", "service/name.txt"); err != nil {
@@ -669,7 +669,7 @@ func TestCheckRunsFromConfigRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "hello regen\n" {
+	if string(got) != "hello genguard\n" {
 		t.Fatalf("generated = %q", string(got))
 	}
 }
@@ -710,7 +710,7 @@ func TestCheckWithoutCleanIgnoresOrphan(t *testing.T) {
 	}
 	commitOrphanGeneratedFile(t, root)
 
-	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +736,7 @@ func TestCheckCleanFailsOnOrphan(t *testing.T) {
 	}
 	commitOrphanGeneratedFile(t, root)
 
-	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "regen.yaml")})
+	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
 	if code != 1 {
 		t.Fatalf("code = %d, want 1; stderr = %q", code, stderr)
 	}
@@ -769,7 +769,7 @@ func TestCheckCleanCommandFailureAfterWipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := testutil.WriteRegenConfig(root, "", "exit 3", "", []testutil.GroupSpec{{
+	if _, err := testutil.WriteGenguardConfig(root, "", "exit 3", "", []testutil.GroupSpec{{
 		Name:    "greeting",
 		Command: "exit 3",
 		Outputs: []string{"generated/"},
@@ -778,7 +778,7 @@ func TestCheckCleanCommandFailureAfterWipe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -828,7 +828,7 @@ func TestCheckRunsLaterGroupAfterCleanCommandFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -901,7 +901,7 @@ func TestCheckCleanRefusesUnsafeOutputs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := testutil.WriteRegenConfig(root, "", "", "", []testutil.GroupSpec{{
+			if _, err := testutil.WriteGenguardConfig(root, "", "", "", []testutil.GroupSpec{{
 				Name:    "greeting",
 				Command: "true",
 				Outputs: tc.outputs,
@@ -909,7 +909,7 @@ func TestCheckCleanRefusesUnsafeOutputs(t *testing.T) {
 			}}); err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+			cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -946,7 +946,7 @@ func TestCheckCleanRefusesNestedGit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := config.LoadConfig(filepath.Join(root, "regen.yaml"))
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
