@@ -1,0 +1,8 @@
+# Copy to your repo as regen.yaml.
+# Requires: a Makefile target that runs all generators in this tree.
+
+groups:
+  - name: make
+    command: make generate
+    outputs:
+      - generated/

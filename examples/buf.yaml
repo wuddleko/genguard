@@ -1,0 +1,8 @@
+# Copy to your repo as regen.yaml (usually next to buf.yaml).
+# Requires: buf CLI — https://buf.build/docs/installation
+
+groups:
+  - name: protobuf
+    command: buf generate
+    outputs:
+      - gen/

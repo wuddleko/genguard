@@ -1,0 +1,8 @@
+# Copy to your repo as regen.yaml (next to the files you generate).
+# Requires: Go toolchain with //go:generate directives in your module.
+
+groups:
+  - name: go-generate
+    command: go generate ./...
+    outputs:
+      - internal/generated/

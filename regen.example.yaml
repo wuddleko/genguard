@@ -1,0 +1,13 @@
+# Re-run generators in CI. Fail if committed outputs are not bit-identical.
+#
+#   regen check
+#
+# Paths are git pathspecs relative to this file's directory.
+# See examples/ for stack-specific templates (buf, sqlc, go generate, etc.).
+
+groups:
+  - name: generate
+    command: make generate
+    outputs:
+      - generated/
+    # clean: true  # wipe generated/ first so leftover files fail the check

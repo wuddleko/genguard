@@ -1,0 +1,9 @@
+# Copy to your repo as regen.yaml (next to your OpenAPI spec).
+# Requires: openapi-generator-cli on PATH.
+# Adjust -i, -g, and -o for your spec path, language, and output directory.
+
+groups:
+  - name: openapi
+    command: openapi-generator-cli generate -i openapi.yaml -g go -o gen/openapi
+    outputs:
+      - gen/openapi/
