@@ -66,13 +66,13 @@ On Windows, `command` runs with `sh -c` or `bash -c` when those shells are on `P
 
 ### Prebuilt binary (recommended for CI)
 
-Download an archive from [GitHub Releases](https://github.com/regen-check/regen/releases) and put `regen` on your `PATH`. Release archives are named with the version **without** the `v` prefix; the download URL still uses the git tag. Each release also publishes `checksums.txt`.
+Download an archive from [GitHub Releases](https://github.com/wuddleko/regen/releases) and put `regen` on your `PATH`. Release archives are named with the version **without** the `v` prefix; the download URL still uses the git tag. Each release also publishes `checksums.txt`.
 
 ```bash
 REGEN_TAG=v0.1.0
 REGEN_VERSION=${REGEN_TAG#v}
 curl -fsSL \
-  "https://github.com/regen-check/regen/releases/download/${REGEN_TAG}/regen_${REGEN_VERSION}_linux_amd64.tar.gz" \
+  "https://github.com/wuddleko/regen/releases/download/${REGEN_TAG}/regen_${REGEN_VERSION}_linux_amd64.tar.gz" \
   -o regen.tar.gz
 tar xzf regen.tar.gz regen
 sudo install regen /usr/local/bin/regen

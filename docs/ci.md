@@ -36,7 +36,7 @@ jobs:
         run: |
           REGEN_VERSION=${REGEN_TAG#v}
           curl -fsSL \
-            "https://github.com/regen-check/regen/releases/download/${REGEN_TAG}/regen_${REGEN_VERSION}_linux_amd64.tar.gz" \
+            "https://github.com/wuddleko/regen/releases/download/${REGEN_TAG}/regen_${REGEN_VERSION}_linux_amd64.tar.gz" \
             -o regen.tar.gz
           tar xzf regen.tar.gz regen
           sudo install regen /usr/local/bin/regen
@@ -45,7 +45,7 @@ jobs:
         run: regen check
 ```
 
-Replace `REGEN_TAG` with a [release tag](https://github.com/regen-check/regen/releases). Archive names follow `regen_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows; binary `regen.exe`).
+Replace `REGEN_TAG` with a [release tag](https://github.com/wuddleko/regen/releases). Archive names follow `regen_<version>_<os>_<arch>.tar.gz` (`.zip` on Windows; binary `regen.exe`).
 
 ### macOS runners
 
@@ -58,7 +58,7 @@ Use `darwin_arm64` on `macos-latest`, or `darwin_amd64` for Intel:
         run: |
           REGEN_VERSION=${REGEN_TAG#v}
           curl -fsSL \
-            "https://github.com/regen-check/regen/releases/download/${REGEN_TAG}/regen_${REGEN_VERSION}_darwin_arm64.tar.gz" \
+            "https://github.com/wuddleko/regen/releases/download/${REGEN_TAG}/regen_${REGEN_VERSION}_darwin_arm64.tar.gz" \
             -o regen.tar.gz
           tar xzf regen.tar.gz regen
           sudo install regen /usr/local/bin/regen
