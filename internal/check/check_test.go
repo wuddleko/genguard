@@ -1000,7 +1000,7 @@ func TestCheckRunsLaterGroupAfterCleanCommandFailure(t *testing.T) {
 	}
 }
 
-func TestCheckCleanFailureMakesOverlappingGroupDrift(t *testing.T) {
+func TestCheckCleanFailureDoesNotBlameOverlappingGroup(t *testing.T) {
 	groups := []testutil.GroupSpec{
 		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}, Clean: true},
 		{Name: "other", Command: "true", Outputs: []string{"generated/hello.txt"}},
@@ -1014,14 +1014,99 @@ func TestCheckCleanFailureMakesOverlappingGroupDrift(t *testing.T) {
 	if result.Groups[0].Status != check.GroupError {
 		t.Fatalf("broken status = %q", result.Groups[0].Status)
 	}
-	if result.Groups[1].Status != check.GroupDrift {
+	if result.Groups[1].Status != check.GroupOK {
 		t.Fatalf("other status = %q, err = %v, drifts = %v", result.Groups[1].Status, result.Groups[1].Err, result.Groups[1].Drifts)
 	}
-	if len(result.Groups[1].Drifts) != 1 || result.Groups[1].Drifts[0].Kind != "missing" {
+	if len(result.Groups[1].Drifts) != 0 {
 		t.Fatalf("other drifts = %v", result.Groups[1].Drifts)
 	}
 	if _, statErr := os.Stat(filepath.Join(root, "generated", "hello.txt")); !os.IsNotExist(statErr) {
 		t.Fatalf("hello.txt should have been wiped: %v", statErr)
+	}
+	if result.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", result.ExitCode())
+	}
+}
+
+func TestCheckCleanFailureStillReportsLaterRewrite(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}, Clean: true},
+		{Name: "other", Command: "printf 'other\\n' > generated/hello.txt", Outputs: []string{"generated/hello.txt"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupError {
+		t.Fatalf("broken status = %q", result.Groups[0].Status)
+	}
+	if result.Groups[1].Status != check.GroupDrift {
+		t.Fatalf("other status = %q, err = %v, drifts = %v", result.Groups[1].Status, result.Groups[1].Err, result.Groups[1].Drifts)
+	}
+	if len(result.Groups[1].Drifts) != 1 || result.Groups[1].Drifts[0].Kind != "modified" || result.Groups[1].Drifts[0].Path != "generated/hello.txt" {
+		t.Fatalf("other drifts = %v", result.Groups[1].Drifts)
+	}
+}
+
+func TestCheckCleanFailureRestoreThenLaterWipe(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}, Clean: true},
+		{Name: "restore", Command: "printf 'hello world\\n' > generated/hello.txt", Outputs: []string{"generated/hello.txt"}},
+		{Name: "wiper", Command: "true", Outputs: []string{"generated/hello.txt"}, Clean: true},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupError {
+		t.Fatalf("broken status = %q", result.Groups[0].Status)
+	}
+	if result.Groups[1].Status != check.GroupOK {
+		t.Fatalf("restore status = %q, err = %v, drifts = %v", result.Groups[1].Status, result.Groups[1].Err, result.Groups[1].Drifts)
+	}
+	if result.Groups[2].Status != check.GroupDrift {
+		t.Fatalf("wiper status = %q, err = %v, drifts = %v", result.Groups[2].Status, result.Groups[2].Err, result.Groups[2].Drifts)
+	}
+	if len(result.Groups[2].Drifts) != 1 || result.Groups[2].Drifts[0].Kind != "missing" || result.Groups[2].Drifts[0].Path != "generated/hello.txt" {
+		t.Fatalf("wiper drifts = %v", result.Groups[2].Drifts)
+	}
+}
+
+func TestCheckCleanFailureKeepsUnrelatedLaterDrift(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}, Clean: true},
+		{Name: "other", Command: "true", Outputs: []string{"generated/hello.txt", "other/out.txt"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other", "out.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "other/out.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "other output"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other", "out.txt"), []byte("edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[1].Status != check.GroupDrift {
+		t.Fatalf("other status = %q, drifts = %v", result.Groups[1].Status, result.Groups[1].Drifts)
+	}
+	if len(result.Groups[1].Drifts) != 1 || result.Groups[1].Drifts[0].Path != "other/out.txt" || result.Groups[1].Drifts[0].Kind != "modified" {
+		t.Fatalf("other drifts = %v", result.Groups[1].Drifts)
 	}
 }
 

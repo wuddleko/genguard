@@ -49,20 +49,23 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 		RepoRoot: repoRoot,
 		Configs:  make([]ConfigRun, 0, len(paths)),
 	}
+	// One map for the whole run: a config that fails after clean shares
+	// the wiped paths with configs checked later.
+	damage := map[string]pathSnap{}
 	for _, path := range paths {
-		run.Configs = append(run.Configs, checkOne(path))
+		run.Configs = append(run.Configs, checkOne(path, damage))
 	}
 	return run, nil
 }
 
-func checkOne(path string) ConfigRun {
+func checkOne(path string, damage map[string]pathSnap) ConfigRun {
 	cfgRun := ConfigRun{Path: path}
 	cfg, err := config.LoadConfig(path)
 	if err != nil {
 		cfgRun.Err = err
 		return cfgRun
 	}
-	result, err := CheckConfig(cfg)
+	result, err := checkConfig(cfg, damage)
 	if err != nil {
 		cfgRun.Err = err
 		return cfgRun

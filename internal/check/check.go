@@ -1,6 +1,7 @@
 package check
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,20 +32,30 @@ func newGenguardError(format string, args ...any) error {
 }
 
 func CheckConfig(cfg config.Config) (ConfigResult, error) {
+	return checkConfig(cfg, map[string]pathSnap{})
+}
+
+func checkConfig(cfg config.Config, damage map[string]pathSnap) (ConfigResult, error) {
 	root := cfg.Root()
 	if err := requireGitRepo(root); err != nil {
 		return ConfigResult{}, err
 	}
+	if damage == nil {
+		damage = map[string]pathSnap{}
+	}
 
 	result := ConfigResult{}
 	for _, group := range cfg.Groups {
-		result.Groups = append(result.Groups, checkGroup(root, group))
+		result.Groups = append(result.Groups, checkGroup(root, group, damage))
 	}
 	return result, nil
 }
 
-func checkGroup(root string, group config.Group) GroupResult {
+func checkGroup(root string, group config.Group, damage map[string]pathSnap) GroupResult {
 	result := GroupResult{Name: group.Name}
+	// Residue is exempt only while it still matches the failed clean.
+	// Drop snapshots this group changes so a later wipe is that group's drift.
+	defer dropRepairedDamage(damage)
 
 	if group.Clean {
 		if err := cleanOutputs(root, group); err != nil {
@@ -58,6 +69,7 @@ func checkGroup(root string, group config.Group) GroupResult {
 		result.Status = GroupError
 		if group.Clean {
 			result.Err = newGenguardError("command failed after cleaning outputs: %s", err.Error())
+			recordCleanDamage(damage, root, group)
 		} else {
 			result.Err = err
 		}
@@ -70,6 +82,7 @@ func checkGroup(root string, group config.Group) GroupResult {
 		result.Err = err
 		return result
 	}
+	found = omitUnchangedDamage(root, found, damage)
 	if len(found) > 0 {
 		result.Status = GroupDrift
 		result.Drifts = found
@@ -78,6 +91,98 @@ func checkGroup(root string, group config.Group) GroupResult {
 
 	result.Status = GroupOK
 	return result
+}
+
+// pathSnap is the on-disk state of a path after a group wiped it and then
+// failed. Later groups leave that residue out of their drift while it still
+// matches. A group that changes the path drops the snapshot.
+type pathSnap struct {
+	missing bool
+	mode    os.FileMode
+	size    int64
+	sum     [32]byte
+	hashed  bool
+}
+
+func recordCleanDamage(damage map[string]pathSnap, root string, group config.Group) {
+	found, err := driftForGroup(root, group)
+	if err != nil {
+		return
+	}
+	for _, item := range found {
+		abs := absDriftPath(root, item.Path)
+		damage[abs] = snapPath(abs)
+	}
+}
+
+func omitUnchangedDamage(root string, found []Drift, damage map[string]pathSnap) []Drift {
+	if len(damage) == 0 || len(found) == 0 {
+		return found
+	}
+	kept := make([]Drift, 0, len(found))
+	for _, item := range found {
+		abs := absDriftPath(root, item.Path)
+		snap, ok := damage[abs]
+		if ok && samePathSnap(abs, snap) {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	return kept
+}
+
+// dropRepairedDamage forgets residue a group has changed. Comparing to the
+// original snapshot, not to this group's drift list, catches a restore that
+// matches HEAD and would otherwise leave the exemption in place.
+func dropRepairedDamage(damage map[string]pathSnap) {
+	if len(damage) == 0 {
+		return
+	}
+	for abs, snap := range damage {
+		if !samePathSnap(abs, snap) {
+			delete(damage, abs)
+		}
+	}
+}
+
+func absDriftPath(root, rel string) string {
+	return filepath.Clean(filepath.Join(root, rel))
+}
+
+func snapPath(abs string) pathSnap {
+	info, err := os.Lstat(abs)
+	if err != nil {
+		return pathSnap{missing: true}
+	}
+	snap := pathSnap{mode: info.Mode(), size: info.Size()}
+	if !info.Mode().IsRegular() {
+		return snap
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return snap
+	}
+	snap.sum = sha256.Sum256(data)
+	snap.hashed = true
+	return snap
+}
+
+func samePathSnap(abs string, snap pathSnap) bool {
+	info, err := os.Lstat(abs)
+	if snap.missing {
+		return os.IsNotExist(err)
+	}
+	if err != nil || info.Mode() != snap.mode || info.Size() != snap.size {
+		return false
+	}
+	if !snap.hashed {
+		return !info.Mode().IsRegular()
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return false
+	}
+	return sha256.Sum256(data) == snap.sum
 }
 
 func RequireGitRepo(root string) error {

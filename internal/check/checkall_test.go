@@ -650,6 +650,57 @@ func TestCheckAllCleanFailureStillRunsOthers(t *testing.T) {
 	}
 }
 
+func TestCheckAllCleanFailureDoesNotBlameLaterConfig(t *testing.T) {
+	root := initMonorepo(t)
+	dir := filepath.Join(root, "api")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	yamlPath, err := testutil.WriteGenguardConfig(dir, "", "", "genguard.yaml", []testutil.GroupSpec{{
+		Name:    "yaml",
+		Command: "exit 3",
+		Outputs: []string{"out.txt"},
+		Clean:   true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ymlPath, err := testutil.WriteGenguardConfig(dir, "", "", "genguard.yml", []testutil.GroupSpec{{
+		Name:    "yml",
+		Command: "true",
+		Outputs: []string{"out.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "out.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, root)
+
+	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", run.ExitCode())
+	}
+	yamlRun := configByPath(t, run, yamlPath)
+	if yamlRun.Result.Groups[0].Status != check.GroupError {
+		t.Fatalf("yaml status = %+v", yamlRun.Result.Groups[0])
+	}
+	if yamlRun.Result.Groups[0].Err == nil || !strings.Contains(yamlRun.Result.Groups[0].Err.Error(), "after cleaning outputs") {
+		t.Fatalf("yaml error = %v", yamlRun.Result.Groups[0].Err)
+	}
+	ymlRun := configByPath(t, run, ymlPath)
+	if ymlRun.Result.Groups[0].Status != check.GroupOK {
+		t.Fatalf("yml status = %+v", ymlRun.Result.Groups[0])
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "out.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("out.txt should have been wiped: %v", statErr)
+	}
+}
+
 func TestCheckAllDiscoveryWalkError(t *testing.T) {
 	root := initMonorepo(t)
 	blocked := filepath.Join(root, "blocked")
