@@ -36,6 +36,13 @@ archives:
     files:
       - LICENSE
       - README.md
+      - genguard.example.yaml
+      - src: docs/ci.md
+        dst: docs
+        strip_parent: true
+      - src: examples/*
+        dst: examples
+        strip_parent: true
 
 checksum:
   name_template: checksums.txt

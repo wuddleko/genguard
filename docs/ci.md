@@ -2,7 +2,7 @@
 
 `genguard check` is meant to run in CI after checkout, inside a git work tree. It re-runs your declared generator commands and fails if `git diff HEAD` would show changes under the declared `outputs` (working tree vs committed files, including staged but uncommitted generated output). Gitignored files under `outputs` are not reported as untracked — commit the generated files.
 
-Groups run in order. If a group's `command` fails, later groups are skipped and the process exits `2`.
+Groups run in order. Every group runs even when an earlier one fails or drifts; on failure genguard prints a **Summary** (one line per group, with drift kinds), then **Drift** details and diffs. Later groups see the working tree as earlier groups left it. When an earlier group fails after `clean`, paths it wiped and a later group leaves untouched stay out of that later group's drift. A later command that writes those paths is checked as usual. Prefer disjoint `outputs` so a group that drifts cannot change the tree the next group checks.
 
 Exit codes:
 
@@ -14,7 +14,7 @@ Exit codes:
 
 ## GitHub Actions (install from release)
 
-Pin a tag and download the matching archive for your runner OS/arch. Archive names use the version **without** the `v` prefix (`genguard_0.1.0_linux_amd64.tar.gz`); the GitHub download path still uses the tag (`v0.1.0`). Releases also include `checksums.txt`.
+Pin a tag and download the matching archive for your runner OS/arch. Archive names use the version **without** the `v` prefix (`genguard_0.2.0_linux_amd64.tar.gz`); the GitHub download path still uses the tag (`v0.2.0`). Releases also include `checksums.txt`.
 
 ```yaml
 name: Generated files
@@ -32,7 +32,7 @@ jobs:
 
       - name: Install genguard
         env:
-          GENGUARD_TAG: v0.1.0
+          GENGUARD_TAG: v0.2.0
         run: |
           GENGUARD_VERSION=${GENGUARD_TAG#v}
           curl -fsSL \
@@ -54,7 +54,7 @@ Use `darwin_arm64` on `macos-latest`, or `darwin_amd64` for Intel:
 ```yaml
       - name: Install genguard
         env:
-          GENGUARD_TAG: v0.1.0
+          GENGUARD_TAG: v0.2.0
         run: |
           GENGUARD_VERSION=${GENGUARD_TAG#v}
           curl -fsSL \
@@ -74,7 +74,7 @@ Fine when the job already uses Go and you want a tagged module version without d
           go-version: "1.22"
 
       - name: Install genguard
-        run: go install github.com/wuddleko/genguard/cmd/genguard@v0.1.0
+        run: go install github.com/wuddleko/genguard/cmd/genguard@v0.2.0
 
       - name: Verify generated files
         run: genguard check
@@ -86,24 +86,30 @@ Ensure `$(go env GOPATH)/bin` is on `PATH` (true by default on GitHub-hosted run
 
 ```yaml
       - uses: actions/checkout@v4
-      - run: go install github.com/wuddleko/genguard/cmd/genguard@v0.1.0
+      - run: go install github.com/wuddleko/genguard/cmd/genguard@v0.2.0
       - run: genguard check
 ```
 
-Place `genguard.yaml` or `genguard.yml` at the repository root. Paths in `outputs` are relative to that file.
+Place `genguard.yaml` or `genguard.yml` at the repository root. Paths in `outputs` are relative to that file. A directory holds one of those names; both files make `genguard check` and `genguard check --all` exit `2`.
 
 ## Monorepo with config per service
 
-Run one check per config (`-c` is the same flag):
+`genguard check --all` discovers every config under the repository root, one `genguard.yaml` or `genguard.yml` per directory. It skips directories named `.git`, `vendor`, and `node_modules`, and it does not read `.gitignore`, so a config inside an ignored directory still runs. A passing run prints each config path and a totals line. Both names in one directory exit `2`.
 
 ```yaml
       - uses: actions/checkout@v4
-      - run: go install github.com/wuddleko/genguard/cmd/genguard@v0.1.0
+      - run: go install github.com/wuddleko/genguard/cmd/genguard@v0.2.0
+      - run: genguard check --all
+```
+
+To check specific services, pass each config (`-c` is the same flag):
+
+```yaml
       - run: genguard check --config services/api/genguard.yaml
       - run: genguard check -c services/worker/genguard.yaml
 ```
 
-Each config’s commands run in that config’s directory, not the workflow’s working directory.
+Each config’s commands run in that config’s directory, not the workflow’s working directory. `--all` runs configs in path order on the shared working tree. A path left untouched after an earlier config fails following `clean` stays out of later configs' drift. Keep `outputs` disjoint across configs.
 
 ## Matrix over example templates
 
@@ -127,12 +133,19 @@ Do **not** rely on CI to mutate the repo. `genguard check` leaves the working tr
 
 ## When check fails in CI
 
-The log shows drift lines and a git diff, for example:
+The log shows a **Summary** (per-group status), **Drift** lines, and a git diff, for example:
 
 ```
+Summary
+  openapi: drift (1 modified)
+1 group: 0 ok, 1 drift, 0 error
+
+Drift
 [modified] openapi: generated/models.py
 
 diff --git a/generated/models.py ...
+
+error: 1 generated path drifted; commit the generator output or fix the command
 ```
 
 Fix locally:
@@ -173,8 +186,8 @@ See [examples/README.md](../examples/README.md) for copy-paste `genguard.yaml` t
 Tag a version to trigger GoReleaser:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
-The [release workflow](../.github/workflows/release.yml) publishes archives for Linux and macOS (`amd64`, `arm64`) and Windows (`amd64`), plus `checksums.txt`. Archive filenames use the tag without the `v` (`genguard_0.1.0_linux_amd64.tar.gz`). On Windows the binary is `genguard.exe`; group commands use `sh`/`bash` when present, otherwise `%COMSPEC% /C` (typically `cmd.exe`).
+The [release workflow](../.github/workflows/release.yml) publishes archives for Linux and macOS (`amd64`, `arm64`) and Windows (`amd64`), plus `checksums.txt`. Each archive includes the binary, `LICENSE`, `README.md`, `docs/ci.md`, `genguard.example.yaml`, and `examples/`. Archive filenames use the tag without the `v` (`genguard_0.2.0_linux_amd64.tar.gz`). On Windows the binary is `genguard.exe`; group commands use `sh`/`bash` when present, otherwise `%COMSPEC% /C` (typically `cmd.exe`).
