@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/wuddleko/genguard/internal/config"
-	"github.com/wuddleko/genguard/internal/testutil"
+	"github.com/wuddleko/genguard/tests/testutil"
 )
 
 func TestLoadConfigHappyPath(t *testing.T) {

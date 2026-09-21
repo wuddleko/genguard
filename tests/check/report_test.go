@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/wuddleko/genguard/internal/check"
-	"github.com/wuddleko/genguard/internal/testutil"
+	"github.com/wuddleko/genguard/tests/testutil"
 )
 
 func TestFormatFailureReportSections(t *testing.T) {

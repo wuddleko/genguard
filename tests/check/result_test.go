@@ -9,7 +9,7 @@ import (
 
 	"github.com/wuddleko/genguard/internal/check"
 	"github.com/wuddleko/genguard/internal/config"
-	"github.com/wuddleko/genguard/internal/testutil"
+	"github.com/wuddleko/genguard/tests/testutil"
 )
 
 func TestCheckRunsAllGroupsAfterCommandFailure(t *testing.T) {

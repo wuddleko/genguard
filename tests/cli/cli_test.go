@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/wuddleko/genguard/internal/cli"
-	"github.com/wuddleko/genguard/internal/testutil"
+	"github.com/wuddleko/genguard/tests/testutil"
 )
 
 func runCLI(args []string) (stdout, stderr string, code int) {

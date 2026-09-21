@@ -13,4 +13,4 @@ lint:
 	go vet ./...
 
 validate-examples:
-	go test ./internal/config/ -run TestExampleYAMLTemplatesLoad -count=1
+	go test ./tests/config/ -run TestExampleYAMLTemplatesLoad -count=1
