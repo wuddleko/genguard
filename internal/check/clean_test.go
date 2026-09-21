@@ -170,6 +170,83 @@ func TestCleanOutputsPreservesExternalSymlinkTarget(t *testing.T) {
 	}
 }
 
+func TestCleanOutputsIgnoresGitBehindSymlink(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, "generated")
+	outside := filepath.Join(root, "outside")
+	outsideGit := filepath.Join(outside, ".git")
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outsideGit, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outsideGit, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(generated, "hello.txt"), []byte("gone\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(generated, "link")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cleanOutputs(root, config.Group{Outputs: []string{"generated/"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(outsideGit, "HEAD")); err != nil {
+		t.Fatalf("git behind symlink was removed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(generated, "link")); !os.IsNotExist(err) {
+		t.Fatalf("symlink entry should be removed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(generated, "hello.txt")); !os.IsNotExist(err) {
+		t.Fatalf("hello.txt should be removed: %v", err)
+	}
+}
+
+func TestCleanOutputsGitNameUsesFilesystemCase(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, "generated")
+	nested := filepath.Join(generated, "sub", ".GIT")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(generated, "hello.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, foldErr := os.Lstat(filepath.Join(generated, "sub", ".git"))
+	err := cleanOutputs(root, config.Group{Outputs: []string{"generated/"}})
+	if os.IsNotExist(foldErr) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, statErr := os.Lstat(filepath.Join(generated, "hello.txt")); !os.IsNotExist(statErr) {
+			t.Fatalf("hello.txt should be removed: %v", statErr)
+		}
+		if _, statErr := os.Lstat(nested); !os.IsNotExist(statErr) {
+			t.Fatalf(".GIT should be removed: %v", statErr)
+		}
+		return
+	}
+	if foldErr != nil {
+		t.Fatal(foldErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), `mixed tree (would delete generated/sub/.git)`) {
+		t.Fatalf("error = %v", err)
+	}
+	if _, statErr := os.Lstat(filepath.Join(nested, "HEAD")); statErr != nil {
+		t.Fatalf("nested git removed: %v", statErr)
+	}
+	if _, statErr := os.Lstat(filepath.Join(generated, "hello.txt")); statErr != nil {
+		t.Fatalf("generated file removed: %v", statErr)
+	}
+}
+
 func TestCleanOutputsRefusesConfigFile(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "genguard.yaml")

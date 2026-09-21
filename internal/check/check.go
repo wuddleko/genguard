@@ -246,9 +246,25 @@ func driftForGroup(root string, group config.Group) ([]Drift, error) {
 		found = append(found, Drift{Group: group.Name, Path: path, Kind: kind})
 	}
 
-	modified, err := gitNames(root, append([]string{"diff", "--name-only", "--relative", "-z", "HEAD", "--"}, group.Outputs...)...)
+	// Repo-root names, not --relative. --relative also drops paths outside
+	// the config directory, so a tracked edit at ../sibling/file.go would
+	// pass. diff.relative is forced off in case the user has it set.
+	modified, err := gitNames(root, append([]string{"-c", "diff.relative=false", "diff", "--name-only", "-z", "HEAD", "--"}, group.Outputs...)...)
 	if err != nil {
 		return nil, err
+	}
+	if len(modified) > 0 {
+		prefix, err := gitPrefix(root)
+		if err != nil {
+			return nil, err
+		}
+		for i, path := range modified {
+			rel, err := configRelativeGitPath(prefix, path)
+			if err != nil {
+				return nil, err
+			}
+			modified[i] = rel
+		}
 	}
 	untracked, err := gitNames(
 		root,
@@ -283,7 +299,7 @@ func driftForGroup(root string, group config.Group) ([]Drift, error) {
 }
 
 func gitDiffText(root string, args ...string) (string, error) {
-	full := append([]string{"diff", "--no-color"}, args...)
+	full := append([]string{"-c", "diff.relative=false", "diff", "--no-color"}, args...)
 	out, code, err := git(root, full...)
 	if err != nil {
 		return "", err
@@ -311,6 +327,36 @@ func gitNames(root string, args ...string) ([]string, error) {
 		return nil, newGenguardError("%s", detail)
 	}
 	return parseGitNameList(out), nil
+}
+
+func gitPrefix(root string) (string, error) {
+	out, code, err := git(root, "rev-parse", "--show-prefix")
+	if err != nil {
+		return "", err
+	}
+	if code != 0 {
+		detail := strings.TrimSpace(out)
+		if detail == "" {
+			detail = "git rev-parse --show-prefix failed"
+		}
+		return "", newGenguardError("%s", detail)
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// configRelativeGitPath maps a repo-root path from git diff onto the config
+// directory. prefix is git rev-parse --show-prefix: empty at the toplevel,
+// "api/" when the config lives in api/.
+func configRelativeGitPath(prefix, gitPath string) (string, error) {
+	base := strings.TrimSuffix(prefix, "/")
+	if base == "" {
+		base = "."
+	}
+	rel, err := filepath.Rel(filepath.FromSlash(base), filepath.FromSlash(gitPath))
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 func parseGitNameList(out string) []string {

@@ -685,6 +685,9 @@ func TestDriftForGroupParentPathspec(t *testing.T) {
 	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
 		t.Fatal(err)
 	}
+	if err := testutil.Git(root, "config", "diff.relative", "true"); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(web, "out.txt"), []byte("new\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -693,8 +696,15 @@ func TestDriftForGroupParentPathspec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(drifts) != 0 {
-		t.Fatalf("modified parent path reported: %+v", drifts)
+	if len(drifts) != 1 || drifts[0] != (check.Drift{Group: "api", Path: "../web/out.txt", Kind: "modified"}) {
+		t.Fatalf("modified = %+v", drifts)
+	}
+	diff, err := check.DriftDiff(api, drifts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "diff --git") || !strings.Contains(diff, "+new") {
+		t.Fatalf("diff = %q", diff)
 	}
 
 	if err := os.WriteFile(filepath.Join(web, "extra.txt"), []byte("extra\n"), 0o644); err != nil {
@@ -707,7 +717,7 @@ func TestDriftForGroupParentPathspec(t *testing.T) {
 	if len(drifts) != 1 || drifts[0] != (check.Drift{Group: "api", Path: "../web/extra.txt", Kind: "untracked"}) {
 		t.Fatalf("untracked = %+v", drifts)
 	}
-	diff, err := check.DriftDiff(api, drifts)
+	diff, err = check.DriftDiff(api, drifts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1090,7 +1100,81 @@ func TestCheckCleanRefusesNestedGit(t *testing.T) {
 	if result.Groups[0].Status != check.GroupError {
 		t.Fatalf("status = %q, want error", result.Groups[0].Status)
 	}
-	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "mixed tree") {
+	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "mixed tree (would delete generated/.git)") {
 		t.Fatalf("error = %q", result.Groups[0].Err)
+	}
+}
+
+func TestCheckCleanRefusesGitBelowOutputRoot(t *testing.T) {
+	cases := []struct {
+		name string
+		nest func(t *testing.T, root string) string
+	}{
+		{
+			name: "directory",
+			nest: func(t *testing.T, root string) string {
+				gitDir := filepath.Join(root, "generated", "sub", ".git")
+				if err := os.MkdirAll(gitDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(gitDir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return gitDir
+			},
+		},
+		{
+			name: "gitlink",
+			nest: func(t *testing.T, root string) string {
+				gitFile := filepath.Join(root, "generated", "sub", ".git")
+				if err := os.MkdirAll(filepath.Dir(gitFile), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(gitFile, []byte("gitdir: /tmp/elsewhere\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return gitFile
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			groups := []testutil.GroupSpec{{
+				Name:    "greeting",
+				Command: "true",
+				Outputs: []string{"generated/"},
+				Clean:   true,
+			}}
+			root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gitPath := tc.nest(t, root)
+			hello := filepath.Join(root, "generated", "hello.txt")
+
+			cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := check.CheckConfig(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Groups) != 1 {
+				t.Fatal("expected one group")
+			}
+			if result.Groups[0].Status != check.GroupError {
+				t.Fatalf("status = %q, want error", result.Groups[0].Status)
+			}
+			if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "mixed tree (would delete generated/sub/.git)") {
+				t.Fatalf("error = %q", result.Groups[0].Err)
+			}
+			if _, err := os.Lstat(gitPath); err != nil {
+				t.Fatalf("nested git removed: %v", err)
+			}
+			if _, err := os.Lstat(hello); err != nil {
+				t.Fatalf("generated file removed: %v", err)
+			}
+		})
 	}
 }
