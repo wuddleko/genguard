@@ -187,3 +187,70 @@ func TestFormatRunFailureReportKeepsSectionsWhenDiffFails(t *testing.T) {
 		t.Fatalf("unexpected final error line: %q", report)
 	}
 }
+
+func TestFormatRunFailureReportStopsBeforeLaterConfigs(t *testing.T) {
+	run := check.RunResult{Configs: []check.ConfigRun{
+		{Path: filepath.Join(t.TempDir(), "missing", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
+			{Name: "sqlc", Status: check.GroupDrift, Drifts: []check.Drift{
+				{Group: "sqlc", Kind: "modified", Path: "generated/hello.txt"},
+			}},
+		}}},
+		{Path: filepath.Join(t.TempDir(), "later", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
+			{Name: "web", Status: check.GroupDrift, Drifts: []check.Drift{
+				{Group: "web", Kind: "modified", Path: "not-reached.txt"},
+			}},
+		}}},
+	}}
+	report, err := check.FormatRunFailureReport(run)
+	if err == nil {
+		t.Fatalf("expected diff error, report = %q", report)
+	}
+	if !strings.Contains(report, "[modified] sqlc: generated/hello.txt") {
+		t.Fatalf("report = %q", report)
+	}
+	if strings.Contains(report, "not-reached.txt") {
+		t.Fatalf("later config was rendered:\n%s", report)
+	}
+	if strings.Contains(report, "error: ") {
+		t.Fatalf("unexpected final error line: %q", report)
+	}
+}
+
+func TestFormatRunFailureReportKeepsEarlierDiffWhenLaterDiffFails(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "generated", "hello.txt"), []byte("drifted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run := check.RunResult{
+		RepoRoot: root,
+		Configs: []check.ConfigRun{
+			{Path: filepath.Join(root, "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
+				{Name: "sqlc", Status: check.GroupDrift, Drifts: []check.Drift{
+					{Group: "sqlc", Kind: "modified", Path: "generated/hello.txt"},
+				}},
+			}}},
+			{Path: filepath.Join(t.TempDir(), "gone", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
+				{Name: "web", Status: check.GroupDrift, Drifts: []check.Drift{
+					{Group: "web", Kind: "modified", Path: "later-only.txt"},
+				}},
+			}}},
+		},
+	}
+	report, err := check.FormatRunFailureReport(run)
+	if err == nil {
+		t.Fatalf("expected diff error, report = %q", report)
+	}
+	if !strings.Contains(report, "diff --git") {
+		t.Fatalf("earlier diff missing:\n%s", report)
+	}
+	if !strings.Contains(report, "[modified] web: later-only.txt") {
+		t.Fatalf("later drift header missing:\n%s", report)
+	}
+	if strings.Contains(report, "error: ") {
+		t.Fatalf("unexpected final error line:\n%s", report)
+	}
+}

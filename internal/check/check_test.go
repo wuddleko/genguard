@@ -663,6 +663,77 @@ func TestDriftForGroupSubdirectoryUsesConfigRelativePaths(t *testing.T) {
 	}
 }
 
+func TestDriftForGroupParentPathspec(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	api := filepath.Join(root, "api")
+	web := filepath.Join(root, "web")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(api, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(web, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(web, "out.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(web, "out.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drifts, err := check.DriftForGroup(api, config.Group{Name: "api", Outputs: []string{"../web/out.txt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drifts) != 0 {
+		t.Fatalf("modified parent path reported: %+v", drifts)
+	}
+
+	if err := os.WriteFile(filepath.Join(web, "extra.txt"), []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	drifts, err = check.DriftForGroup(api, config.Group{Name: "api", Outputs: []string{"../web/extra.txt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drifts) != 1 || drifts[0] != (check.Drift{Group: "api", Path: "../web/extra.txt", Kind: "untracked"}) {
+		t.Fatalf("untracked = %+v", drifts)
+	}
+	diff, err := check.DriftDiff(api, drifts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "diff --git") || !strings.Contains(diff, "+extra") {
+		t.Fatalf("diff = %q", diff)
+	}
+
+	if err := os.Remove(filepath.Join(web, "out.txt")); err != nil {
+		t.Fatal(err)
+	}
+	drifts, err = check.DriftForGroup(api, config.Group{Name: "api", Outputs: []string{"../web/out.txt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drifts) != 1 || drifts[0] != (check.Drift{Group: "api", Path: "../web/out.txt", Kind: "missing"}) {
+		t.Fatalf("deleted = %+v", drifts)
+	}
+	diff, err = check.DriftDiff(api, drifts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "deleted file") {
+		t.Fatalf("diff = %q", diff)
+	}
+}
+
 func TestDriftForGroupDeletedTrackedFileIsMissingOnce(t *testing.T) {
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
 	if err != nil {

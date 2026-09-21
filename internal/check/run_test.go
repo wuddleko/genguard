@@ -149,6 +149,68 @@ func TestRunResultSummaryLines(t *testing.T) {
 	if got != want {
 		t.Fatalf("SummaryLines =\n%s\nwant\n%s", got, want)
 	}
+	configs, ok, drift, errorsN := run.Counts()
+	if configs != 2 || ok != 0 || drift != 1 || errorsN != 0 {
+		t.Fatalf("Counts = %d, %d, %d, %d", configs, ok, drift, errorsN)
+	}
+}
+
+func TestRunResultSummaryLinesEmpty(t *testing.T) {
+	t.Parallel()
+	got := strings.Join(check.RunResult{}.SummaryLines(), "\n")
+	if got != "0 configs: 0 ok, 0 drift, 0 error" {
+		t.Fatalf("SummaryLines = %q", got)
+	}
+}
+
+func TestRunResultSummaryLinesSeparatesTotal(t *testing.T) {
+	t.Parallel()
+	repo := filepath.Join(string(filepath.Separator), "repo")
+	run := check.RunResult{RepoRoot: repo, Configs: []check.ConfigRun{{
+		Path: filepath.Join(repo, "genguard.yaml"),
+		Result: check.ConfigResult{Groups: []check.GroupResult{
+			{Name: "g", Status: check.GroupOK},
+		}},
+	}}}
+	got := strings.Join(run.SummaryLines(), "\n")
+	want := strings.Join([]string{
+		"genguard.yaml",
+		"  g: OK",
+		"1 group: 1 ok, 0 drift, 0 error",
+		"",
+		"1 config: 1 ok, 0 drift, 0 error",
+	}, "\n")
+	if got != want {
+		t.Fatalf("SummaryLines =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestRunResultSummaryLinesRepoRootDisplaysDot(t *testing.T) {
+	t.Parallel()
+	repo := filepath.Join(string(filepath.Separator), "repo")
+	run := check.RunResult{RepoRoot: repo, Configs: []check.ConfigRun{{
+		Path: repo,
+		Err:  errors.New("parse\nfailed\there"),
+	}}}
+	lines := run.SummaryLines()
+	if lines[0] != "." || lines[1] != "  error (parse failed here)" {
+		t.Fatalf("lines = %q", lines)
+	}
+}
+
+func TestRunResultSummaryLinesMixedGroupIsConfigError(t *testing.T) {
+	t.Parallel()
+	run := check.RunResult{Configs: []check.ConfigRun{{
+		Path: "a.yaml",
+		Result: check.ConfigResult{Groups: []check.GroupResult{
+			{Name: "a", Status: check.GroupError, Err: errors.New("x")},
+			{Name: "b", Status: check.GroupDrift, Drifts: []check.Drift{{Path: "f", Kind: "modified"}}},
+		}},
+	}}}
+	got := strings.Join(run.SummaryLines(), "\n")
+	if !strings.Contains(got, "1 config: 0 ok, 0 drift, 1 error") {
+		t.Fatalf("SummaryLines =\n%s", got)
+	}
 }
 
 func TestRunResultFinalErrorLine(t *testing.T) {
@@ -206,6 +268,26 @@ func TestRunResultFinalErrorLine(t *testing.T) {
 			name: "error and drift",
 			run:  check.RunResult{Configs: []check.ConfigRun{setup, drift("a")}},
 			want: "error: 1 config failed; 1 config drifted",
+		},
+		{
+			name: "one failure and two drifts",
+			run:  check.RunResult{Configs: []check.ConfigRun{setup, drift("a"), drift("b")}},
+			want: "error: 1 config failed; 2 configs drifted",
+		},
+		{
+			name: "mixed groups stay on the config line",
+			run: check.RunResult{Configs: []check.ConfigRun{{
+				Result: check.ConfigResult{Groups: []check.GroupResult{
+					{Name: "a", Status: check.GroupError, Err: errors.New("x")},
+					{Name: "b", Status: check.GroupDrift, Drifts: []check.Drift{{Path: "f"}}},
+				}},
+			}}},
+			want: "error: 1 group failed; 1 group drifted",
+		},
+		{
+			name: "single config with two paths",
+			run:  check.RunResult{Configs: []check.ConfigRun{drift("a", "b")}},
+			want: "error: 2 generated paths drifted; commit the generator output or fix the command",
 		},
 	}
 	for _, tc := range cases {
