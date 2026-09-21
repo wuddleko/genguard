@@ -2,6 +2,7 @@ package check
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -36,6 +37,60 @@ func FormatFailureReport(result ConfigResult, root string) (string, error) {
 	}
 
 	if line := result.FinalErrorLine(); line != "" {
+		b.WriteString("\n")
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	return b.String(), nil
+}
+
+// FormatRunFailureReport renders a multi-config failure: a summary with
+// one block per config, drift lines and git diffs for configs that
+// drifted, and an aggregated final error line.
+//
+// Diffs are taken from each config's directory. If a git diff cannot be
+// produced, the report built so far is returned without the final error
+// line, along with the error.
+func FormatRunFailureReport(run RunResult) (string, error) {
+	var b strings.Builder
+	b.WriteString("Summary\n")
+	for _, line := range run.SummaryLines() {
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
+	wroteDrift := false
+	for _, cfg := range run.Configs {
+		if cfg.Err != nil {
+			continue
+		}
+		drifts := cfg.Result.AllDrifts()
+		if len(drifts) == 0 {
+			continue
+		}
+		if !wroteDrift {
+			b.WriteString("\nDrift\n")
+			wroteDrift = true
+		} else {
+			b.WriteString("\n")
+		}
+		b.WriteString(displayConfigPath(run.RepoRoot, cfg.Path))
+		b.WriteString("\n")
+		for _, item := range drifts {
+			fmt.Fprintf(&b, "[%s] %s: %s\n", item.Kind, item.Group, item.Path)
+		}
+		diff, err := DriftDiff(filepath.Dir(cfg.Path), drifts)
+		if err != nil {
+			return b.String(), err
+		}
+		if strings.TrimSpace(diff) != "" {
+			b.WriteString("\n")
+			b.WriteString(diff)
+			b.WriteString("\n")
+		}
+	}
+
+	if line := run.FinalErrorLine(); line != "" {
 		b.WriteString("\n")
 		b.WriteString(line)
 		b.WriteString("\n")

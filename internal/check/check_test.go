@@ -604,6 +604,65 @@ func TestDriftForGroupHandlesNewlineInFilename(t *testing.T) {
 	}
 }
 
+func TestDriftForGroupSubdirectoryUsesConfigRelativePaths(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	api := filepath.Join(root, "api")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(api, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(api, "out.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(api, "out.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(api, "extra.txt"), []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	group := config.Group{Name: "api", Outputs: []string{"out.txt", "extra.txt"}}
+	drifts, err := check.DriftForGroup(api, group)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drifts) != 2 {
+		t.Fatalf("drifts = %+v", drifts)
+	}
+	if drifts[0] != (check.Drift{Group: "api", Path: "out.txt", Kind: "modified"}) {
+		t.Fatalf("modified = %+v", drifts[0])
+	}
+	if drifts[1] != (check.Drift{Group: "api", Path: "extra.txt", Kind: "untracked"}) {
+		t.Fatalf("untracked = %+v", drifts[1])
+	}
+	diff, err := check.DriftDiff(api, drifts[:1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "diff --git") || !strings.Contains(diff, "+new") {
+		t.Fatalf("diff = %q", diff)
+	}
+
+	if err := os.Remove(filepath.Join(api, "out.txt")); err != nil {
+		t.Fatal(err)
+	}
+	drifts, err = check.DriftForGroup(api, config.Group{Name: "api", Outputs: []string{"out.txt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drifts) != 1 || drifts[0] != (check.Drift{Group: "api", Path: "out.txt", Kind: "missing"}) {
+		t.Fatalf("deleted = %+v", drifts)
+	}
+}
+
 func TestDriftForGroupDeletedTrackedFileIsMissingOnce(t *testing.T) {
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
 	if err != nil {

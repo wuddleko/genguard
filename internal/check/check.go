@@ -146,6 +146,60 @@ func requireGitRepo(root string) error {
 	return nil
 }
 
+func gitRepoRoot(dir string) (string, error) {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		dir = wd
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	if err := requireGitRepo(abs); err != nil {
+		return "", err
+	}
+	out, code, err := git(abs, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", err
+	}
+	root := strings.TrimSpace(out)
+	if code != 0 || root == "" {
+		return "", newGenguardError("%s is not a git work tree", abs)
+	}
+	return callerRepoRoot(abs, root), nil
+}
+
+// callerRepoRoot returns gitRoot, using start's path spelling when start
+// is that toplevel or a directory inside it. git rev-parse --show-toplevel
+// resolves symlinks (/var -> /private/var on macOS); discovery should keep
+// the path the caller passed.
+func callerRepoRoot(start, gitRoot string) string {
+	resolvedStart, err := filepath.EvalSymlinks(start)
+	if err != nil {
+		return filepath.Clean(gitRoot)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(gitRoot)
+	if err != nil {
+		return filepath.Clean(gitRoot)
+	}
+	rel, err := filepath.Rel(resolvedRoot, resolvedStart)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return filepath.Clean(gitRoot)
+	}
+	if rel == "." {
+		return filepath.Clean(start)
+	}
+	suffix := string(filepath.Separator) + rel
+	if strings.HasSuffix(start, suffix) {
+		return filepath.Clean(strings.TrimSuffix(start, suffix))
+	}
+	return filepath.Clean(gitRoot)
+}
+
 func runCommand(root, command string) error {
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -192,7 +246,7 @@ func driftForGroup(root string, group config.Group) ([]Drift, error) {
 		found = append(found, Drift{Group: group.Name, Path: path, Kind: kind})
 	}
 
-	modified, err := gitNames(root, append([]string{"diff", "--name-only", "-z", "HEAD", "--"}, group.Outputs...)...)
+	modified, err := gitNames(root, append([]string{"diff", "--name-only", "--relative", "-z", "HEAD", "--"}, group.Outputs...)...)
 	if err != nil {
 		return nil, err
 	}

@@ -98,3 +98,92 @@ func TestFormatFailureReportErrorsOnly(t *testing.T) {
 		t.Fatalf("report = %q", report)
 	}
 }
+
+func TestFormatRunFailureReportSections(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "generated", "hello.txt"), []byte("drifted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run := check.RunResult{
+		RepoRoot: root,
+		Configs: []check.ConfigRun{
+			{Path: filepath.Join(root, "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
+				{Name: "sqlc", Status: check.GroupDrift, Drifts: []check.Drift{
+					{Group: "sqlc", Kind: "modified", Path: "generated/hello.txt"},
+				}},
+			}}},
+			{Path: filepath.Join(root, "web", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
+				{Name: "web", Status: check.GroupOK},
+			}}},
+		},
+	}
+	report, err := check.FormatRunFailureReport(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(report, "Summary\n") {
+		t.Fatalf("report = %q", report)
+	}
+	summary := strings.Index(report, "genguard.yaml\n  sqlc: drift (1 modified)")
+	other := strings.Index(report, filepath.Join("web", "genguard.yaml")+"\n  web: OK")
+	totals := strings.Index(report, "2 configs: 1 ok, 1 drift, 0 error")
+	drift := strings.Index(report, "\nDrift\n")
+	item := strings.Index(report, "[modified] sqlc: generated/hello.txt")
+	diff := strings.Index(report, "diff --git")
+	final := strings.Index(report, "error: 1 generated path drifted")
+	if summary < 0 || other < 0 || totals < 0 || drift < 0 || item < 0 || diff < 0 || final < 0 {
+		t.Fatalf("report = %q", report)
+	}
+	if !(summary < other && other < totals && totals < drift && drift < item && item < diff && diff < final) {
+		t.Fatalf("section order: %q", report)
+	}
+	if strings.Contains(report, "\nDrift\n"+filepath.Join("web", "genguard.yaml")) {
+		t.Fatalf("ok config listed under drift: %q", report)
+	}
+}
+
+func TestFormatRunFailureReportSetupError(t *testing.T) {
+	run := check.RunResult{Configs: []check.ConfigRun{
+		{Path: "bad.yaml", Err: errors.New("parse failed")},
+	}}
+	report, err := check.FormatRunFailureReport(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(report, "\nDrift\n") {
+		t.Fatalf("unexpected drift section: %q", report)
+	}
+	if !strings.Contains(report, "  error (parse failed)") {
+		t.Fatalf("report = %q", report)
+	}
+	if !strings.Contains(report, "error: parse failed") {
+		t.Fatalf("report = %q", report)
+	}
+}
+
+func TestFormatRunFailureReportKeepsSectionsWhenDiffFails(t *testing.T) {
+	run := check.RunResult{Configs: []check.ConfigRun{
+		{Path: filepath.Join(t.TempDir(), "missing", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
+			{Name: "sqlc", Status: check.GroupDrift, Drifts: []check.Drift{
+				{Group: "sqlc", Kind: "modified", Path: "generated/hello.txt"},
+			}},
+		}}},
+	}}
+	report, err := check.FormatRunFailureReport(run)
+	if err == nil {
+		t.Fatalf("expected diff error, report = %q", report)
+	}
+	if !strings.Contains(report, "Summary\n") || !strings.Contains(report, "\nDrift\n") {
+		t.Fatalf("report = %q", report)
+	}
+	if !strings.Contains(report, "[modified] sqlc: generated/hello.txt") {
+		t.Fatalf("report = %q", report)
+	}
+	if strings.Contains(report, "error: 1 generated path drifted") {
+		t.Fatalf("unexpected final error line: %q", report)
+	}
+}
