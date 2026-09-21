@@ -9,12 +9,16 @@ import (
 )
 
 func cleanOutputs(root string, group config.Group) error {
-	gitDir := filepath.Join(root, ".git")
-	configYAML := filepath.Join(root, "genguard.yaml")
-	configYML := filepath.Join(root, "genguard.yml")
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return err
+	}
+	gitDir := filepath.Join(absRoot, ".git")
+	configYAML := filepath.Join(absRoot, "genguard.yaml")
+	configYML := filepath.Join(absRoot, "genguard.yml")
 
 	for _, spec := range group.Outputs {
-		target, isDir, err := resolveCleanTarget(root, spec)
+		target, isDir, err := resolveCleanTarget(absRoot, spec)
 		if err != nil {
 			return err
 		}
@@ -27,7 +31,7 @@ func cleanOutputs(root string, group config.Group) error {
 		if wouldRemove(target, configYAML) || wouldRemove(target, configYML) {
 			return newGenguardError("clean refuses %q: mixed tree (would delete the config file)", spec)
 		}
-		if err := removeCleanTarget(target, isDir); err != nil {
+		if err := removeCleanTarget(absRoot, target, isDir); err != nil {
 			return newGenguardError("clean %q: %s", spec, err.Error())
 		}
 	}
@@ -82,18 +86,31 @@ func resolveCleanTarget(root, spec string) (string, bool, error) {
 	return target, isDir, nil
 }
 
+func pathComponents(rel string) ([]string, error) {
+	parts := make([]string, 0)
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		if part == ".." {
+			return nil, newGenguardError("clean refuses %q", rel)
+		}
+		parts = append(parts, part)
+	}
+	return parts, nil
+}
+
 func refuseSymlinksInPath(root, target string) error {
 	rel, err := filepath.Rel(root, target)
 	if err != nil {
 		return err
 	}
+	parts, err := pathComponents(rel)
+	if err != nil {
+		return err
+	}
 	cur := root
-	relParts := make([]string, 0)
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
-		if part == "" || part == "." {
-			continue
-		}
-		relParts = append(relParts, part)
+	for i, part := range parts {
 		cur = filepath.Join(cur, part)
 		info, err := os.Lstat(cur)
 		if err != nil {
@@ -103,22 +120,8 @@ func refuseSymlinksInPath(root, target string) error {
 			return err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return newGenguardError("clean refuses symlink in output path %q", filepath.Join(relParts...))
+			return newGenguardError("clean refuses symlink in output path %q", filepath.Join(parts[:i+1]...))
 		}
-	}
-	return nil
-}
-
-func refuseSymlinkTarget(target string) error {
-	info, err := os.Lstat(target)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return newGenguardError("refuses symlink target")
 	}
 	return nil
 }
@@ -139,19 +142,17 @@ func wouldRemove(target, path string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-func removeCleanTarget(target string, isDir bool) error {
-	if err := refuseSymlinkTarget(target); err != nil {
+func removeCleanTarget(root, target string, isDir bool) error {
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
 		return err
 	}
-	if isDir {
-		if err := os.RemoveAll(target); err != nil {
-			return err
-		}
-		return os.MkdirAll(target, 0o755)
-	}
-	err := os.Remove(target)
-	if err != nil && !os.IsNotExist(err) {
+	parts, err := pathComponents(rel)
+	if err != nil {
 		return err
 	}
-	return nil
+	if len(parts) == 0 {
+		return newGenguardError("clean refuses %q", rel)
+	}
+	return removePinned(root, parts, isDir)
 }

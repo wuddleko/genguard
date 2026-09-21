@@ -226,7 +226,7 @@ func TestRemoveCleanTargetRefusesSwappedSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := removeCleanTarget(generated, true)
+	err := removeCleanTarget(root, generated, true)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -276,5 +276,109 @@ func TestCleanOutputsRefusesDirectoryReplacedWithSymlink(t *testing.T) {
 	}
 	if string(got) != "keep\n" {
 		t.Fatalf("secret = %q", got)
+	}
+}
+
+func TestRefuseSymlinksInPathRefusesDotDot(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	err := refuseSymlinksInPath(root, filepath.Join(root, "..", "outside"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "clean refuses") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestRemoveCleanTargetRemovesNestedFile(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(root, "generated")
+	hello := filepath.Join(generated, "hello.txt")
+	if err := os.Mkdir(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hello, []byte("gone\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := removeCleanTarget(root, hello, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(hello); !os.IsNotExist(err) {
+		t.Fatalf("file should be removed: %v", err)
+	}
+	if _, err := os.Lstat(generated); err != nil {
+		t.Fatalf("parent directory should remain: %v", err)
+	}
+}
+
+func TestRemoveCleanTargetRefusesParentSymlinkFile(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(root, "outside")
+	secret := filepath.Join(outside, "hello.txt")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secret, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "generated")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := removeCleanTarget(root, filepath.Join(root, "generated", "hello.txt"), false)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("error = %q", err)
+	}
+	got, readErr := os.ReadFile(secret)
+	if readErr != nil {
+		t.Fatalf("outside file missing: %v", readErr)
+	}
+	if string(got) != "keep\n" {
+		t.Fatalf("secret = %q", got)
+	}
+}
+
+func TestRemoveCleanTargetRefusesParentSymlinkMkdir(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(root, "outside")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "generated")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := removeCleanTarget(root, filepath.Join(root, "generated", "nested"), true)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("error = %q", err)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "nested")); !os.IsNotExist(err) {
+		t.Fatalf("should not create through symlink: %v", err)
+	}
+}
+
+func TestRemoveCleanTargetCreatesMissingDir(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "generated", "nested")
+	if err := removeCleanTarget(root, target, true); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() {
+		t.Fatal("want directory")
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("want a real directory")
 	}
 }
