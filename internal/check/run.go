@@ -81,15 +81,30 @@ func (r RunResult) SummaryLines() []string {
 	if len(r.Configs) > 0 {
 		lines = append(lines, "")
 	}
+	lines = append(lines, r.configStatusLine())
+	return lines
+}
+
+// SuccessLines lists each config path, relative to RepoRoot, then the
+// config-level totals line. Callers print this when ExitCode is 0.
+func (r RunResult) SuccessLines() []string {
+	lines := make([]string, 0, len(r.Configs)+1)
+	for _, cfg := range r.Configs {
+		lines = append(lines, displayConfigPath(r.RepoRoot, cfg.Path))
+	}
+	lines = append(lines, r.configStatusLine())
+	return lines
+}
+
+func (r RunResult) configStatusLine() string {
 	ok, drift, errors := r.configStatusCounts()
-	lines = append(lines, fmt.Sprintf(
+	return fmt.Sprintf(
 		"%s: %d ok, %d drift, %d error",
 		countNoun(len(r.Configs), "config", "configs"),
 		ok,
 		drift,
 		errors,
-	))
-	return lines
+	)
 }
 
 // FinalErrorLine is the aggregated error line for the run.

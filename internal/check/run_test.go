@@ -155,6 +155,48 @@ func TestRunResultSummaryLines(t *testing.T) {
 	}
 }
 
+func TestRunResultSuccessLines(t *testing.T) {
+	t.Parallel()
+	repo := filepath.Join(string(filepath.Separator), "repo")
+	run := check.RunResult{RepoRoot: repo, Configs: []check.ConfigRun{
+		{Path: filepath.Join(repo, "web", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
+			{Name: "web", Status: check.GroupOK},
+		}}},
+		{Path: filepath.Join(repo, "api", "genguard.yml"), Result: check.ConfigResult{Groups: []check.GroupResult{
+			{Name: "api", Status: check.GroupOK},
+		}}},
+	}}
+	got := strings.Join(run.SuccessLines(), "\n")
+	want := strings.Join([]string{
+		filepath.Join("web", "genguard.yaml"),
+		filepath.Join("api", "genguard.yml"),
+		"2 configs: 2 ok, 0 drift, 0 error",
+	}, "\n")
+	if got != want {
+		t.Fatalf("SuccessLines =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestRunResultSuccessLinesSingularAndOutsideRepo(t *testing.T) {
+	t.Parallel()
+	repo := filepath.Join(string(filepath.Separator), "repo")
+	outside := filepath.Join(string(filepath.Separator), "tmp", "genguard.yml")
+	run := check.RunResult{RepoRoot: repo, Configs: []check.ConfigRun{{Path: outside}}}
+	got := strings.Join(run.SuccessLines(), "\n")
+	want := outside + "\n1 config: 1 ok, 0 drift, 0 error"
+	if got != want {
+		t.Fatalf("SuccessLines =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestRunResultSuccessLinesEmpty(t *testing.T) {
+	t.Parallel()
+	got := strings.Join(check.RunResult{}.SuccessLines(), "\n")
+	if got != "0 configs: 0 ok, 0 drift, 0 error" {
+		t.Fatalf("SuccessLines = %q", got)
+	}
+}
+
 func TestRunResultSummaryLinesEmpty(t *testing.T) {
 	t.Parallel()
 	got := strings.Join(check.RunResult{}.SummaryLines(), "\n")

@@ -49,6 +49,7 @@ diff --git a/gen/foo.pb.go ...
 
 ```
 genguard check [-c|--config path/to/genguard.yaml]
+genguard check --all
 genguard version
 ```
 
@@ -129,6 +130,10 @@ genguard check -c path/to/genguard.yaml
 ```
 
 If you omit `--config` / `-c`, genguard walks up from the current directory until it finds `genguard.yaml` or `genguard.yml`. The directory that contains the config must be a git work tree (or inside one).
+
+`genguard check --all` checks every `genguard.yaml` and `genguard.yml` under the git repository root, in path order, on the shared working tree. It skips `.git/`, `vendor/`, and `node_modules/`. Nested configs both run. `--all` cannot be combined with `--config` / `-c`. If none are found, the command exits `2`. A passing run prints each config path and a totals line.
+
+Configs run sequentially. Later configs see the tree earlier ones left behind, including files wiped by `clean`. Prefer disjoint `outputs` across configs.
 
 Each group has:
 

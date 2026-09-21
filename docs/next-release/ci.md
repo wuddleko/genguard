@@ -99,16 +99,22 @@ Place `genguard.yaml` or `genguard.yml` at the repository root. Paths in `output
 
 ## Monorepo with config per service
 
-Run one check per config (`-c` is the same flag):
+`genguard check --all` discovers every config under the repository root. A passing run prints each config path and a totals line.
 
 ```yaml
       - uses: actions/checkout@v4
       - run: go install github.com/wuddleko/genguard/cmd/genguard@v0.1.0
+      - run: genguard check --all
+```
+
+To check specific services, pass each config (`-c` is the same flag):
+
+```yaml
       - run: genguard check --config services/api/genguard.yaml
       - run: genguard check -c services/worker/genguard.yaml
 ```
 
-Each config’s commands run in that config’s directory, not the workflow’s working directory.
+Each config’s commands run in that config’s directory, not the workflow’s working directory. `--all` runs configs in path order on the shared working tree; keep `outputs` disjoint across configs.
 
 ## Matrix over example templates
 
