@@ -783,13 +783,50 @@ func TestCLICheckAllSameDirectoryYamlAndYml(t *testing.T) {
 	dir := filepath.Join(root, "api")
 	writeCLIConfig(t, dir, "yaml", "true")
 	writeNamedCLIConfig(t, dir, "genguard.yml", "yml", "true", []string{"out.txt"}, false)
+	writeCLIConfig(t, filepath.Join(root, "web"), "web", "true")
 	commitRepo(t, root)
 
 	stdout, stderr, code := cliCheckAll(t, root)
-	requireCheckAllSuccess(t, stdout, stderr, code,
-		filepath.Join("api", "genguard.yaml"),
-		filepath.Join("api", "genguard.yml"),
-	)
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stdout = %q stderr = %q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "both genguard.yaml and genguard.yml") || !strings.Contains(stderr, dir) {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stdout, "Generated files match") || strings.Contains(stderr, "web") {
+		t.Fatalf("other configs should not run\nstdout = %q\nstderr = %q", stdout, stderr)
+	}
+}
+
+func TestCLICheckRejectsBothNames(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, root, "yaml", "true")
+	writeNamedCLIConfig(t, root, "genguard.yml", "yml", "true", []string{"out.txt"}, false)
+	commitRepo(t, root)
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"check"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stdout = %q stderr = %q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "both genguard.yaml and genguard.yml") || !strings.Contains(stderr, root) {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestCLIConfigFlagSelectsOneOfBothNames(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, root, "yaml", "true")
+	writeNamedCLIConfig(t, root, "genguard.yml", "yml", "exit 3", []string{"out.txt"}, false)
+	commitRepo(t, root)
+
+	stdout, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files match the generators.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
 }
 
 func TestCLICheckAllNestedFromDeepest(t *testing.T) {

@@ -17,9 +17,10 @@ var skipDirNames = map[string]struct{}{
 }
 
 // FindAll returns every genguard.yaml / genguard.yml under repoRoot,
-// as absolute paths sorted lexicographically. Directories named .git,
-// vendor, or node_modules are not searched. An empty result is not an
-// error; the caller decides how to treat "no configs".
+// as absolute paths sorted lexicographically. A directory that contains
+// both names is an error. Directories named .git, vendor, or
+// node_modules are not searched. An empty result is not an error; the
+// caller decides how to treat "no configs".
 //
 // repoRoot need not be a git repository. Empty repoRoot means the
 // current working directory. A symlink root is followed; directory
@@ -55,6 +56,9 @@ func FindAll(repoRoot string) ([]string, error) {
 		return nil, err
 	}
 	sort.Strings(found)
+	if err := rejectBothConfigNames(found); err != nil {
+		return nil, err
+	}
 	return found, nil
 }
 

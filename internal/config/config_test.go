@@ -342,6 +342,29 @@ func TestExampleYAMLTemplatesLoad(t *testing.T) {
 	}
 }
 
+func TestFindConfigRejectsBothNames(t *testing.T) {
+	root := t.TempDir()
+	if _, err := testutil.WriteGenguardConfig(root, "generated/hello.txt", "", "genguard.yaml", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(root, "generated/hello.txt", "", "genguard.yml", nil); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, nested)
+
+	_, err := config.FindConfig("")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "both genguard.yaml and genguard.yml") || !strings.Contains(err.Error(), root) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
 func TestFindConfigReturnsEmpty(t *testing.T) {
 	root := t.TempDir()
 	testutil.Chdir(t, root)

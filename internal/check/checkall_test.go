@@ -678,7 +678,12 @@ func TestCheckAllCleanFailureDoesNotBlameLaterConfig(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	if err == nil || !strings.Contains(err.Error(), "both genguard.yaml and genguard.yml") {
+		t.Fatalf("discovery error = %v", err)
+	}
+
+	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Paths: []string{yamlPath, ymlPath}})
 	if err != nil {
 		t.Fatal(err)
 	}

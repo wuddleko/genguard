@@ -33,12 +33,12 @@ func FindConfig(start string) (string, error) {
 		return "", err
 	}
 	for dir := here; ; dir = filepath.Dir(dir) {
-		for _, name := range configNames {
-			candidate := filepath.Join(dir, name)
-			info, err := os.Stat(candidate)
-			if err == nil && !info.IsDir() {
-				return candidate, nil
-			}
+		found, err := configFile(dir)
+		if err != nil {
+			return "", err
+		}
+		if found != "" {
+			return found, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -46,6 +46,51 @@ func FindConfig(start string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// configFile returns the only config file in dir. A directory holds one of
+// genguard.yaml or genguard.yml. Both files is an error so a walk-up check
+// and genguard check --all see the same layout.
+func configFile(dir string) (string, error) {
+	var found string
+	for _, name := range configNames {
+		candidate := filepath.Join(dir, name)
+		info, err := os.Stat(candidate)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return "", err
+		}
+		if info.IsDir() {
+			continue
+		}
+		if found != "" {
+			return "", bothConfigNamesError(dir)
+		}
+		found = candidate
+	}
+	return found, nil
+}
+
+func bothConfigNamesError(dir string) error {
+	return fmt.Errorf("%s contains both genguard.yaml and genguard.yml; keep one", dir)
+}
+
+// rejectBothConfigNames reports a directory that contains both config names.
+// A nested config can sort between genguard.yaml and genguard.yml, so the
+// check groups by directory instead of comparing adjacent paths.
+func rejectBothConfigNames(paths []string) error {
+	seen := make(map[string]string, len(paths))
+	for _, path := range paths {
+		dir := filepath.Dir(path)
+		base := filepath.Base(path)
+		if prev, ok := seen[dir]; ok && prev != base {
+			return bothConfigNamesError(dir)
+		}
+		seen[dir] = base
+	}
+	return nil
 }
 
 func LoadConfig(path string) (Config, error) {

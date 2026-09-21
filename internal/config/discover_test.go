@@ -126,10 +126,65 @@ func TestFindAllDoesNotRequireGit(t *testing.T) {
 	assertPaths(t, found, []string{filepath.Join(root, "genguard.yaml")})
 }
 
-func TestFindAllCollectsBothNamesInSameDir(t *testing.T) {
+func TestFindAllRejectsBothNamesInSameDir(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	if _, err := testutil.WriteGenguardConfig(root, "gen/", "", "genguard.yaml", nil); err != nil {
+	api := filepath.Join(root, "api")
+	web := filepath.Join(root, "web")
+	if err := os.MkdirAll(api, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(web, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(api, "gen/", "", "genguard.yaml", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(api, "gen/", "", "genguard.yml", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(web, "gen/", "", "genguard.yaml", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := config.FindAll(root)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "both genguard.yaml and genguard.yml") || !strings.Contains(err.Error(), api) {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestFindAllRejectsBothNamesWhenNestedPathSortsBetween(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	api := filepath.Join(root, "api")
+	// genguard.yaml.bak sorts between genguard.yaml and genguard.yml.
+	backup := filepath.Join(api, "genguard.yaml.bak")
+	if err := os.MkdirAll(backup, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(api, "gen/", "", "genguard.yaml", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(api, "gen/", "", "genguard.yml", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(backup, "gen/", "", "genguard.yaml", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := config.FindAll(root)
+	if err == nil || err.Error() != api+" contains both genguard.yaml and genguard.yml; keep one" {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestFindAllAllowsConfigDirectoryName(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "genguard.yaml"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := testutil.WriteGenguardConfig(root, "gen/", "", "genguard.yml", nil); err != nil {
@@ -140,11 +195,7 @@ func TestFindAllCollectsBothNamesInSameDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{
-		filepath.Join(root, "genguard.yaml"),
-		filepath.Join(root, "genguard.yml"),
-	}
-	assertPaths(t, found, want)
+	assertPaths(t, found, []string{filepath.Join(root, "genguard.yml")})
 }
 
 func TestFindAllFollowsSymlinkRoot(t *testing.T) {
