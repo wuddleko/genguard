@@ -58,3 +58,21 @@ jobs:
 
       - name: Validate example configs
         run: go test ./tests/config/ -run TestExampleYAMLTemplatesLoad -count=1
+
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Fuzz
+        run: |
+          set -euo pipefail
+          for target in FuzzParseGitNameList FuzzConfigRelativeGitPath FuzzResolveCleanPath; do
+            go test -count=1 -fuzz="^${target}$" -fuzztime=30s ./internal/check
+          done
+          go test -count=1 -fuzz='^FuzzParseConfig$' -fuzztime=30s ./internal/config
