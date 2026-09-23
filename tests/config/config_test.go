@@ -41,6 +41,36 @@ func TestLoadConfigHappyPath(t *testing.T) {
 	if len(group.Outputs) != 1 || group.Outputs[0] != "generated/hello.txt" {
 		t.Fatalf("outputs = %v", group.Outputs)
 	}
+	if group.Inputs != nil {
+		t.Fatalf("inputs = %v, want none", group.Inputs)
+	}
+}
+
+func TestLoadConfigInputs(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	configPath := filepath.Join(root, "genguard.yaml")
+	content := "groups:\n" +
+		"  - name: sqlc\n" +
+		"    command: sqlc generate\n" +
+		"    inputs:\n" +
+		"      - queries/\n" +
+		"      - sqlc.yaml\n" +
+		"      - '   '\n" +
+		"    outputs:\n" +
+		"      - internal/db/\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(cfg.Groups[0].Inputs, ",")
+	if got != "queries/,sqlc.yaml" {
+		t.Fatalf("inputs = %q", got)
+	}
 }
 
 func TestLoadConfigAcceptsGenguardYml(t *testing.T) {
@@ -164,12 +194,56 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 			"no usable paths",
 		},
 		{
+			"groups:\n  - command: python3 scripts/gen.py\n    outputs: generated/\n",
+			"'outputs' must be a list",
+		},
+		{
+			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n      - null\n",
+			"groups[0].outputs[1] must be a string",
+		},
+		{
+			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - 1\n",
+			"groups[0].outputs[0] must be a string",
+		},
+		{
+			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    inputs:\n      - true\n",
+			"groups[0].inputs[0] must be a string",
+		},
+		{
+			"groups:\n  - name: 1\n    command: python3 scripts/gen.py\n    outputs:\n      - generated/\n",
+			"groups[0].name must be a string",
+		},
+		{
 			"clean: 1\ngroups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n",
 			"clean must be a boolean",
 		},
 		{
 			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    clean: 1\n",
 			"groups[0].clean",
+		},
+		{
+			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    inputs: []\n",
+			"non-empty 'inputs' list",
+		},
+		{
+			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    inputs:\n",
+			"non-empty 'inputs' list",
+		},
+		{
+			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    inputs:\n      - '  '\n",
+			"no usable paths",
+		},
+		{
+			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    inputs: queries/\n",
+			"'inputs' must be a list",
+		},
+		{
+			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    inptus:\n      - queries/\n",
+			`unknown key "inptus"`,
+		},
+		{
+			"typo: true\ngroups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n",
+			`genguard.yaml: unknown key "typo"`,
 		},
 	}
 	for _, tc := range cases {

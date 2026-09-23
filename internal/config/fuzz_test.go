@@ -46,6 +46,11 @@ func FuzzParseConfig(f *testing.F) {
 					t.Fatalf("group %d has a blank output %q", i, output)
 				}
 			}
+			for _, input := range group.Inputs {
+				if strings.TrimSpace(input) == "" {
+					t.Fatalf("group %d has a blank input %q", i, input)
+				}
+			}
 		}
 	})
 }

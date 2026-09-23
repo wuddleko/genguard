@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -15,6 +16,7 @@ type Group struct {
 	Name    string
 	Command string
 	Outputs []string
+	Inputs  []string
 	Clean   bool
 }
 
@@ -113,6 +115,10 @@ func parseConfig(path string, data []byte) (Config, error) {
 		return Config{}, fmt.Errorf("%s must be a mapping", path)
 	}
 
+	if err := rejectUnknownKeys(raw, []string{"groups", "clean"}, path); err != nil {
+		return Config{}, err
+	}
+
 	groupsRaw, ok := raw["groups"].([]any)
 	if !ok || len(groupsRaw) == 0 {
 		return Config{}, fmt.Errorf("%s must include a non-empty 'groups' list", path)
@@ -129,10 +135,20 @@ func parseConfig(path string, data []byte) (Config, error) {
 		if !ok {
 			return Config{}, fmt.Errorf("groups[%d] must be a mapping", index)
 		}
+		loc := fmt.Sprintf("groups[%d]", index)
+		if err := rejectUnknownKeys(groupMap, []string{"name", "command", "outputs", "inputs", "clean"}, loc); err != nil {
+			return Config{}, err
+		}
 
-		name := fmt.Sprintf("groups[%d]", index)
-		if value, ok := groupMap["name"].(string); ok && value != "" {
-			name = value
+		name := loc
+		if rawName, exists := groupMap["name"]; exists && rawName != nil {
+			value, ok := rawName.(string)
+			if !ok {
+				return Config{}, fmt.Errorf("%s.name must be a string", loc)
+			}
+			if value != "" {
+				name = value
+			}
 		}
 
 		command, ok := groupMap["command"].(string)
@@ -140,20 +156,13 @@ func parseConfig(path string, data []byte) (Config, error) {
 			return Config{}, fmt.Errorf("groups[%d] requires a non-empty 'command' string", index)
 		}
 
-		outputsRaw, ok := groupMap["outputs"].([]any)
-		if !ok || len(outputsRaw) == 0 {
-			return Config{}, fmt.Errorf("groups[%d] requires a non-empty 'outputs' list", index)
+		outputs, err := requiredPaths(groupMap, "outputs", loc)
+		if err != nil {
+			return Config{}, err
 		}
-
-		outputs := make([]string, 0, len(outputsRaw))
-		for _, entry := range outputsRaw {
-			value := strings.TrimSpace(fmt.Sprint(entry))
-			if value != "" {
-				outputs = append(outputs, value)
-			}
-		}
-		if len(outputs) == 0 {
-			return Config{}, fmt.Errorf("groups[%d] 'outputs' has no usable paths", index)
+		inputs, err := optionalPaths(groupMap, "inputs", loc)
+		if err != nil {
+			return Config{}, err
 		}
 
 		clean := defaultClean.value
@@ -169,11 +178,74 @@ func parseConfig(path string, data []byte) (Config, error) {
 			Name:    name,
 			Command: command,
 			Outputs: outputs,
+			Inputs:  inputs,
 			Clean:   clean,
 		})
 	}
 
 	return Config{Path: path, Groups: groups}, nil
+}
+
+func rejectUnknownKeys(m map[string]any, known []string, loc string) error {
+	allow := make(map[string]struct{}, len(known))
+	for _, key := range known {
+		allow[key] = struct{}{}
+	}
+	var extra []string
+	for key := range m {
+		if _, ok := allow[key]; !ok {
+			extra = append(extra, key)
+		}
+	}
+	if len(extra) == 0 {
+		return nil
+	}
+	sort.Strings(extra)
+	return fmt.Errorf("%s: unknown key %q", loc, extra[0])
+}
+
+func requiredPaths(m map[string]any, key, loc string) ([]string, error) {
+	raw, ok := m[key]
+	if !ok || raw == nil {
+		return nil, fmt.Errorf("%s requires a non-empty '%s' list", loc, key)
+	}
+	return pathsFrom(raw, key, loc)
+}
+
+func optionalPaths(m map[string]any, key, loc string) ([]string, error) {
+	raw, ok := m[key]
+	if !ok {
+		return nil, nil
+	}
+	if raw == nil {
+		return nil, fmt.Errorf("%s requires a non-empty '%s' list", loc, key)
+	}
+	return pathsFrom(raw, key, loc)
+}
+
+func pathsFrom(raw any, key, loc string) ([]string, error) {
+	entries, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s '%s' must be a list", loc, key)
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("%s requires a non-empty '%s' list", loc, key)
+	}
+	paths := make([]string, 0, len(entries))
+	for i, entry := range entries {
+		value, ok := entry.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s.%s[%d] must be a string", loc, key, i)
+		}
+		value = strings.TrimSpace(value)
+		if value != "" {
+			paths = append(paths, value)
+		}
+	}
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("%s '%s' has no usable paths", loc, key)
+	}
+	return paths, nil
 }
 
 func normalizeRoot(parsed any) any {
