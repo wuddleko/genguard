@@ -31,6 +31,13 @@ func TestConfigRelativeGitPath(t *testing.T) {
 	}
 }
 
+func TestConfigRelativeGitPathRejectsAbsolutePrefix(t *testing.T) {
+	_, err := configRelativeGitPath("/no/such/prefix/", "generated/hello.txt")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
 func TestParseGitNameList(t *testing.T) {
 	tests := []struct {
 		name string

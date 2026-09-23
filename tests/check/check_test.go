@@ -2302,6 +2302,9 @@ func TestSinceRunsChangedInput(t *testing.T) {
 	assertGroupStatus(t, result, "sqlc", check.GroupOK)
 	assertGroupStatus(t, result, "protobuf", check.GroupSkipped)
 	assertGroupStatus(t, result, "plain", check.GroupOK)
+	if result.ExitCode() != 0 {
+		t.Fatalf("exit = %d, want 0", result.ExitCode())
+	}
 	if !markerExists(root, "sqlc-ran") {
 		t.Fatal("changed input did not run sqlc")
 	}
@@ -2328,6 +2331,12 @@ func TestSinceRunsHandEditedOutput(t *testing.T) {
 		t.Fatalf("drifts = %+v", sqlc.Drifts)
 	}
 	assertGroupStatus(t, result, "protobuf", check.GroupSkipped)
+	if result.ExitCode() != 1 {
+		t.Fatalf("exit = %d, want 1", result.ExitCode())
+	}
+	if !strings.Contains(strings.Join(result.SummaryLines(), "\n"), "  protobuf: skipped") {
+		t.Fatal("skipped group was not labeled skipped")
+	}
 	if !markerExists(root, "sqlc-ran") || markerExists(root, "proto-ran") {
 		t.Fatal("output edit did not select only sqlc")
 	}
@@ -2367,11 +2376,17 @@ func TestCheckWithoutSinceRunsEveryGroup(t *testing.T) {
 	if !markerExists(root, "sqlc-ran") || !markerExists(root, "proto-ran") || !markerExists(root, "plain-ran") {
 		t.Fatal("check without --since skipped a group")
 	}
+	if result.ExitCode() != 0 {
+		t.Fatalf("exit = %d, want 0", result.ExitCode())
+	}
 
 	blank := mustCheckSince(t, root, "")
 	assertGroupStatus(t, blank, "sqlc", check.GroupOK)
 	assertGroupStatus(t, blank, "protobuf", check.GroupOK)
 	assertGroupStatus(t, blank, "plain", check.GroupOK)
+	if blank.ExitCode() != 0 {
+		t.Fatalf("exit = %d, want 0", blank.ExitCode())
+	}
 }
 
 func TestSinceBadRef(t *testing.T) {

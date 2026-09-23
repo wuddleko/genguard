@@ -9,6 +9,10 @@ import (
 var version = "dev"
 
 func main() {
+	os.Exit(run(os.Args[1:]))
+}
+
+func run(args []string) int {
 	cli.Version = version
-	os.Exit(cli.Run(os.Args[1:]))
+	return cli.Run(args)
 }

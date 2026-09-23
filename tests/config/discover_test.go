@@ -292,6 +292,35 @@ func TestFindAllRejectsFileRoot(t *testing.T) {
 	}
 }
 
+func TestFindAllDanglingSymlinkRoot(t *testing.T) {
+	t.Parallel()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := config.FindAll(link)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestDiscoveryWhenWorkingDirectoryIsGone(t *testing.T) {
+	testutil.WithoutWorkingDirectory(t)
+
+	if _, err := config.FindAll(""); err == nil {
+		t.Fatal("FindAll empty start")
+	}
+	if _, err := config.FindAll("repo"); err == nil {
+		t.Fatal("FindAll relative start")
+	}
+	if _, err := config.FindConfig(""); err == nil {
+		t.Fatal("FindConfig empty start")
+	}
+	if _, err := config.FindConfig("repo"); err == nil {
+		t.Fatal("FindConfig relative start")
+	}
+}
+
 func TestFindAllEmptyStartUsesCwd(t *testing.T) {
 	root := t.TempDir()
 	if _, err := testutil.WriteGenguardConfig(root, "gen/", "", "", nil); err != nil {

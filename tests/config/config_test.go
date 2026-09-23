@@ -182,6 +182,8 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 		content string
 		match   string
 	}{
+		{"true\n", "must be a mapping"},
+		{"hello\n", "must be a mapping"},
 		{"[]", "non-empty"},
 		{"groups: []", "non-empty"},
 		{"groups:\n  - not-a-mapping\n", "mapping"},
@@ -436,6 +438,47 @@ func TestFindConfigRejectsBothNames(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "both genguard.yaml and genguard.yml") || !strings.Contains(err.Error(), root) {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestFindConfigIgnoresDirectoryNamedYaml(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "genguard.yaml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(root, "gen/", "", "genguard.yml", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := config.FindConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found != filepath.Join(root, "genguard.yml") {
+		t.Fatalf("found = %q", found)
+	}
+}
+
+func TestFindConfigStatError(t *testing.T) {
+	root := t.TempDir()
+	if _, err := testutil.WriteGenguardConfig(root, "gen/", "", "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+	if f, err := os.Open(root); err == nil {
+		f.Close()
+		t.Skip("directory permissions are not enforced")
+	}
+
+	_, err := config.FindConfig(root)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if os.IsNotExist(err) {
+		t.Fatalf("error = %v, want a stat failure", err)
 	}
 }
 

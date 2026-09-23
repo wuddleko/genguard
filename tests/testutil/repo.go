@@ -52,6 +52,45 @@ func Chdir(t *testing.T, dir string) {
 	})
 }
 
+// WithoutWorkingDirectory moves into a child directory and removes search
+// permission from its parent, so os.Getwd and filepath.Abs of a relative
+// path fail. It restores both when the test ends, and skips when the OS
+// still resolves the working directory.
+func WithoutWorkingDirectory(t *testing.T) {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := t.TempDir()
+	child := filepath.Join(parent, "child")
+	if err := os.Mkdir(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(child); err != nil {
+		t.Fatal(err)
+	}
+	// PWD must not name this directory, or Getwd returns it without asking the OS.
+	t.Setenv("PWD", filepath.Join(parent, "not-the-cwd"))
+	if err := os.Chmod(parent, 0); err != nil {
+		if chdirErr := os.Chdir(wd); chdirErr != nil {
+			t.Fatal(chdirErr)
+		}
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(parent, 0o755); err != nil {
+			t.Error(err)
+		}
+		if err := os.Chdir(wd); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := os.Getwd(); err == nil {
+		t.Skip("working directory still resolves")
+	}
+}
+
 func Git(dir string, args ...string) error {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	cmd.Stdout = os.Stdout

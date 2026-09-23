@@ -100,6 +100,43 @@ func TestCLIInvalidConfigExit2(t *testing.T) {
 	}
 }
 
+func TestCLIEmptyInputsExit2(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "genguard.yaml")
+	content := "groups:\n" +
+		"  - name: sqlc\n" +
+		"    command: \"true\"\n" +
+		"    inputs: []\n" +
+		"    outputs:\n" +
+		"      - generated/\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"check", "--since", "HEAD", "--config", configPath})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "non-empty 'inputs' list") {
+		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
+	}
+}
+
+func TestCLISinceWithoutInputsRuns(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml"), "--since", "HEAD"})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files match the generators.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+}
+
 func TestCLIRunsAllGroupsAfterCommandFailure(t *testing.T) {
 	groups := []testutil.GroupSpec{
 		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}},
@@ -380,6 +417,59 @@ func TestCLIEntryPointVersionLdflags(t *testing.T) {
 	}
 }
 
+func TestCLIRunWithoutArgsPrintsUsage(t *testing.T) {
+	oldOut, oldErr := os.Stdout, os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	os.Stderr = w
+	code := cli.Run(nil)
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = oldOut
+	os.Stderr = oldErr
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if code != 2 {
+		t.Fatalf("code = %d, want 2", code)
+	}
+	if !strings.Contains(buf.String(), "Usage:") || !strings.Contains(buf.String(), "genguard check") {
+		t.Fatalf("output = %q", buf.String())
+	}
+}
+
+func TestCLICheckDiffFailureExit2(t *testing.T) {
+	root := initCLIRepo(t)
+	web := filepath.Join(root, "web")
+	writeCLIConfig(t, web, "web", "printf 'aaa\\n' > out.txt")
+	commitRepo(t, root)
+	failGitDiffIn(t, string(filepath.Separator)+"web")
+
+	stdout, stderr, code := runCLI([]string{"check", "--config", filepath.Join(web, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2\nstdout = %q\nstderr:\n%s", code, stdout, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	for _, part := range []string{"Summary", "[modified] web: out.txt", "error: forced diff failure"} {
+		if !strings.Contains(stderr, part) {
+			t.Fatalf("stderr missing %q:\n%s", part, stderr)
+		}
+	}
+	if strings.Contains(stderr, "generated path drifted") {
+		t.Fatalf("stderr = %q, want the diff error to win", stderr)
+	}
+}
+
 func TestCLIHelp(t *testing.T) {
 	_, stderr, code := runCLI([]string{"--help"})
 	if code != 0 {
@@ -389,6 +479,9 @@ func TestCLIHelp(t *testing.T) {
 		t.Fatalf("stderr = %q", stderr)
 	}
 	if !strings.Contains(stderr, "genguard check --all") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "--since") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 	if !strings.Contains(stderr, "genguard version") {

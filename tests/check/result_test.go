@@ -166,6 +166,36 @@ func TestSummaryLine(t *testing.T) {
 			want: "  greeting: drift (1 modified, 1 other)",
 		},
 		{
+			name: "blank kind singular",
+			g: check.GroupResult{
+				Name:   "greeting",
+				Status: check.GroupDrift,
+				Drifts: []check.Drift{{Kind: "", Path: "a"}},
+			},
+			want: "  greeting: drift (1 file)",
+		},
+		{
+			name: "blank kind plural",
+			g: check.GroupResult{
+				Name:   "greeting",
+				Status: check.GroupDrift,
+				Drifts: []check.Drift{{Kind: "", Path: "a"}, {Kind: "", Path: "b"}},
+			},
+			want: "  greeting: drift (2 files)",
+		},
+		{
+			name: "blank kind after known kinds",
+			g: check.GroupResult{
+				Name:   "greeting",
+				Status: check.GroupDrift,
+				Drifts: []check.Drift{
+					{Kind: "modified", Path: "a"},
+					{Kind: "", Path: "b"},
+				},
+			},
+			want: "  greeting: drift (1 modified, 1 file)",
+		},
+		{
 			name: "zero files",
 			g:    check.GroupResult{Name: "greeting", Status: check.GroupDrift},
 			want: "  greeting: drift (0 files)",

@@ -88,6 +88,8 @@ error: bad --since ref: fatal: Not a valid object name not-a-ref
 
 ## Exit codes
 
+A skip does not add a code. A matching run is `0`, including when some groups were skipped. Drift is `1`. A bad `--since` ref, an empty `inputs` list, and a failed command are `2`.
+
 | Exit code | Meaning |
 |---|---|
 | `0` | Generated files match |
