@@ -154,3 +154,26 @@ func MakeRepo(tmp string, outputs, configName string, groups []GroupSpec) (strin
 	}
 	return root, nil
 }
+
+// SkipIfFilenameRejected skips when dir cannot hold a file named name.
+// Windows rejects names that contain a newline.
+func SkipIfFilenameRejected(t *testing.T, dir, name string) {
+	t.Helper()
+	if strings.ContainsAny(name, `/\`) {
+		t.Fatalf("name must be a single path element, got %q", name)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, name)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Skipf("filesystem rejects filename %q: %v", name, err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+}

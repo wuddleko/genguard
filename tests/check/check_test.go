@@ -573,6 +573,7 @@ func TestDriftForGroupHandlesNewlineInFilename(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	testutil.SkipIfFilenameRejected(t, filepath.Dir(path), "hello\nworld.txt")
 	if err := os.WriteFile(path, []byte("v1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

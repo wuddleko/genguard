@@ -2,9 +2,12 @@ package cli_test
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,6 +15,13 @@ import (
 	"github.com/wuddleko/genguard/internal/cli"
 	"github.com/wuddleko/genguard/tests/testutil"
 )
+
+func TestMain(m *testing.M) {
+	if os.Getenv("GENGUARD_GIT_WRAP") == "1" {
+		os.Exit(gitWrapMain())
+	}
+	os.Exit(m.Run())
+}
 
 func runCLI(args []string) (stdout, stderr string, code int) {
 	var outBuf, errBuf bytes.Buffer
@@ -1041,6 +1051,16 @@ func failGitDiffIn(t *testing.T, suffix string) {
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
+	if runtime.GOOS == "windows" {
+		installWindowsGitShim(t, bin, real, suffix)
+	} else {
+		installUnixGitShim(t, bin, real, suffix)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func installUnixGitShim(t *testing.T, bin, real, suffix string) {
+	t.Helper()
 	script := "#!/bin/sh\n" +
 		"root=\nprev=\nnocolor=0\n" +
 		"for arg in \"$@\"; do\n" +
@@ -1064,7 +1084,76 @@ func failGitDiffIn(t *testing.T, suffix string) {
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// Windows resolves git.exe on PATH and will not run an extensionless script.
+// The shim is a copy of this test binary.
+func installWindowsGitShim(t *testing.T, bin, real, suffix string) {
+	t.Helper()
+	src, err := os.Open(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	dstPath := filepath.Join(bin, "git.exe")
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		t.Fatal(err)
+	}
+	if err := dst.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GENGUARD_GIT_WRAP", "1")
+	t.Setenv("GENGUARD_REAL_GIT", real)
+	t.Setenv("GENGUARD_FAIL_GIT_SUFFIX", suffix)
+}
+
+func gitWrapMain() int {
+	args := os.Args[1:]
+	root := ""
+	prev := ""
+	noColor := false
+	for _, arg := range args {
+		if prev == "-C" {
+			root = arg
+		}
+		if arg == "--no-color" {
+			noColor = true
+		}
+		prev = arg
+	}
+	suffix := os.Getenv("GENGUARD_FAIL_GIT_SUFFIX")
+	if noColor && suffix != "" && strings.HasSuffix(root, suffix) {
+		_, _ = os.Stderr.WriteString("forced diff failure\n")
+		return 129
+	}
+	real := os.Getenv("GENGUARD_REAL_GIT")
+	cmd := exec.Command(real, args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	env := make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "GENGUARD_GIT_WRAP=") {
+			continue
+		}
+		env = append(env, entry)
+	}
+	cmd.Env = env
+	err := cmd.Run()
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	_, _ = os.Stderr.WriteString(err.Error() + "\n")
+	return 1
 }
 
 func shellQuote(s string) string {

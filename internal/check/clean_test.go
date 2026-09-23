@@ -1045,6 +1045,7 @@ func TestCleanOutputsGlobNewlineInFilename(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(hello), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	testutil.SkipIfFilenameRejected(t, filepath.Dir(hello), "hello\nworld.txt")
 	if err := os.WriteFile(hello, []byte("gone\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

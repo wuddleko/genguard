@@ -221,17 +221,15 @@ func TestFindAllFollowsSymlinkRoot(t *testing.T) {
 }
 
 func TestFindAllReturnsAbsolutePaths(t *testing.T) {
-	t.Parallel()
 	root := t.TempDir()
 	if _, err := testutil.WriteGenguardConfig(root, "gen/", "", "", nil); err != nil {
 		t.Fatal(err)
 	}
 
-	rel, err := filepath.Rel(mustGetwd(t), root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	found, err := config.FindAll(rel)
+	// Start beside the temp directory so the relative path stays on one drive.
+	// filepath.Rel cannot cross Windows drive letters.
+	testutil.Chdir(t, filepath.Dir(root))
+	found, err := config.FindAll(filepath.Base(root))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,8 +239,16 @@ func TestFindAllReturnsAbsolutePaths(t *testing.T) {
 	if !filepath.IsAbs(found[0]) {
 		t.Fatalf("path is not absolute: %q", found[0])
 	}
-	if found[0] != filepath.Join(root, "genguard.yaml") {
-		t.Fatalf("found = %q", found[0])
+	got, err := filepath.EvalSymlinks(found[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(filepath.Join(root, "genguard.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("found = %q, want %q", found[0], filepath.Join(root, "genguard.yaml"))
 	}
 }
 
@@ -310,13 +316,4 @@ func assertPaths(t *testing.T, got, want []string) {
 			t.Fatalf("found[%d] = %q, want %q\nfull: %v", i, got[i], want[i], got)
 		}
 	}
-}
-
-func mustGetwd(t *testing.T) string {
-	t.Helper()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return wd
 }
