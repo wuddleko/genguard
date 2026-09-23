@@ -190,4 +190,4 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-The [release workflow](../.github/workflows/release.yml) publishes archives for Linux and macOS (`amd64`, `arm64`) and Windows (`amd64`), plus `checksums.txt`. Each archive includes the binary, `LICENSE`, `README.md`, `docs/ci.md`, `genguard.example.yaml`, and `examples/`. Archive filenames use the tag without the `v` (`genguard_0.2.0_linux_amd64.tar.gz`). On Windows the binary is `genguard.exe`; group commands use `sh`/`bash` when present, otherwise `%COMSPEC% /C` (typically `cmd.exe`).
+The [release workflow](../.github/workflows/release.yml) publishes archives for Linux and macOS (`amd64`, `arm64`) and Windows (`amd64`), plus `checksums.txt`. Each archive includes the binary, `LICENSE`, `README.md`, `SECURITY.md`, `docs/ci.md`, `genguard.example.yaml`, and `examples/`. Archive filenames use the tag without the `v` (`genguard_0.2.0_linux_amd64.tar.gz`). On Windows the binary is `genguard.exe`; group commands use `sh`/`bash` when present, otherwise `%COMSPEC% /C` (typically `cmd.exe`).

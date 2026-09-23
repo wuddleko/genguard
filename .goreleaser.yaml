@@ -36,6 +36,7 @@ archives:
     files:
       - LICENSE
       - README.md
+      - SECURITY.md
       - genguard.example.yaml
       - src: docs/ci.md
         dst: docs

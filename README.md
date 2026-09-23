@@ -1,14 +1,12 @@
 # genguard
 
-**Keep generated files honest in CI.**
+`genguard check` runs your code generators and fails if the result doesn't match the files already in git. A hand-edited `.pb.go` or a schema change nobody regenerated shows up as a diff. With `clean: true`, genguard deletes the declared outputs first, so a file the generator stopped writing fails the check too.
 
-`genguard check` re-runs your codegen commands and fails if the result does not match what is already committed. Hand-edited generated files, stale commits after a schema change, or a forgotten `make generate` — all caught before merge.
+The command can be anything you can run in a shell. `buf generate`, `sqlc generate`, `go generate`, a Make target, your own script.
 
-It works with any generator: protobuf, OpenAPI, sqlc, `go generate`, Make targets, or anything else you can run in a shell.
+## Run it
 
-## Quick start
-
-1. Add a `genguard.yaml` (or `genguard.yml`) beside the directory that holds generated files (or copy a template from [examples/](examples/README.md)):
+Put a `genguard.yaml` (or `genguard.yml`) next to the generated files, outside the output directory. Templates for the usual tools are in [examples/](examples/README.md).
 
 ```yaml
 groups:
@@ -18,13 +16,13 @@ groups:
       - gen/
 ```
 
-2. From a git work tree, run the check locally or in CI:
+Then, from a git checkout:
 
 ```bash
 genguard check
 ```
 
-If outputs drift, `genguard check` prints what changed and exits non-zero:
+A match prints `Generated files match the generators.` and exits 0. Drift prints a summary, the paths, and a diff, then exits 1:
 
 ```
 Summary
@@ -39,52 +37,19 @@ diff --git a/gen/foo.pb.go ...
 error: 1 generated path drifted; commit the generator output or fix the command
 ```
 
-Other invocations:
+Regenerate and commit. genguard leaves the tree as the generator wrote it and prints the diff. A generated file that is only staged still fails until that commit exists.
 
 ```bash
-genguard check [-c|--config path/to/genguard.yaml]
-genguard check --all
+genguard check -c path/to/genguard.yaml   # same as --config
+genguard check --all                      # every config in the repo
 genguard version
 ```
 
-## How it works
-
-Groups run in order. Every group runs even when an earlier one fails or drifts. On failure, genguard prints a **Summary** (one line per group, with drift kinds), then **Drift** details and diffs.
-
-For each group, `genguard check`:
-
-1. If `clean` is true, deletes the declared `outputs` (a directory is recreated empty; a glob deletes only the files git matches)
-2. Runs `command` from the directory that contains the config file (`sh -c` on Unix)
-3. Compares git HEAD to the working tree under the declared `outputs`
-4. Records OK, drift, or error for that group
-
-This is a **reproducibility check**: it asks whether re-running the generator on the current branch reproduces what is already committed. It does not compare your branch to a PR target branch or merge base.
-
-Later groups see the working tree as earlier groups left it. When an earlier group fails after `clean`, paths it wiped and a later group leaves untouched stay out of that later group's drift. A later command that writes those paths is checked as usual. Prefer disjoint `outputs` so a group that drifts cannot change the tree the next group checks. After every group has run, genguard exits `1` if any group drifted or `2` if any group had a command error (command errors take priority).
-
-The working tree is left as the generators left it — same idea as `make generate && git diff --exit-code HEAD`, but with explicit output paths and clearer errors. The check does not run `git add`. Staged generated files still fail until they are committed.
-
-Generated paths must be tracked. Gitignored files under `outputs` are not reported as untracked.
-
-On Windows, `command` runs with `sh -c` or `bash -c` when those shells are on `PATH` (Git Bash), otherwise `%COMSPEC% /C` (typically `cmd.exe`). POSIX recipes need a POSIX shell.
-
-| Drift kind | What it means |
-|---|---|
-| `modified` | A tracked generated file exists and changed |
-| `untracked` | The generator wrote a file that is not in git (and is not gitignored) |
-| `missing` | A tracked file under `outputs` was deleted, or a listed **file** path does not exist after the command. Directory and glob specs (`gen/`, `*.go`) are not themselves reported as missing. |
-
-| Exit code | Meaning |
-|---|---|
-| `0` | Generated files match |
-| `1` | Drift detected |
-| `2` | Config, git, or generator command error |
+The diff is against `HEAD` in the checkout you just made. On a pull request that is the PR branch tip. genguard is asking whether this commit's outputs still match this commit's inputs.
 
 ## Install
 
-### Prebuilt binary (recommended for CI)
-
-Download an archive from [GitHub Releases](https://github.com/wuddleko/genguard/releases) and put `genguard` on your `PATH`. Release archives are named with the version **without** the `v` prefix; the download URL still uses the git tag. Each release also publishes `checksums.txt`.
+Download an archive from [GitHub Releases](https://github.com/wuddleko/genguard/releases). The filename drops the leading `v`; the URL keeps the tag. Each release also has `checksums.txt`.
 
 ```bash
 GENGUARD_TAG=v0.2.0
@@ -96,61 +61,78 @@ tar xzf genguard.tar.gz genguard
 sudo install genguard /usr/local/bin/genguard
 ```
 
-Set `GENGUARD_TAG` to a genguard release. Adjust OS and arch in the filename (`darwin_arm64`, `linux_amd64`, `windows_amd64.zip`, etc.). On Windows the binary is `genguard.exe`.
+Change the archive name for the machine (`darwin_arm64`, `linux_amd64`, `windows_amd64.zip`, and so on). On Windows the binary is `genguard.exe`.
 
-### From source
-
-Requires Go 1.22+.
+From source, with Go 1.22+:
 
 ```bash
 make install
 # or, from this repository
 go install ./cmd/genguard
-# or, from a published module version
+# or a published module version
 go install github.com/wuddleko/genguard/cmd/genguard@v0.2.0
 ```
 
-Ensure `$(go env GOPATH)/bin` is on your `PATH`.
+`$(go env GOPATH)/bin` has to be on your `PATH`.
 
-## Configuration
+## Config
 
-Place `genguard.yaml` or `genguard.yml` beside the directory that holds generated files, or pass an explicit path:
+With no `--config`, genguard walks up from the current directory until it finds `genguard.yaml` or `genguard.yml`. That file has to sit inside a git work tree. A directory gets one of those names. Both files in the same directory make `genguard check` and `genguard check --all` exit 2. `--config` still checks the path you gave it.
 
-```bash
-genguard check --config path/to/genguard.yaml
-genguard check -c path/to/genguard.yaml
-```
+`genguard check --all` runs every config under the repository root, in path order, on the same working tree. It skips directories named `.git`, `vendor`, and `node_modules`. It does not read `.gitignore`, so a config inside an ignored directory still runs. A clean run prints each config path and a totals line. `--all` and `--config` are separate invocations.
 
-If you omit `--config` / `-c`, genguard walks up from the current directory until it finds `genguard.yaml` or `genguard.yml`. The directory that contains the config must be a git work tree (or inside one). A directory holds one of those names. If both files are present, `genguard check` and `genguard check --all` exit `2`. `--config` still checks the file you name.
+A group has:
 
-`genguard check --all` checks every `genguard.yaml` and `genguard.yml` under the git repository root, in path order, on the shared working tree. It skips directories named `.git`, `vendor`, and `node_modules`. It does not read `.gitignore`, so a config inside an ignored directory still runs. Nested configs in different directories both run. `--all` cannot be combined with `--config` / `-c`. If none are found, or a directory contains both names, the command exits `2`. A passing run prints each config path and a totals line.
+- **`name`** — label in the output. Optional. The fallback is `groups[0]`, `groups[1]`, and so on.
+- **`command`** — the shell command. genguard runs it with `sh -c` from the directory that contains the config, and it will run whatever that command is. On Windows it uses `sh` or `bash` when one of those is on `PATH` (Git Bash); otherwise it uses `cmd.exe`. A POSIX recipe needs a POSIX shell.
+- **`outputs`** — git pathspecs, relative to the config file, for the files to compare.
+- **`clean`** — optional, default `false`. Delete those outputs before the command runs. You can also set `clean` once at the top of the file and every group inherits it.
 
-Configs run sequentially on the shared working tree. A path left untouched after an earlier config fails following `clean` stays out of later configs' drift. Prefer disjoint `outputs` across configs.
+After the command, genguard compares `HEAD` to the working tree under `outputs`:
 
-Each group has:
+| What you see | What happened |
+|---|---|
+| `modified` | A tracked file is still there, and it changed |
+| `untracked` | The generator wrote a file git does not know about, and the file is not gitignored |
+| `missing` | A tracked file under `outputs` is gone, or a **file** you listed is not there after the command. A directory or a glob (`gen/`, `*.go`) is not, by itself, a missing path |
 
-- **`name`** — optional; label used in error output. Defaults to `groups[N]`.
-- **`command`** — shell command that regenerates files (run from the config directory via `sh -c` on Unix). Treat it like CI workflow code: genguard executes whatever the config declares.
-- **`outputs`** — git pathspecs, relative to the config file's directory, for generated files to check
-- **`clean`** — optional; default `false`. If `true`, delete those outputs before running `command`, so files the generator no longer writes fail the check. Also valid at the top level of the config as the default for every group.
+Generated paths have to be tracked. Gitignored files under `outputs` are left out of the report.
 
-Without `clean`, a generator that stops producing `old.go` leaves the stale file in place and a plain `git diff` may not notice. With `clean: true`, genguard deletes `gen/` first, re-runs the generator, and reports the missing `old.go` as drift.
+### `clean`
 
-`clean` is destructive. A directory output is removed and recreated empty. A file output is removed. A glob output removes the tracked and untracked files git matches (ignored files stay), so a package directory can list `*_queries.sql.go` without deleting hand-written files next to them. It refuses `.`, `..`, absolute paths, paths that escape the config directory, symlinks, and any tree that would delete `.git` or the config file (`genguard.yaml` / `genguard.yml`). Every output is checked before anything is deleted, so a refused path leaves the tree unchanged. If `command` fails after a wipe, the error says so; outputs are not restored.
+Turn this on when a generator might stop emitting a file. Without it, `old.go` just sits there and a diff never mentions it. With `clean: true`, genguard deletes the declared outputs, runs the command, and reports `old.go` as missing if it did not come back.
 
-See [genguard.example.yaml](genguard.example.yaml) and the stack-specific templates in [examples/](examples/README.md):
+The delete is real.
 
-- [go-generate.yaml](examples/go-generate.yaml) — `go generate ./...`
-- [buf.yaml](examples/buf.yaml) — protobuf via `buf generate`
-- [openapi.yaml](examples/openapi.yaml) — OpenAPI clients and types
-- [sqlc.yaml](examples/sqlc.yaml) — SQL → Go via `sqlc generate`
-- [make.yaml](examples/make.yaml) — Makefile-driven codegen
+- A directory output is removed and recreated empty.
+- A file output is removed.
+- A glob removes the tracked and untracked files git matches, and leaves ignored files alone. `*_queries.sql.go` can live next to Go you wrote by hand.
 
-These templates are config only. genguard does not ship generators; it runs whatever your `command` declares.
+It will refuse `.`, `..`, absolute paths, anything that escapes the config directory, symlinks, and any delete that would take `.git` or the config file with it. Every output is checked before anything is removed, so one refused path leaves the tree as it was. If the command fails after a wipe, the error says the outputs are already gone. They are not put back.
+
+Starting points: [genguard.example.yaml](genguard.example.yaml) and the templates in [examples/](examples/README.md) (`go generate`, buf, OpenAPI, sqlc, Make). Those files are config only. The generator stays yours.
+
+## More than one group
+
+Groups run in the order you listed them, and every group runs. Drift or a command error in the first one still lets the rest go. You get a Summary line per group, then the Drift paths and diffs.
+
+Each group sees the working tree the previous group left behind. Give them outputs that don't overlap, or a drift in one group changes what the next group is judging. `genguard check --all` follows the same rule across config files.
+
+If an earlier group has `clean: true` and then the command fails, paths it wiped and a later group never writes stay out of that later group's drift. A later command that does write them is checked as usual.
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Generated files match |
+| `1` | Drift |
+| `2` | Config, git, or the generator command failed. A command error wins over drift |
+
+## Security
+
+What a run is allowed to do, and how to report a vulnerability: [SECURITY.md](SECURITY.md).
 
 ## CI
 
-GitHub Actions snippets, monorepo patterns, and tool-specific setup: [docs/ci.md](docs/ci.md).
+GitHub Actions snippets, monorepo layouts, and per-tool setup are in [docs/ci.md](docs/ci.md).
 
 ## Development
 
@@ -159,22 +141,8 @@ make test
 make lint   # go vet ./...
 ```
 
-Tests require `git` and `python3` (used by the test fixtures' sample generator).
-
-## What genguard is for
-
-genguard is a small, language-agnostic guardrail: declare how files are generated, declare where they land, and let CI prove they stay in sync.
-
-You could run `make generate && git diff --exit-code HEAD`, but genguard adds:
-
-- **Scoped outputs** — check only the paths you declare, not the whole repo
-- **Multiple generators** — one config, one CI step, per-group status
-- **Missing and untracked detection** — not just modified files
-- **Stale artifact detection** — with `clean: true`, files a generator stopped writing are caught
-- **Structured CI output** — summary, drift kinds, and diffs in one place
-
-It is not a replacement for secret scanning or tool-specific commands like `sqlc diff` or `buf breaking`. Those solve different problems. genguard is the generic "re-run the generator and compare git" step that fits any stack.
+Tests need `git` and `python3`. The fixtures use `python3` as a stand-in generator.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
