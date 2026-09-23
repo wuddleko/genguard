@@ -177,6 +177,38 @@ func TestRunResultSuccessLines(t *testing.T) {
 	}
 }
 
+func TestRunResultSuccessLinesLabelsSkippedGroups(t *testing.T) {
+	t.Parallel()
+	repo := filepath.Join(string(filepath.Separator), "repo")
+	run := check.RunResult{RepoRoot: repo, Configs: []check.ConfigRun{
+		{Path: filepath.Join(repo, "api", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
+			{Name: "api", Status: check.GroupSkipped},
+		}}},
+		{Path: filepath.Join(repo, "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
+			{Name: "sqlc", Status: check.GroupOK},
+			{Name: "protobuf", Status: check.GroupSkipped},
+		}}},
+	}}
+	got := strings.Join(run.SuccessLines(), "\n")
+	want := strings.Join([]string{
+		filepath.Join("api", "genguard.yaml"),
+		"genguard.yaml",
+		"2 configs: 2 ok, 0 drift, 0 error",
+		"",
+		filepath.Join("api", "genguard.yaml"),
+		"  api: skipped",
+		"1 group: 0 ok, 0 drift, 0 error, 1 skipped",
+		"",
+		"genguard.yaml",
+		"  sqlc: OK",
+		"  protobuf: skipped",
+		"2 groups: 1 ok, 0 drift, 0 error, 1 skipped",
+	}, "\n")
+	if got != want {
+		t.Fatalf("SuccessLines =\n%s\nwant\n%s", got, want)
+	}
+}
+
 func TestRunResultSuccessLinesSingularAndOutsideRepo(t *testing.T) {
 	t.Parallel()
 	repo := filepath.Join(string(filepath.Separator), "repo")

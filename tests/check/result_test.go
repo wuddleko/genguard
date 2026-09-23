@@ -118,6 +118,11 @@ func TestSummaryLine(t *testing.T) {
 			want: "  greeting: OK",
 		},
 		{
+			name: "skipped",
+			g:    check.GroupResult{Name: "protobuf", Status: check.GroupSkipped},
+			want: "  protobuf: skipped",
+		},
+		{
 			name: "one modified",
 			g: check.GroupResult{
 				Name:   "greeting",
@@ -253,6 +258,15 @@ func TestSummaryLinesCount(t *testing.T) {
 	}}
 	lines = one.SummaryLines()
 	if lines[len(lines)-1] != "1 group: 0 ok, 1 drift, 0 error" {
+		t.Fatalf("totals = %q", lines[len(lines)-1])
+	}
+
+	skipped := check.ConfigResult{Groups: []check.GroupResult{
+		{Name: "sqlc", Status: check.GroupOK},
+		{Name: "protobuf", Status: check.GroupSkipped},
+	}}
+	lines = skipped.SummaryLines()
+	if lines[len(lines)-1] != "2 groups: 1 ok, 0 drift, 0 error, 1 skipped" {
 		t.Fatalf("totals = %q", lines[len(lines)-1])
 	}
 }

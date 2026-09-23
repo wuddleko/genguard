@@ -8,9 +8,10 @@ import (
 type GroupStatus string
 
 const (
-	GroupOK    GroupStatus = "ok"
-	GroupDrift GroupStatus = "drift"
-	GroupError GroupStatus = "error"
+	GroupOK      GroupStatus = "ok"
+	GroupDrift   GroupStatus = "drift"
+	GroupError   GroupStatus = "error"
+	GroupSkipped GroupStatus = "skipped"
 )
 
 type GroupResult struct {
@@ -52,6 +53,7 @@ func (r ConfigResult) Counts() (ok, drift, errors int) {
 			drift++
 		case GroupError:
 			errors++
+		case GroupSkipped:
 		default:
 			errors++
 		}
@@ -71,6 +73,8 @@ func (g GroupResult) SummaryLine() string {
 			line += "; drift (" + driftKindSummary(g.Drifts) + ")"
 		}
 		return line
+	case GroupSkipped:
+		return fmt.Sprintf("  %s: skipped", g.Name)
 	default:
 		return fmt.Sprintf("  %s: unknown", g.Name)
 	}
@@ -82,14 +86,29 @@ func (r ConfigResult) SummaryLines() []string {
 		lines = append(lines, group.SummaryLine())
 	}
 	ok, drift, errors := r.Counts()
-	lines = append(lines, fmt.Sprintf(
+	line := fmt.Sprintf(
 		"%s: %d ok, %d drift, %d error",
 		countNoun(len(r.Groups), "group", "groups"),
 		ok,
 		drift,
 		errors,
-	))
+	)
+	if n := r.Skipped(); n > 0 {
+		line += ", " + countNoun(n, "skipped", "skipped")
+	}
+	lines = append(lines, line)
 	return lines
+}
+
+// Skipped counts groups left unrun by --since.
+func (r ConfigResult) Skipped() int {
+	n := 0
+	for _, group := range r.Groups {
+		if group.Status == GroupSkipped {
+			n++
+		}
+	}
+	return n
 }
 
 func (r ConfigResult) FinalErrorLine() string {

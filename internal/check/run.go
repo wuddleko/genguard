@@ -86,13 +86,23 @@ func (r RunResult) SummaryLines() []string {
 }
 
 // SuccessLines lists each config path, relative to RepoRoot, then the
-// config-level totals line. Callers print this when ExitCode is 0.
+// config-level totals line. Each config that skipped a group then adds a
+// blank line, its path, and that config's group summary. Callers print
+// this when ExitCode is 0.
 func (r RunResult) SuccessLines() []string {
 	lines := make([]string, 0, len(r.Configs)+1)
 	for _, cfg := range r.Configs {
 		lines = append(lines, displayConfigPath(r.RepoRoot, cfg.Path))
 	}
 	lines = append(lines, r.configStatusLine())
+	for _, cfg := range r.Configs {
+		if cfg.Result.Skipped() == 0 {
+			continue
+		}
+		lines = append(lines, "")
+		lines = append(lines, displayConfigPath(r.RepoRoot, cfg.Path))
+		lines = append(lines, cfg.Result.SummaryLines()...)
+	}
 	return lines
 }
 

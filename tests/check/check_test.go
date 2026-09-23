@@ -2261,3 +2261,515 @@ func TestCheckCleanRefusesGitBelowOutputRoot(t *testing.T) {
 		})
 	}
 }
+
+func TestSinceSkipsUnchangedGroupsAndDoesNotClean(t *testing.T) {
+	root := writeSinceRepo(t)
+	result := mustCheckSince(t, root, "base")
+
+	assertGroupStatus(t, result, "sqlc", check.GroupSkipped)
+	assertGroupStatus(t, result, "protobuf", check.GroupSkipped)
+	assertGroupStatus(t, result, "plain", check.GroupOK)
+	if markerExists(root, "sqlc-ran") || markerExists(root, "proto-ran") {
+		t.Fatal("skipped group ran its command")
+	}
+	if !markerExists(root, "plain-ran") {
+		t.Fatal("group with no inputs did not run")
+	}
+	got, err := os.ReadFile(filepath.Join(root, "gen", "a.pb.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "package gen\n" {
+		t.Fatalf("clean ran on a skipped group: %q", got)
+	}
+	joined := strings.Join(result.SummaryLines(), "\n")
+	if !strings.Contains(joined, "  sqlc: skipped") || !strings.Contains(joined, "  protobuf: skipped") {
+		t.Fatalf("summary = %q", joined)
+	}
+	if !strings.Contains(joined, "3 groups: 1 ok, 0 drift, 0 error, 2 skipped") {
+		t.Fatalf("summary = %q", joined)
+	}
+	if result.ExitCode() != 0 {
+		t.Fatalf("exit = %d", result.ExitCode())
+	}
+}
+
+func TestSinceRunsChangedInput(t *testing.T) {
+	root := writeSinceRepo(t)
+	commitPath(t, root, "queries/q.sql", "select 2;\n")
+
+	result := mustCheckSince(t, root, "base")
+	assertGroupStatus(t, result, "sqlc", check.GroupOK)
+	assertGroupStatus(t, result, "protobuf", check.GroupSkipped)
+	assertGroupStatus(t, result, "plain", check.GroupOK)
+	if !markerExists(root, "sqlc-ran") {
+		t.Fatal("changed input did not run sqlc")
+	}
+	if markerExists(root, "proto-ran") {
+		t.Fatal("unchanged protobuf ran")
+	}
+	if _, err := os.Stat(filepath.Join(root, "gen", "a.pb.go")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSinceRunsHandEditedOutput(t *testing.T) {
+	root := writeSinceRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "internal", "db", "out.txt"), []byte("edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckSince(t, root, "HEAD")
+	sqlc := groupResult(t, result, "sqlc")
+	if sqlc.Status != check.GroupDrift {
+		t.Fatalf("sqlc status = %q, want drift", sqlc.Status)
+	}
+	if len(sqlc.Drifts) != 1 || sqlc.Drifts[0].Kind != "modified" || sqlc.Drifts[0].Path != "internal/db/out.txt" {
+		t.Fatalf("drifts = %+v", sqlc.Drifts)
+	}
+	assertGroupStatus(t, result, "protobuf", check.GroupSkipped)
+	if !markerExists(root, "sqlc-ran") || markerExists(root, "proto-ran") {
+		t.Fatal("output edit did not select only sqlc")
+	}
+}
+
+func TestSinceUntrackedInputRuns(t *testing.T) {
+	root := writeSinceRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "queries", "new.sql"), []byte("select 3;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := mustCheckSince(t, root, "HEAD")
+	assertGroupStatus(t, result, "sqlc", check.GroupOK)
+	assertGroupStatus(t, result, "protobuf", check.GroupSkipped)
+	if !markerExists(root, "sqlc-ran") {
+		t.Fatal("untracked input did not run sqlc")
+	}
+}
+
+func TestSinceIgnoredInputDoesNotRun(t *testing.T) {
+	root := writeSinceRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "queries", "skip.ignore"), []byte("nope\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := mustCheckSince(t, root, "HEAD")
+	assertGroupStatus(t, result, "sqlc", check.GroupSkipped)
+	if markerExists(root, "sqlc-ran") {
+		t.Fatal("gitignored input ran sqlc")
+	}
+}
+
+func TestCheckWithoutSinceRunsEveryGroup(t *testing.T) {
+	root := writeSinceRepo(t)
+	result := mustCheckConfig(t, root)
+	assertGroupStatus(t, result, "sqlc", check.GroupOK)
+	assertGroupStatus(t, result, "protobuf", check.GroupOK)
+	assertGroupStatus(t, result, "plain", check.GroupOK)
+	if !markerExists(root, "sqlc-ran") || !markerExists(root, "proto-ran") || !markerExists(root, "plain-ran") {
+		t.Fatal("check without --since skipped a group")
+	}
+
+	blank := mustCheckSince(t, root, "")
+	assertGroupStatus(t, blank, "sqlc", check.GroupOK)
+	assertGroupStatus(t, blank, "protobuf", check.GroupOK)
+	assertGroupStatus(t, blank, "plain", check.GroupOK)
+}
+
+func TestSinceBadRef(t *testing.T) {
+	root := writeSinceRepo(t)
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = check.CheckSince(cfg, "not-a-ref")
+	if err == nil || !strings.Contains(err.Error(), "bad --since ref") {
+		t.Fatalf("err = %v", err)
+	}
+	if markerExists(root, "plain-ran") {
+		t.Fatal("bad ref ran a group")
+	}
+}
+
+func TestSinceCheckAllSelectsPerGroup(t *testing.T) {
+	root := writeSinceRepo(t)
+	commitPath(t, root, "queries/q.sql", "select 2;\n")
+
+	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Since: "base"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Configs) != 2 {
+		t.Fatalf("configs = %d", len(run.Configs))
+	}
+	sqlc := groupInRun(t, run, "sqlc")
+	protobuf := groupInRun(t, run, "protobuf")
+	api := groupInRun(t, run, "api")
+	if sqlc.Status != check.GroupOK || protobuf.Status != check.GroupSkipped || api.Status != check.GroupSkipped {
+		t.Fatalf("sqlc=%s protobuf=%s api=%s", sqlc.Status, protobuf.Status, api.Status)
+	}
+	if !markerExists(root, "sqlc-ran") || markerExists(root, "proto-ran") || markerExists(filepath.Join(root, "api"), "api-ran") {
+		t.Fatal("check --all did not select per group")
+	}
+	if _, err := os.Stat(filepath.Join(root, "gen", "a.pb.go")); err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d", run.ExitCode())
+	}
+}
+
+func TestSinceCheckAllBadRef(t *testing.T) {
+	root := writeSinceRepo(t)
+	_, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Since: "not-a-ref"})
+	if err == nil || !strings.Contains(err.Error(), "bad --since ref") {
+		t.Fatalf("err = %v", err)
+	}
+	if markerExists(root, "plain-ran") || markerExists(filepath.Join(root, "api"), "api-ran") {
+		t.Fatal("bad ref ran a group")
+	}
+}
+
+func TestCLISinceReportsSkipAndBadRef(t *testing.T) {
+	root := writeSinceRepo(t)
+	commitPath(t, root, "queries/q.sql", "select 2;\n")
+
+	stdout, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml"), "--since", "base"})
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "Generated files match the generators.") || !strings.Contains(stdout, "sqlc: OK") || !strings.Contains(stdout, "protobuf: skipped") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+
+	testutil.Chdir(t, root)
+	stdout, stderr, code = runCLI([]string{"check", "--all", "--since", "not-a-ref"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "bad --since ref") {
+		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
+	}
+}
+
+func TestSinceRunsWhenWorktreeMatchesBaseNotHEAD(t *testing.T) {
+	root := writeSinceRepo(t)
+	commitPath(t, root, "internal/db/out.txt", "edited\n")
+	if err := os.WriteFile(filepath.Join(root, "internal/db/out.txt"), []byte("db\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckSince(t, root, "base")
+	sqlc := groupResult(t, result, "sqlc")
+	if sqlc.Status != check.GroupDrift {
+		t.Fatalf("sqlc status = %q, want drift; err = %v", sqlc.Status, sqlc.Err)
+	}
+	if len(sqlc.Drifts) != 1 || sqlc.Drifts[0].Kind != "modified" || sqlc.Drifts[0].Path != "internal/db/out.txt" {
+		t.Fatalf("drifts = %+v", sqlc.Drifts)
+	}
+	assertGroupStatus(t, result, "protobuf", check.GroupSkipped)
+	if !markerExists(root, "sqlc-ran") || markerExists(root, "proto-ran") {
+		t.Fatal("worktree matching base did not select only sqlc")
+	}
+}
+
+func TestSinceRunsInputRestoredToBase(t *testing.T) {
+	root := writeSinceRepo(t)
+	commitPath(t, root, "queries/q.sql", "select 2;\n")
+	if err := os.WriteFile(filepath.Join(root, "queries/q.sql"), []byte("select 1;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckSince(t, root, "base")
+	assertGroupStatus(t, result, "sqlc", check.GroupOK)
+	assertGroupStatus(t, result, "protobuf", check.GroupSkipped)
+	if !markerExists(root, "sqlc-ran") || markerExists(root, "proto-ran") {
+		t.Fatal("input restored to base did not select only sqlc")
+	}
+}
+
+func TestSinceRunsWhenConfigCommandChanges(t *testing.T) {
+	root := writeSinceRepo(t)
+	groups := sinceGroups()
+	groups[0].Command = `python3 -c "open('sqlc-ran','w').close(); open('sqlc-cmd','w').close()"`
+	if _, err := testutil.WriteGenguardConfig(root, "", "", "", groups); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "genguard.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "change command"); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckSince(t, root, "base")
+	assertGroupStatus(t, result, "sqlc", check.GroupOK)
+	assertGroupStatus(t, result, "protobuf", check.GroupOK)
+	if !markerExists(root, "sqlc-cmd") || !markerExists(root, "proto-ran") {
+		t.Fatal("config command change did not run groups with inputs")
+	}
+	got, err := os.ReadFile(filepath.Join(root, "gen", "a.pb.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "package gen\n" {
+		t.Fatalf("protobuf output = %q", got)
+	}
+}
+
+func TestSinceRunsUntrackedConfig(t *testing.T) {
+	root := writeSinceRepo(t)
+	writeSinceFile(t, root, "fresh/in.txt", "in\n")
+	writeSinceFile(t, root, "fresh/out.txt", "out\n")
+	if err := testutil.Git(root, "add", "fresh/in.txt", "fresh/out.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "fresh files"); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "fresh")
+	path, err := testutil.WriteGenguardConfig(dir, "", "", "genguard.yml", []testutil.GroupSpec{{
+		Name:    "fresh",
+		Command: `python3 -c "open('fresh-ran','w').close()"`,
+		Inputs:  []string{"in.txt"},
+		Outputs: []string{"out.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := check.CheckSince(cfg, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Groups) != 1 || result.Groups[0].Status != check.GroupOK {
+		t.Fatalf("fresh = %+v", result.Groups)
+	}
+	if !markerExists(dir, "fresh-ran") {
+		t.Fatal("untracked config did not run")
+	}
+}
+
+func TestSinceRunsMissingLiteralOutput(t *testing.T) {
+	root := writeSinceRepo(t)
+	groups := sinceGroups()
+	groups[0].Outputs = append(append([]string{}, groups[0].Outputs...), "internal/db/missing.txt")
+	if _, err := testutil.WriteGenguardConfig(root, "", "", "", groups); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "genguard.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "declare missing output"); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckSince(t, root, "HEAD")
+	sqlc := groupResult(t, result, "sqlc")
+	if sqlc.Status != check.GroupDrift {
+		t.Fatalf("sqlc status = %q, want drift; err = %v", sqlc.Status, sqlc.Err)
+	}
+	if len(sqlc.Drifts) != 1 || sqlc.Drifts[0].Kind != "missing" || sqlc.Drifts[0].Path != "internal/db/missing.txt" {
+		t.Fatalf("drifts = %+v", sqlc.Drifts)
+	}
+	assertGroupStatus(t, result, "protobuf", check.GroupSkipped)
+	if !markerExists(root, "sqlc-ran") || markerExists(root, "proto-ran") {
+		t.Fatal("missing declared output did not select only sqlc")
+	}
+}
+
+func TestSinceRunsDeletionOfOutputAddedAfterBase(t *testing.T) {
+	root := writeSinceRepo(t)
+	groups := sinceGroups()
+	groups[0].Outputs = append(append([]string{}, groups[0].Outputs...), "internal/db/extra.txt")
+	if _, err := testutil.WriteGenguardConfig(root, "", "", "", groups); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "genguard.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "declare extra"); err != nil {
+		t.Fatal(err)
+	}
+	// The declaration is part of base, so the config file does not select
+	// protobuf. The file itself arrives in a later commit, then goes missing.
+	if err := testutil.Git(root, "branch", "-f", "base"); err != nil {
+		t.Fatal(err)
+	}
+	writeSinceFile(t, root, "internal/db/extra.txt", "extra\n")
+	if err := testutil.Git(root, "add", "internal/db/extra.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "extra"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "internal/db/extra.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckSince(t, root, "base")
+	sqlc := groupResult(t, result, "sqlc")
+	if sqlc.Status != check.GroupDrift {
+		t.Fatalf("sqlc status = %q, want drift; err = %v", sqlc.Status, sqlc.Err)
+	}
+	if len(sqlc.Drifts) != 1 || sqlc.Drifts[0].Kind != "missing" || sqlc.Drifts[0].Path != "internal/db/extra.txt" {
+		t.Fatalf("drifts = %+v", sqlc.Drifts)
+	}
+	assertGroupStatus(t, result, "protobuf", check.GroupSkipped)
+	if !markerExists(root, "sqlc-ran") {
+		t.Fatal("deleted output added after base did not run sqlc")
+	}
+}
+
+func TestCLISinceAllLabelsSkippedGroups(t *testing.T) {
+	root := writeSinceRepo(t)
+	commitPath(t, root, "queries/q.sql", "select 2;\n")
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"check", "--all", "--since", "base"})
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	want := strings.Join([]string{
+		"Generated files match the generators.",
+		filepath.Join("api", "genguard.yaml"),
+		"genguard.yaml",
+		"2 configs: 2 ok, 0 drift, 0 error",
+		"",
+		filepath.Join("api", "genguard.yaml"),
+		"  api: skipped",
+		"1 group: 0 ok, 0 drift, 0 error, 1 skipped",
+		"",
+		"genguard.yaml",
+		"  sqlc: OK",
+		"  protobuf: skipped",
+		"  plain: OK",
+		"3 groups: 2 ok, 0 drift, 0 error, 1 skipped",
+	}, "\n") + "\n"
+	if stdout != want {
+		t.Fatalf("stdout =\n%s\nwant\n%s", stdout, want)
+	}
+}
+
+func writeSinceRepo(t *testing.T) string {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	writeSinceFile(t, root, ".gitignore", "*.ignore\n")
+	writeSinceFile(t, root, "queries/q.sql", "select 1;\n")
+	writeSinceFile(t, root, "proto/a.proto", "syntax = \"proto3\";\n")
+	writeSinceFile(t, root, "internal/db/out.txt", "db\n")
+	writeSinceFile(t, root, "gen/a.pb.go", "package gen\n")
+	writeSinceFile(t, root, "plain/out.txt", "plain\n")
+	writeSinceFile(t, root, "api/src/a.txt", "api\n")
+	writeSinceFile(t, root, "api/out.txt", "out\n")
+	if _, err := testutil.WriteGenguardConfig(root, "", "", "", sinceGroups()); err != nil {
+		t.Fatal(err)
+	}
+	apiGroups := []testutil.GroupSpec{{
+		Name:    "api",
+		Command: `python3 -c "open('api-ran','w').close()"`,
+		Inputs:  []string{"src/"},
+		Outputs: []string{"out.txt"},
+	}}
+	if _, err := testutil.WriteGenguardConfig(filepath.Join(root, "api"), "", "", "", apiGroups); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "base"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "branch", "base"); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func sinceGroups() []testutil.GroupSpec {
+	return []testutil.GroupSpec{
+		{
+			Name:    "sqlc",
+			Command: `python3 -c "open('sqlc-ran','w').close()"`,
+			Inputs:  []string{"queries/"},
+			Outputs: []string{"internal/db/out.txt"},
+		},
+		{
+			Name:    "protobuf",
+			Command: `python3 -c "open('proto-ran','w').close(); open('gen/a.pb.go','w').write('package gen'+chr(10))"`,
+			Inputs:  []string{"proto/"},
+			Outputs: []string{"gen/a.pb.go"},
+			Clean:   true,
+		},
+		{
+			Name:    "plain",
+			Command: `python3 -c "open('plain-ran','w').close()"`,
+			Outputs: []string{"plain/out.txt"},
+		},
+	}
+}
+
+func writeSinceFile(t *testing.T, root, rel, content string) {
+	t.Helper()
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustCheckSince(t *testing.T, root, since string) check.ConfigResult {
+	t.Helper()
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := check.CheckSince(cfg, since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func groupResult(t *testing.T, result check.ConfigResult, name string) check.GroupResult {
+	t.Helper()
+	for _, group := range result.Groups {
+		if group.Name == name {
+			return group
+		}
+	}
+	t.Fatalf("missing group %s", name)
+	return check.GroupResult{}
+}
+
+func assertGroupStatus(t *testing.T, result check.ConfigResult, name string, status check.GroupStatus) {
+	t.Helper()
+	group := groupResult(t, result, name)
+	if group.Status != status {
+		t.Fatalf("%s status = %q, want %q; err = %v", name, group.Status, status, group.Err)
+	}
+}
+
+func groupInRun(t *testing.T, run check.RunResult, name string) check.GroupResult {
+	t.Helper()
+	for _, cfg := range run.Configs {
+		for _, group := range cfg.Result.Groups {
+			if group.Name == name {
+				return group
+			}
+		}
+	}
+	t.Fatalf("missing group %s", name)
+	return check.GroupResult{}
+}
+
+func markerExists(root, name string) bool {
+	_, err := os.Stat(filepath.Join(root, name))
+	return err == nil
+}

@@ -3,6 +3,7 @@ package check
 import (
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/wuddleko/genguard/internal/config"
 )
@@ -20,6 +21,11 @@ import (
 type CheckAllOptions struct {
 	RepoRoot string
 	Paths    []string
+	// Since is a rev. When set, a group that declares inputs runs when its
+	// inputs, its outputs, or its config file differ from HEAD or from the
+	// merge-base of HEAD and Since. A declared output file that is not on
+	// disk also runs it. A blank Since checks every group.
+	Since string
 }
 
 // CheckAll loads and checks each config, continuing after per-config
@@ -45,6 +51,14 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 		return RunResult{}, err
 	}
 
+	base := ""
+	if strings.TrimSpace(opts.Since) != "" {
+		base, err = mergeBase(repoRoot, opts.Since)
+		if err != nil {
+			return RunResult{}, err
+		}
+	}
+
 	run := RunResult{
 		RepoRoot: repoRoot,
 		Configs:  make([]ConfigRun, 0, len(paths)),
@@ -53,19 +67,19 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 	// the wiped paths with configs checked later.
 	damage := map[string]pathSnap{}
 	for _, path := range paths {
-		run.Configs = append(run.Configs, checkOne(path, damage))
+		run.Configs = append(run.Configs, checkOne(path, base, damage))
 	}
 	return run, nil
 }
 
-func checkOne(path string, damage map[string]pathSnap) ConfigRun {
+func checkOne(path, base string, damage map[string]pathSnap) ConfigRun {
 	cfgRun := ConfigRun{Path: path}
 	cfg, err := config.LoadConfig(path)
 	if err != nil {
 		cfgRun.Err = err
 		return cfgRun
 	}
-	result, err := checkConfig(cfg, damage)
+	result, err := checkConfig(cfg, base, damage)
 	if err != nil {
 		cfgRun.Err = err
 		return cfgRun

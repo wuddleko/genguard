@@ -22,6 +22,7 @@ type GroupSpec struct {
 	Name    string
 	Command string
 	Outputs []string
+	Inputs  []string
 	Clean   bool
 }
 
@@ -122,6 +123,12 @@ func WriteGenguardConfig(root string, outputs, command, configName string, group
 		b.WriteString("    outputs:\n")
 		for _, output := range group.Outputs {
 			b.WriteString(fmt.Sprintf("      - %s\n", yamlScalar(output)))
+		}
+		if len(group.Inputs) > 0 {
+			b.WriteString("    inputs:\n")
+			for _, input := range group.Inputs {
+				b.WriteString(fmt.Sprintf("      - %s\n", yamlScalar(input)))
+			}
 		}
 		if group.Clean {
 			b.WriteString("    clean: true\n")

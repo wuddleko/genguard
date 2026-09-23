@@ -46,6 +46,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	all := fs.Bool("all", false, "Check every genguard.yaml or genguard.yml under the git repository root")
 	configPath := fs.String("config", "", "Path to genguard.yaml (default: walk parents from cwd)")
 	configShort := fs.String("c", "", "Path to genguard.yaml (default: walk parents from cwd)")
+	since := fs.String("since", "", "Run a group with inputs when its inputs, outputs, or config file differ from HEAD or from the merge-base of this ref, or a declared output file is missing")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -62,7 +63,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *all {
-		return runCheckAll(stdout, stderr)
+		return runCheckAll(stdout, stderr, *since)
 	}
 
 	path := selected
@@ -85,13 +86,18 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	result, err := check.CheckConfig(cfg)
+	result, err := check.CheckSince(cfg, *since)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
 	}
 	if result.ExitCode() == 0 {
 		fmt.Fprintln(stdout, "Generated files match the generators.")
+		if result.Skipped() > 0 {
+			for _, line := range result.SummaryLines() {
+				fmt.Fprintln(stdout, line)
+			}
+		}
 		return 0
 	}
 
@@ -104,8 +110,8 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	return result.ExitCode()
 }
 
-func runCheckAll(stdout, stderr io.Writer) int {
-	run, err := check.CheckAll(check.CheckAllOptions{})
+func runCheckAll(stdout, stderr io.Writer, since string) int {
+	run, err := check.CheckAll(check.CheckAllOptions{Since: since})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
@@ -135,8 +141,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, `genguard — fail CI when committed generated outputs drift from their generators
 
 Usage:
-  genguard check [-c|--config path/to/genguard.yaml]
-  genguard check --all
+  genguard check [-c|--config path/to/genguard.yaml] [--since ref]
+  genguard check --all [--since ref]
   genguard version
 
 `)

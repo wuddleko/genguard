@@ -33,10 +33,31 @@ func newGenguardError(format string, args ...any) error {
 }
 
 func CheckConfig(cfg config.Config) (ConfigResult, error) {
-	return checkConfig(cfg, map[string]pathSnap{})
+	return checkConfig(cfg, "", map[string]pathSnap{})
 }
 
-func checkConfig(cfg config.Config, damage map[string]pathSnap) (ConfigResult, error) {
+// CheckSince checks cfg. A blank since checks every group. Otherwise a group
+// that declares inputs runs when its inputs, its outputs, or its config
+// file differ between the working tree and either HEAD or the merge-base of
+// HEAD and since. A declared output file that is not on disk also runs it.
+// Untracked files count. Gitignored files do not. Groups with no inputs
+// always run.
+func CheckSince(cfg config.Config, since string) (ConfigResult, error) {
+	if strings.TrimSpace(since) == "" {
+		return CheckConfig(cfg)
+	}
+	root := cfg.Root()
+	if err := requireGitRepo(root); err != nil {
+		return ConfigResult{}, err
+	}
+	base, err := mergeBase(root, since)
+	if err != nil {
+		return ConfigResult{}, err
+	}
+	return checkConfig(cfg, base, map[string]pathSnap{})
+}
+
+func checkConfig(cfg config.Config, base string, damage map[string]pathSnap) (ConfigResult, error) {
 	root := cfg.Root()
 	if err := requireGitRepo(root); err != nil {
 		return ConfigResult{}, err
@@ -47,16 +68,29 @@ func checkConfig(cfg config.Config, damage map[string]pathSnap) (ConfigResult, e
 
 	result := ConfigResult{}
 	for _, group := range cfg.Groups {
-		result.Groups = append(result.Groups, checkGroup(root, group, damage))
+		result.Groups = append(result.Groups, checkGroup(root, group, damage, base))
 	}
 	return result, nil
 }
 
-func checkGroup(root string, group config.Group, damage map[string]pathSnap) GroupResult {
+func checkGroup(root string, group config.Group, damage map[string]pathSnap, base string) GroupResult {
 	result := GroupResult{Name: group.Name}
 	// Residue is exempt only while it still matches the failed clean.
 	// Drop snapshots this group changes so a later wipe is that group's drift.
 	defer dropRepairedDamage(damage)
+
+	if base != "" && len(group.Inputs) > 0 {
+		affected, err := groupAffected(root, base, group)
+		if err != nil {
+			result.Status = GroupError
+			result.Err = err
+			return result
+		}
+		if !affected {
+			result.Status = GroupSkipped
+			return result
+		}
+	}
 
 	// wipe is the tree immediately after a successful clean, before the
 	// command. A failed command still diffs. Paths that still match an
@@ -380,10 +414,7 @@ func driftForGroup(root string, group config.Group) ([]Drift, error) {
 		found = append(found, Drift{Group: group.Name, Path: path, Kind: kind})
 	}
 
-	// Repo-root names, not --relative. --relative also drops paths outside
-	// the config directory, so a tracked edit at ../sibling/file.go would
-	// pass. diff.relative is forced off in case the user has it set.
-	modified, err := gitNames(root, append([]string{"-c", "diff.relative=false", "diff", "--name-only", "-z", "HEAD", "--"}, group.Outputs...)...)
+	modified, err := gitDiffNames(root, "HEAD", group.Outputs)
 	if err != nil {
 		return nil, err
 	}
@@ -420,16 +451,84 @@ func driftForGroup(root string, group config.Group) ([]Drift, error) {
 	}
 
 	for _, spec := range group.Outputs {
-		if isGlob(spec) || strings.HasSuffix(spec, "/") {
-			continue
+		if literalOutputAbsent(root, spec) {
+			record(spec, "missing")
 		}
-		if _, err := os.Stat(filepath.Join(root, spec)); err == nil {
-			continue
-		}
-		record(spec, "missing")
 	}
 
 	return found, nil
+}
+
+// mergeBase resolves since against HEAD. A missing or unrelated ref is an
+// error so the caller can exit 2 before any group runs.
+func mergeBase(root, since string) (string, error) {
+	since = strings.TrimSpace(since)
+	if since == "" {
+		return "", newGenguardError("--since requires a ref")
+	}
+	out, code, err := git(root, "merge-base", "HEAD", since)
+	if err != nil {
+		return "", err
+	}
+	if code != 0 {
+		detail := strings.TrimSpace(out)
+		if detail == "" {
+			detail = "git merge-base failed"
+		}
+		return "", newGenguardError("bad --since ref: %s", detail)
+	}
+	base := strings.TrimSpace(out)
+	if base == "" {
+		return "", newGenguardError("bad --since ref: empty merge-base")
+	}
+	return base, nil
+}
+
+// groupAffected reports whether a group with inputs should run. Inputs,
+// outputs, and the config file are compared to base and to HEAD, so a
+// worktree that matches the merge-base but not HEAD still runs. The config
+// file counts so a command or clean change runs the group. A declared
+// output file that is not on disk runs it too. Untracked files count.
+// Gitignored files do not.
+func groupAffected(root, base string, group config.Group) (bool, error) {
+	for _, spec := range group.Outputs {
+		if literalOutputAbsent(root, spec) {
+			return true, nil
+		}
+	}
+	specs := make([]string, 0, len(group.Inputs)+len(group.Outputs)+2)
+	specs = append(specs, group.Inputs...)
+	specs = append(specs, group.Outputs...)
+	// Both names: a directory keeps one, and a rename or an untracked
+	// config uses whichever is on disk.
+	specs = append(specs, "genguard.yaml", "genguard.yml")
+	for _, rev := range []string{base, "HEAD"} {
+		names, err := gitDiffNames(root, rev, specs)
+		if err != nil || len(names) > 0 {
+			return len(names) > 0, err
+		}
+	}
+	untracked, err := gitNames(root, append([]string{"ls-files", "--others", "--exclude-standard", "-z", "--"}, specs...)...)
+	return len(untracked) > 0, err
+}
+
+// literalOutputAbsent reports a declared output that names a file and is
+// not on disk. Globs and directory outputs are left to git.
+func literalOutputAbsent(root, spec string) bool {
+	if isGlob(spec) || strings.HasSuffix(spec, "/") {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(root, spec))
+	return err != nil
+}
+
+// gitDiffNames lists repo-root paths that differ between rev and the working
+// tree. Names are not --relative: that drops paths outside the config
+// directory, so a tracked edit at ../sibling/file.go would pass.
+// diff.relative is forced off in case the user has it set.
+func gitDiffNames(root, rev string, specs []string) ([]string, error) {
+	args := append([]string{"-c", "diff.relative=false", "diff", "--name-only", "-z", rev, "--"}, specs...)
+	return gitNames(root, args...)
 }
 
 func gitDiffText(root string, args ...string) (string, error) {
