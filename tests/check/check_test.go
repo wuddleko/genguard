@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wuddleko/genguard/internal/check"
 	"github.com/wuddleko/genguard/internal/cli"
@@ -742,6 +743,338 @@ func TestDriftForGroupParentPathspec(t *testing.T) {
 	if !strings.Contains(diff, "deleted file") {
 		t.Fatalf("diff = %q", diff)
 	}
+}
+
+func TestDriftForGroupIgnoresCRLFRenormalizeWarning(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	same := filepath.Join(root, "generated", "same.txt")
+	changed := filepath.Join(root, "generated", "changed.txt")
+	if err := os.MkdirAll(filepath.Dir(same), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(same, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(changed, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "config", "core.autocrlf", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(changed, []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ageFile(t, same)
+
+	warn := gitDiffStderr(t, root, "generated/same.txt", "generated/changed.txt")
+	if !strings.Contains(warn, "LF will be replaced by CRLF") {
+		t.Fatalf("git diff stderr = %q, want a CRLF renormalize warning", warn)
+	}
+	// The probe refreshed the clean file's stat cache. Age it again so the
+	// check itself is the diff that sees the warning.
+	ageFile(t, same)
+
+	group := config.Group{Name: "greeting", Outputs: []string{"generated/same.txt", "generated/changed.txt"}}
+	drifts, err := check.DriftForGroup(root, group)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := check.Drift{Group: "greeting", Path: "generated/changed.txt", Kind: "modified"}
+	if len(drifts) != 1 || drifts[0] != want {
+		t.Fatalf("drifts = %+v, want [%+v]", drifts, want)
+	}
+	diff, err := check.DriftDiff(root, drifts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(diff, "LF will be replaced") {
+		t.Fatalf("diff contains CRLF warning: %q", diff)
+	}
+	if !strings.Contains(diff, "+new") {
+		t.Fatalf("diff = %q", diff)
+	}
+
+	ageFile(t, same)
+	drifts, err = check.DriftForGroup(root, config.Group{
+		Name:    "greeting",
+		Outputs: []string{"generated/same.txt"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drifts) != 0 {
+		t.Fatalf("clean file drifts = %+v", drifts)
+	}
+}
+
+func TestDriftForGroupReportsGitFatal(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref: refs/heads/missing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := check.DriftForGroup(root, config.Group{Name: "greeting", Outputs: []string{"file.txt"}})
+	if err == nil || !strings.Contains(err.Error(), "fatal:") {
+		t.Fatalf("error = %v, want git fatal text", err)
+	}
+}
+
+func TestDriftDiffUntrackedIgnoresCRLFRenormalizeWarning(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "--allow-empty", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "config", "core.autocrlf", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "generated"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "generated", "new.txt")
+	if err := os.WriteFile(path, []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ageFile(t, path)
+	cmd := exec.Command("git", "-C", root, "diff", "--no-index", "--", os.DevNull, "generated/new.txt")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		t.Fatal("git diff --no-index exited 0, want 1")
+	}
+	if !strings.Contains(stderr.String(), "LF will be replaced by CRLF") {
+		t.Fatalf("stderr = %q, want a CRLF warning", stderr.String())
+	}
+	ageFile(t, path)
+
+	drifts, err := check.DriftForGroup(root, config.Group{Name: "greeting", Outputs: []string{"generated/new.txt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := check.Drift{Group: "greeting", Path: "generated/new.txt", Kind: "untracked"}
+	if len(drifts) != 1 || drifts[0] != want {
+		t.Fatalf("drifts = %+v, want [%+v]", drifts, want)
+	}
+	text, err := check.DriftDiff(root, drifts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(text, "LF will be replaced by CRLF") {
+		t.Fatalf("diff = %q, warning leaked into the patch", text)
+	}
+	if !strings.Contains(text, "+new") {
+		t.Fatalf("diff = %q, want the untracked file contents", text)
+	}
+}
+
+func TestDriftDiffReportsGitFatal(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "generated"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "generated", "hello.txt"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "generated/hello.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref: refs/heads/missing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := check.DriftDiff(root, []check.Drift{{Group: "greeting", Path: "generated/hello.txt", Kind: "modified"}})
+	if err == nil || !strings.Contains(err.Error(), "fatal:") {
+		t.Fatalf("modified error = %v, want git fatal text", err)
+	}
+	_, err = check.DriftDiff(root, []check.Drift{{Group: "greeting", Path: "generated/hello.txt", Kind: "missing"}})
+	if err == nil || !strings.Contains(err.Error(), "fatal:") {
+		t.Fatalf("missing error = %v, want git fatal text", err)
+	}
+
+	extra := filepath.Join(root, "generated", "extra.txt")
+	if err := os.WriteFile(extra, []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	text, err := check.DriftDiff(root, []check.Drift{{Group: "greeting", Path: "generated/extra.txt", Kind: "untracked"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(text, "fatal:") || !strings.Contains(text, "+extra") {
+		t.Fatalf("diff = %q, want the untracked patch without the broken HEAD", text)
+	}
+}
+
+func TestDriftDiffMissingIgnoresCRLFRenormalizeWarning(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	same := filepath.Join(root, "generated", "same.txt")
+	gone := filepath.Join(root, "generated", "gone.txt")
+	if err := os.MkdirAll(filepath.Dir(same), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(same, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gone, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "config", "core.autocrlf", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	ageFile(t, same)
+	warn := gitDiffStderr(t, root, "generated/same.txt", "generated/gone.txt")
+	if !strings.Contains(warn, "LF will be replaced by CRLF") {
+		t.Fatalf("git diff stderr = %q, want a CRLF renormalize warning", warn)
+	}
+	ageFile(t, same)
+
+	group := config.Group{Name: "greeting", Outputs: []string{"generated/same.txt", "generated/gone.txt"}}
+	drifts, err := check.DriftForGroup(root, group)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := check.Drift{Group: "greeting", Path: "generated/gone.txt", Kind: "missing"}
+	if len(drifts) != 1 || drifts[0] != want {
+		t.Fatalf("drifts = %+v, want [%+v]", drifts, want)
+	}
+	diff, err := check.DriftDiff(root, drifts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(diff, "LF will be replaced") {
+		t.Fatalf("diff contains CRLF warning: %q", diff)
+	}
+	if !strings.Contains(diff, "-hello") {
+		t.Fatalf("diff = %q, want the deletion", diff)
+	}
+}
+
+func TestDriftForGroupSubdirectoryIgnoresCRLFRenormalizeWarning(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	api := filepath.Join(root, "api")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	same := filepath.Join(api, "same.txt")
+	changed := filepath.Join(api, "changed.txt")
+	if err := os.MkdirAll(api, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(same, []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(changed, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "config", "core.autocrlf", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(changed, []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	extra := filepath.Join(api, "extra.txt")
+	if err := os.WriteFile(extra, []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ageFile(t, same)
+	ageFile(t, extra)
+	warn := gitDiffStderr(t, api, "same.txt", "changed.txt")
+	if !strings.Contains(warn, "LF will be replaced by CRLF") {
+		t.Fatalf("git diff stderr = %q, want a CRLF renormalize warning", warn)
+	}
+	cmd := exec.Command("git", "-C", api, "diff", "--no-index", "--", os.DevNull, "extra.txt")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err == nil {
+		t.Fatal("git diff --no-index exited 0, want 1")
+	}
+	if !strings.Contains(stderr.String(), "LF will be replaced by CRLF") {
+		t.Fatalf("stderr = %q, want a CRLF warning", stderr.String())
+	}
+	ageFile(t, same)
+	ageFile(t, extra)
+
+	group := config.Group{Name: "api", Outputs: []string{"same.txt", "changed.txt", "extra.txt"}}
+	drifts, err := check.DriftForGroup(api, group)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drifts) != 2 {
+		t.Fatalf("drifts = %+v", drifts)
+	}
+	if drifts[0] != (check.Drift{Group: "api", Path: "changed.txt", Kind: "modified"}) {
+		t.Fatalf("modified = %+v", drifts[0])
+	}
+	if drifts[1] != (check.Drift{Group: "api", Path: "extra.txt", Kind: "untracked"}) {
+		t.Fatalf("untracked = %+v", drifts[1])
+	}
+	diff, err := check.DriftDiff(api, drifts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(diff, "LF will be replaced") {
+		t.Fatalf("diff contains CRLF warning: %q", diff)
+	}
+	if !strings.Contains(diff, "+new") || !strings.Contains(diff, "+extra") {
+		t.Fatalf("diff = %q", diff)
+	}
+}
+
+func ageFile(t *testing.T, path string) {
+	t.Helper()
+	past := time.Now().Add(-2 * time.Second)
+	if err := os.Chtimes(path, past, past); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func gitDiffStderr(t *testing.T, root string, paths ...string) string {
+	t.Helper()
+	args := append([]string{"-C", root, "diff", "--name-only", "-z", "HEAD", "--"}, paths...)
+	cmd := exec.Command("git", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return stderr.String()
 }
 
 func TestDriftForGroupDeletedTrackedFileIsMissingOnce(t *testing.T) {

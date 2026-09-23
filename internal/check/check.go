@@ -1,6 +1,7 @@
 package check
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -480,15 +481,34 @@ func parseGitNameList(out string) []string {
 
 func git(root string, args ...string) (string, int, error) {
 	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-	output, err := cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
 	if err == nil {
-		return string(output), 0, nil
+		return stdout.String(), 0, nil
 	}
 	var exitErr *exec.ExitError
 	if errorsAsExit(err, &exitErr) {
-		return string(output), exitErr.ExitCode(), nil
+		code := exitErr.ExitCode()
+		// Exit 1 is a diff with changes. The patch is on stdout. A CRLF
+		// warning on stderr must not be appended to it. A failure that
+		// exits 1 with an empty stdout still has its message on stderr.
+		if code == 1 {
+			if strings.TrimSpace(stdout.String()) == "" && strings.TrimSpace(stderr.String()) != "" {
+				return stderr.String(), code, nil
+			}
+			return stdout.String(), code, nil
+		}
+		if strings.TrimSpace(stderr.String()) != "" {
+			return stderr.String(), code, nil
+		}
+		return stdout.String(), code, nil
 	}
-	return string(output), -1, err
+	if strings.TrimSpace(stderr.String()) != "" {
+		return stderr.String(), -1, err
+	}
+	return stdout.String(), -1, err
 }
 
 func isGlob(spec string) bool {
