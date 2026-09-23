@@ -9,6 +9,14 @@ import (
 	"github.com/wuddleko/genguard/internal/config"
 )
 
+// cleanTarget is one filesystem path clean will remove. spec is the output
+// entry it came from, used in errors.
+type cleanTarget struct {
+	spec   string
+	target string
+	isDir  bool
+}
+
 func cleanOutputs(root string, group config.Group) error {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
@@ -18,42 +26,176 @@ func cleanOutputs(root string, group config.Group) error {
 	configYAML := filepath.Join(absRoot, "genguard.yaml")
 	configYML := filepath.Join(absRoot, "genguard.yml")
 
+	// Resolve every output before deleting any. A later refusal must not
+	// leave earlier outputs wiped: the command never runs, and the next
+	// group sees the broken tree.
+	planned := make([]cleanTarget, 0, len(group.Outputs))
 	for _, spec := range group.Outputs {
-		target, isDir, err := resolveCleanTarget(absRoot, spec)
+		items, err := planCleanSpec(absRoot, spec)
 		if err != nil {
 			return err
 		}
-		if wouldRemove(target, gitDir) {
-			return newGenguardError("clean refuses %q: mixed tree (would delete .git)", spec)
-		}
-		gitPath, err := treeContainsGit(target)
-		if err != nil {
-			return newGenguardError("clean %q: %s", spec, err.Error())
-		}
-		if gitPath != "" {
-			rel, relErr := filepath.Rel(absRoot, gitPath)
-			if relErr != nil {
-				rel = gitPath
+		for _, item := range items {
+			if err := guardCleanTarget(absRoot, item, gitDir, configYAML, configYML); err != nil {
+				return err
 			}
-			return newGenguardError("clean refuses %q: mixed tree (would delete %s)", spec, filepath.ToSlash(rel))
 		}
-		if wouldRemove(target, configYAML) || wouldRemove(target, configYML) {
-			return newGenguardError("clean refuses %q: mixed tree (would delete the config file)", spec)
-		}
-		if err := removeCleanTarget(absRoot, target, isDir); err != nil {
-			return newGenguardError("clean %q: %s", spec, err.Error())
+		planned = append(planned, items...)
+	}
+	for _, item := range planned {
+		if err := removeCleanTarget(absRoot, item.target, item.isDir); err != nil {
+			return newGenguardError("clean %q: %s", item.spec, err.Error())
 		}
 	}
 	return nil
 }
 
+func planCleanSpec(root, spec string) ([]cleanTarget, error) {
+	if isGlob(spec) {
+		return planCleanGlob(root, spec)
+	}
+	target, isDir, err := resolveCleanTarget(root, spec)
+	if err != nil {
+		return nil, err
+	}
+	return []cleanTarget{{spec: spec, target: target, isDir: isDir}}, nil
+}
+
+// planCleanGlob expands a git pathspec to the files drift would check:
+// tracked files and untracked files that are not ignored. Those files are
+// removed. The rest of the directory, including hand-written files, stays.
+func planCleanGlob(root, spec string) ([]cleanTarget, error) {
+	spec = strings.TrimSpace(spec)
+	if err := validateGlobSpec(spec); err != nil {
+		return nil, err
+	}
+	// Git does not list files through a directory symlink, so a prefix link
+	// with no matches would skip the per-file checks and the command would
+	// write through it.
+	if err := refuseGlobPrefix(root, spec); err != nil {
+		return nil, err
+	}
+	names, err := globCleanFiles(root, spec)
+	if err != nil {
+		return nil, newGenguardError("clean %q: %s", spec, err.Error())
+	}
+	items := make([]cleanTarget, 0, len(names))
+	for _, name := range names {
+		rel := filepath.ToSlash(filepath.Clean(name))
+		target, isDir, err := resolveCleanPath(root, rel, false)
+		if err != nil {
+			return nil, err
+		}
+		if isDir {
+			return nil, newGenguardError("clean refuses %q: glob matched directory %q", spec, rel)
+		}
+		items = append(items, cleanTarget{spec: spec, target: target, isDir: false})
+	}
+	return items, nil
+}
+
+// refuseGlobPrefix rejects a symlink in the literal directory prefix of a
+// glob. generated/*_queries.sql.go checks generated. *_queries.sql.go has
+// no directory prefix.
+func refuseGlobPrefix(root, spec string) error {
+	var prefix []string
+	for _, part := range strings.Split(filepath.ToSlash(spec), "/") {
+		if part == "" || part == "." {
+			continue
+		}
+		if strings.ContainsAny(part, globChars) {
+			break
+		}
+		prefix = append(prefix, part)
+	}
+	cur := root
+	for i, part := range prefix {
+		cur = filepath.Join(cur, part)
+		info, err := os.Lstat(cur)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return newGenguardError("clean refuses symlink in output path %q", filepath.Join(prefix[:i+1]...))
+		}
+	}
+	return nil
+}
+
+func validateGlobSpec(spec string) error {
+	if spec == "" {
+		return newGenguardError("clean refuses an empty output path")
+	}
+	if filepath.IsAbs(spec) {
+		return newGenguardError("clean refuses absolute output %q", spec)
+	}
+	for _, part := range strings.Split(filepath.ToSlash(spec), "/") {
+		if part == ".." {
+			return newGenguardError("clean refuses %q", spec)
+		}
+	}
+	return nil
+}
+
+func globCleanFiles(root, spec string) ([]string, error) {
+	tracked, err := gitNames(root, "ls-files", "-z", "--", spec)
+	if err != nil {
+		return nil, err
+	}
+	others, err := gitNames(root, "ls-files", "--others", "--exclude-standard", "-z", "--", spec)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(tracked)+len(others))
+	files := make([]string, 0, len(tracked)+len(others))
+	for _, name := range append(tracked, others...) {
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		files = append(files, name)
+	}
+	return files, nil
+}
+
+func guardCleanTarget(absRoot string, item cleanTarget, gitDir, configYAML, configYML string) error {
+	if wouldRemove(item.target, gitDir) {
+		return newGenguardError("clean refuses %q: mixed tree (would delete .git)", item.spec)
+	}
+	gitPath, err := treeContainsGit(item.target)
+	if err != nil {
+		return newGenguardError("clean %q: %s", item.spec, err.Error())
+	}
+	if gitPath != "" {
+		rel, relErr := filepath.Rel(absRoot, gitPath)
+		if relErr != nil {
+			rel = gitPath
+		}
+		return newGenguardError("clean refuses %q: mixed tree (would delete %s)", item.spec, filepath.ToSlash(rel))
+	}
+	if wouldRemove(item.target, configYAML) || wouldRemove(item.target, configYML) {
+		return newGenguardError("clean refuses %q: mixed tree (would delete the config file)", item.spec)
+	}
+	return nil
+}
+
 func resolveCleanTarget(root, spec string) (string, bool, error) {
+	return resolveCleanPath(root, spec, true)
+}
+
+func resolveCleanPath(root, spec string, rejectGlob bool) (string, bool, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
 		return "", false, newGenguardError("clean refuses an empty output path")
 	}
-	if isGlob(spec) {
-		return "", false, newGenguardError("clean refuses glob output %q; use a directory path", spec)
+	if rejectGlob && isGlob(spec) {
+		return "", false, newGenguardError("clean refuses glob output %q", spec)
 	}
 	if filepath.IsAbs(spec) {
 		return "", false, newGenguardError("clean refuses absolute output %q", spec)

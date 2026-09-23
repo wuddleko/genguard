@@ -53,7 +53,7 @@ Groups run in order. Every group runs even when an earlier one fails or drifts. 
 
 For each group, `genguard check`:
 
-1. If `clean` is true, deletes the declared `outputs` (then recreates empty directories)
+1. If `clean` is true, deletes the declared `outputs` (a directory is recreated empty; a glob deletes only the files git matches)
 2. Runs `command` from the directory that contains the config file (`sh -c` on Unix)
 3. Compares git HEAD to the working tree under the declared `outputs`
 4. Records OK, drift, or error for that group
@@ -136,7 +136,7 @@ Each group has:
 
 Without `clean`, a generator that stops producing `old.go` leaves the stale file in place and a plain `git diff` may not notice. With `clean: true`, genguard deletes `gen/` first, re-runs the generator, and reports the missing `old.go` as drift.
 
-`clean` is destructive. Use it only on generated-only directories. It refuses `.`, `..`, globs, absolute paths, paths that escape the config directory, symlinks, and any tree that would delete `.git` or the config file (`genguard.yaml` / `genguard.yml`). If `command` fails after a wipe, the error says so; outputs are not restored.
+`clean` is destructive. A directory output is removed and recreated empty. A file output is removed. A glob output removes the tracked and untracked files git matches (ignored files stay), so a package directory can list `*_queries.sql.go` without deleting hand-written files next to them. It refuses `.`, `..`, absolute paths, paths that escape the config directory, symlinks, and any tree that would delete `.git` or the config file (`genguard.yaml` / `genguard.yml`). Every output is checked before anything is deleted, so a refused path leaves the tree unchanged. If `command` fails after a wipe, the error says so; outputs are not restored.
 
 See [genguard.example.yaml](genguard.example.yaml) and the stack-specific templates in [examples/](examples/README.md):
 

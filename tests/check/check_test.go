@@ -1450,7 +1450,6 @@ func TestCheckCleanRefusesUnsafeOutputs(t *testing.T) {
 	}{
 		{[]string{"."}, `clean refuses "."`},
 		{[]string{".."}, `clean refuses ".."`},
-		{[]string{"generated/*.txt"}, "glob"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -1485,6 +1484,392 @@ func TestCheckCleanRefusesUnsafeOutputs(t *testing.T) {
 				t.Fatalf("error = %q, want substring %q", result.Groups[0].Err, tc.match)
 			}
 		})
+	}
+}
+
+func TestCheckCleanRefusalLeavesLaterGroup(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "sqlc", Command: "python3 scripts/gen.py", Outputs: []string{"generated/hello.txt", ".."}, Clean: true},
+		{Name: "wrappers", Command: "test -f generated/hello.txt", Outputs: []string{"other/store.go"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other", "store.go"), []byte("package store\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "other/store.go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "store"); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupError {
+		t.Fatalf("sqlc status = %q, err = %v", result.Groups[0].Status, result.Groups[0].Err)
+	}
+	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), `clean refuses ".."`) {
+		t.Fatalf("sqlc err = %v", result.Groups[0].Err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))
+	if err != nil {
+		t.Fatalf("hello.txt removed: %v", err)
+	}
+	if string(got) != "hello world\n" {
+		t.Fatalf("hello.txt = %q", got)
+	}
+	if result.Groups[1].Status != check.GroupOK {
+		t.Fatalf("wrappers status = %q, err = %v", result.Groups[1].Status, result.Groups[1].Err)
+	}
+}
+
+func TestCheckCleanGlobLeavesUnmatchedFile(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "sqlc",
+		Command: "python3 scripts/gen.py && printf 'package q\\n' > generated/oidc_queries.sql.go",
+		Outputs: []string{"generated/hello.txt", "generated/*_queries.sql.go"},
+		Clean:   true,
+	}, {
+		Name:    "wrappers",
+		Command: "test -f generated/hello.txt && test -f generated/oidc_queries.sql.go && test -f generated/generate.go",
+		Outputs: []string{"other/store.go"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "generated", "oidc_queries.sql.go"), []byte("package q\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "generated", "generate.go"), []byte("package hand\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other", "store.go"), []byte("package store\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "outputs"); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupOK {
+		t.Fatalf("sqlc status = %q, err = %v, drifts = %v", result.Groups[0].Status, result.Groups[0].Err, result.Groups[0].Drifts)
+	}
+	if result.Groups[1].Status != check.GroupOK {
+		t.Fatalf("wrappers status = %q, err = %v", result.Groups[1].Status, result.Groups[1].Err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "generate.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "package hand\n" {
+		t.Fatalf("generate.go = %q", got)
+	}
+}
+
+func TestCheckCleanGlobReportsStaleFile(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "sqlc",
+		Command: "python3 scripts/gen.py",
+		Outputs: []string{"generated/*.txt"},
+		Clean:   true,
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "generated", "old.txt"), []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "generated", "keep.go"), []byte("package hand\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "generated/old.txt", "generated/keep.go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "stale"); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupDrift {
+		t.Fatalf("status = %q, err = %v, drifts = %v", result.Groups[0].Status, result.Groups[0].Err, result.Groups[0].Drifts)
+	}
+	if len(result.Groups[0].Drifts) != 1 || result.Groups[0].Drifts[0].Path != "generated/old.txt" || result.Groups[0].Drifts[0].Kind != "missing" {
+		t.Fatalf("drifts = %v", result.Groups[0].Drifts)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "generated", "old.txt")); !os.IsNotExist(err) {
+		t.Fatalf("old.txt should be removed: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "keep.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "package hand\n" {
+		t.Fatalf("keep.go = %q", got)
+	}
+}
+
+func TestCheckCleanGlobSqlcPackage(t *testing.T) {
+	oidc := "package db\n\nfunc Queries() {}\n"
+	session := "package db\n\ntype OidcSession struct{}\n"
+	groups := []testutil.GroupSpec{{
+		Name:    "sqlc",
+		Command: `python3 -c 'open("oidc_queries.sql.go","w").write("package db\n\nfunc Queries() {}\n"); open("session_queries.sql.go","w").write("package db\n\ntype OidcSession struct{}\n")'`,
+		Outputs: []string{"*_queries.sql.go"},
+		Clean:   true,
+	}, {
+		Name:    "wrappers",
+		Command: "test -f db.go && test -f models.go && test -f oidc_queries.sql.go && test -f session_queries.sql.go",
+		Outputs: []string{"wrapper.go"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := "package db\n\nfunc Queries() {}\n"
+	models := "package db\n\ntype OidcSession struct{}\n"
+	for name, body := range map[string]string{
+		"db.go":                  db,
+		"models.go":              models,
+		"oidc_queries.sql.go":    oidc,
+		"session_queries.sql.go": session,
+		"wrapper.go":             "package wrap\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "package"); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupOK {
+		t.Fatalf("sqlc status = %q, err = %v, drifts = %v", result.Groups[0].Status, result.Groups[0].Err, result.Groups[0].Drifts)
+	}
+	if result.Groups[1].Status != check.GroupOK {
+		t.Fatalf("wrappers status = %q, err = %v", result.Groups[1].Status, result.Groups[1].Err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "db.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != db {
+		t.Fatalf("db.go = %q", got)
+	}
+	got, err = os.ReadFile(filepath.Join(root, "models.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != models {
+		t.Fatalf("models.go = %q", got)
+	}
+}
+
+func TestCheckCleanGlobStaleQueryFile(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "sqlc",
+		Command: "true",
+		Outputs: []string{"*_queries.sql.go"},
+		Clean:   true,
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "db.go"), []byte("package db\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "models.go"), []byte("package db\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "old_queries.sql.go"), []byte("package old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "db.go", "models.go", "old_queries.sql.go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "stale query"); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupDrift {
+		t.Fatalf("status = %q, err = %v, drifts = %v", result.Groups[0].Status, result.Groups[0].Err, result.Groups[0].Drifts)
+	}
+	if len(result.Groups[0].Drifts) != 1 || result.Groups[0].Drifts[0].Path != "old_queries.sql.go" || result.Groups[0].Drifts[0].Kind != "missing" {
+		t.Fatalf("drifts = %v", result.Groups[0].Drifts)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "old_queries.sql.go")); !os.IsNotExist(err) {
+		t.Fatalf("old query file should be removed: %v", err)
+	}
+	for _, name := range []string{"db.go", "models.go"} {
+		if _, err := os.Lstat(filepath.Join(root, name)); err != nil {
+			t.Fatalf("%s removed: %v", name, err)
+		}
+	}
+}
+
+func TestCheckCleanGlobCommandFailureLeavesHandWrittenFiles(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "sqlc",
+		Command: "exit 3",
+		Outputs: []string{"*_queries.sql.go"},
+		Clean:   true,
+	}, {
+		Name:    "wrappers",
+		Command: "test -f db.go && test -f models.go",
+		Outputs: []string{"wrapper.go"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"db.go":               "package db\n",
+		"models.go":           "package db\n",
+		"oidc_queries.sql.go": "package db\n",
+		"wrapper.go":          "package wrap\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := testutil.Git(root, "add", "db.go", "models.go", "oidc_queries.sql.go", "wrapper.go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "package"); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupError {
+		t.Fatalf("sqlc status = %q, err = %v", result.Groups[0].Status, result.Groups[0].Err)
+	}
+	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "after cleaning outputs") || !strings.Contains(result.Groups[0].Err.Error(), "exit 3") {
+		t.Fatalf("sqlc err = %v", result.Groups[0].Err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "oidc_queries.sql.go")); !os.IsNotExist(err) {
+		t.Fatalf("query file should be removed: %v", err)
+	}
+	for _, name := range []string{"db.go", "models.go"} {
+		if _, err := os.Lstat(filepath.Join(root, name)); err != nil {
+			t.Fatalf("%s removed: %v", name, err)
+		}
+	}
+	if result.Groups[1].Status != check.GroupOK {
+		t.Fatalf("wrappers status = %q, err = %v", result.Groups[1].Status, result.Groups[1].Err)
+	}
+}
+
+func TestCheckCleanGlobEmptyMatchRunsCommand(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "sqlc",
+		Command: "mkdir -p extra && printf 'n\\n' > extra/new.txt",
+		Outputs: []string{"extra/*.txt"},
+		Clean:   true,
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "db.go"), []byte("package db\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "db.go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "db"); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupDrift {
+		t.Fatalf("status = %q, err = %v, drifts = %v", result.Groups[0].Status, result.Groups[0].Err, result.Groups[0].Drifts)
+	}
+	if len(result.Groups[0].Drifts) != 1 || result.Groups[0].Drifts[0].Path != "extra/new.txt" || result.Groups[0].Drifts[0].Kind != "untracked" {
+		t.Fatalf("drifts = %v", result.Groups[0].Drifts)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "db.go")); err != nil {
+		t.Fatalf("db.go removed: %v", err)
+	}
+}
+
+func TestCheckCleanGlobSymlinkPrefixSkipsCommand(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "sqlc",
+		Command: "printf 'pwn\\n' > generated/pwned.txt",
+		Outputs: []string{"generated/*.txt"},
+		Clean:   true,
+	}, {
+		Name:    "wrappers",
+		Command: "test -f db.go",
+		Outputs: []string{"wrapper.go"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "db.go"), []byte("package db\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "wrapper.go"), []byte("package wrap\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(root, "outside")
+	if err := os.Mkdir(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "generated")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "generated")); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "db.go", "wrapper.go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "package"); err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupError {
+		t.Fatalf("sqlc status = %q, err = %v", result.Groups[0].Status, result.Groups[0].Err)
+	}
+	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "symlink") {
+		t.Fatalf("sqlc err = %v", result.Groups[0].Err)
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "pwned.txt")); !os.IsNotExist(err) {
+		t.Fatalf("command wrote through symlink: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(outside, "secret.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "secret\n" {
+		t.Fatalf("secret = %q", got)
+	}
+	if result.Groups[1].Status != check.GroupOK {
+		t.Fatalf("wrappers status = %q, err = %v", result.Groups[1].Status, result.Groups[1].Err)
 	}
 }
 
