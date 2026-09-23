@@ -25,7 +25,13 @@ func FormatFailureReport(result ConfigResult, root string) (string, error) {
 		for _, item := range drifts {
 			fmt.Fprintf(&b, "[%s] %s: %s\n", item.Kind, item.Group, item.Path)
 		}
-		diff, err := DriftDiff(root, drifts)
+		var diff string
+		var err error
+		if result.captured != nil {
+			diff, err = result.captured.text, result.captured.err
+		} else {
+			diff, err = DriftDiff(root, drifts)
+		}
 		if err != nil {
 			return b.String(), err
 		}

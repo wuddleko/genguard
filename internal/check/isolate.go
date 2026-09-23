@@ -1,10 +1,114 @@
 package check
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/wuddleko/genguard/internal/config"
 )
+
+// CheckSinceIsolated checks the HEAD copy of the config at path in a
+// throwaway worktree. Dirty files in the user's tree are not read or
+// written. A blank since checks every group. Groups in the file still
+// share that one tree, including the damage map used by clean. The drift
+// diff is captured before the worktree is removed, so FormatFailureReport
+// does not diff the caller's files.
+func CheckSinceIsolated(path, since string) (ConfigResult, error) {
+	var result ConfigResult
+	err := withIsolatedCheck(path, since, func(cfg config.Config, r ConfigResult) error {
+		if drifts := r.AllDrifts(); len(drifts) > 0 {
+			diff, diffErr := DriftDiff(cfg.Root(), drifts)
+			r.captureDriftDiff(diff, diffErr)
+		}
+		result = r
+		return nil
+	})
+	return result, err
+}
+
+// withIsolatedCheck loads path from a detached HEAD worktree, checks it,
+// and calls fn before the worktree is removed so a caller can format a
+// report against that tree.
+func withIsolatedCheck(path, since string, fn func(config.Config, ConfigResult) error) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	// Resolve before the detached worktree exists. That checkout has no
+	// branch and no reflog, so @{u} and HEAD@{1} would not mean what they
+	// mean in the caller's tree. A blank since still checks every group.
+	since, err = isolateSince(filepath.Dir(abs), since)
+	if err != nil {
+		return err
+	}
+	return withIsolatedWorktree(filepath.Dir(abs), func(wt isolatedWorktree) error {
+		mapped, err := wt.mapPath(abs)
+		if err != nil {
+			return err
+		}
+		cfg, err := config.LoadConfig(mapped)
+		if err != nil {
+			return callerPathError(err, mapped, path)
+		}
+		result, err := CheckSince(cfg, since)
+		if err != nil {
+			return err
+		}
+		return fn(cfg, result)
+	})
+}
+
+// isolateSince resolves since to a commit in the caller's checkout.
+// The throwaway worktree then merges that commit with its own HEAD, which
+// is the caller's HEAD at the moment the worktree was added.
+func isolateSince(dir, since string) (string, error) {
+	since = strings.TrimSpace(since)
+	if since == "" {
+		return "", nil
+	}
+	root, err := gitRepoRoot(dir)
+	if err != nil {
+		return "", err
+	}
+	out, code, err := git(root, "rev-parse", "--verify", since+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	if code != 0 {
+		detail := strings.TrimSpace(out)
+		if detail == "" {
+			detail = "git rev-parse failed"
+		}
+		return "", newGenguardError("bad --since ref: %s", detail)
+	}
+	rev := strings.TrimSpace(out)
+	if rev == "" {
+		return "", newGenguardError("bad --since ref: empty revision")
+	}
+	return rev, nil
+}
+
+// callerPathError names path instead of the worktree copy. That copy is
+// deleted before the error reaches the caller.
+func callerPathError(err error, mapped, path string) error {
+	if err == nil {
+		return nil
+	}
+	var pe *os.PathError
+	if errors.As(err, &pe) && pe.Path == mapped {
+		clone := *pe
+		clone.Path = path
+		return &clone
+	}
+	msg := err.Error()
+	if mapped != "" && strings.Contains(msg, mapped) {
+		return errors.New(strings.ReplaceAll(msg, mapped, path))
+	}
+	return fmt.Errorf("%s: %w", path, err)
+}
 
 // isolatedWorktree is a detached HEAD checkout of a repository. Dirty files
 // in the user's tree are not copied, so a later check cannot write them.
@@ -42,7 +146,11 @@ func addIsolatedWorktree(repoRoot string) (isolatedWorktree, error) {
 	if err := os.Remove(dir); err != nil {
 		return isolatedWorktree{}, err
 	}
-	out, code, err := git(repo, "worktree", "add", "--detach", dir, "HEAD")
+	// post-checkout runs in the new tree and can edit it, or write the
+	// caller's files through an absolute path. A missing hooks directory
+	// skips that hook, so the check sees HEAD.
+	hooks := dir + "-hooks"
+	out, code, err := git(repo, "-c", "core.hooksPath="+hooks, "worktree", "add", "--detach", dir, "HEAD")
 	if err != nil || code != 0 {
 		_ = os.RemoveAll(dir)
 		_, _, _ = git(repo, "worktree", "prune")

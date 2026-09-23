@@ -23,6 +23,19 @@ type GroupResult struct {
 
 type ConfigResult struct {
 	Groups []GroupResult
+	// captured is the drift diff from the tree that was checked.
+	// Nil means FormatFailureReport diffs the root it was given.
+	// An isolated check sets it before deleting its worktree.
+	captured *capturedDriftDiff
+}
+
+type capturedDriftDiff struct {
+	text string
+	err  error
+}
+
+func (r *ConfigResult) captureDriftDiff(text string, err error) {
+	r.captured = &capturedDriftDiff{text: text, err: err}
 }
 
 func (r ConfigResult) AllDrifts() []Drift {
