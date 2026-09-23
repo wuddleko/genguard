@@ -175,6 +175,29 @@ func TestSummaryLine(t *testing.T) {
 			want: "  greeting: error (command failed (exit 1): line1 line2)",
 		},
 		{
+			name: "error with drift",
+			g: check.GroupResult{
+				Name:   "greeting",
+				Status: check.GroupError,
+				Err:    errors.New("command failed (exit 1): boom"),
+				Drifts: []check.Drift{{Kind: "modified", Path: "a"}},
+			},
+			want: "  greeting: error (command failed (exit 1): boom); drift (1 modified)",
+		},
+		{
+			name: "error with mixed drift",
+			g: check.GroupResult{
+				Name:   "greeting",
+				Status: check.GroupError,
+				Err:    errors.New("command failed (exit 1): boom"),
+				Drifts: []check.Drift{
+					{Kind: "modified", Path: "a"},
+					{Kind: "missing", Path: "b"},
+				},
+			},
+			want: "  greeting: error (command failed (exit 1): boom); drift (1 modified, 1 missing)",
+		},
+		{
 			name: "nil error",
 			g:    check.GroupResult{Name: "greeting", Status: check.GroupError},
 			want: "  greeting: error (unknown error)",
@@ -277,6 +300,18 @@ func TestFinalErrorLine(t *testing.T) {
 				{Name: "g", Status: check.GroupError, Err: errors.New("command failed (exit 3): no output")},
 			},
 			want: "error: command failed (exit 3): no output",
+		},
+		{
+			name: "error with its own drift stays the command error",
+			groups: []check.GroupResult{
+				{
+					Name:   "g",
+					Status: check.GroupError,
+					Err:    errors.New("command failed (exit 1): boom"),
+					Drifts: []check.Drift{{Kind: "modified", Path: "a"}},
+				},
+			},
+			want: "error: command failed (exit 1): boom",
 		},
 		{
 			name: "single error nil",

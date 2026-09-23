@@ -66,7 +66,11 @@ func (g GroupResult) SummaryLine() string {
 	case GroupDrift:
 		return fmt.Sprintf("  %s: drift (%s)", g.Name, driftKindSummary(g.Drifts))
 	case GroupError:
-		return fmt.Sprintf("  %s: error (%s)", g.Name, oneLineError(g.Err))
+		line := fmt.Sprintf("  %s: error (%s)", g.Name, oneLineError(g.Err))
+		if len(g.Drifts) > 0 {
+			line += "; drift (" + driftKindSummary(g.Drifts) + ")"
+		}
+		return line
 	default:
 		return fmt.Sprintf("  %s: unknown", g.Name)
 	}

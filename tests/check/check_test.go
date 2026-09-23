@@ -1320,8 +1320,86 @@ func TestCheckCommandFailureStillReportsDrift(t *testing.T) {
 	if !strings.Contains(report, "[modified] greeting: generated/hello.txt") {
 		t.Fatalf("report = %s", report)
 	}
+	if !strings.Contains(report, "  greeting: error (command failed (exit 1): no output); drift (1 modified)") {
+		t.Fatalf("report = %s", report)
+	}
 	if !strings.Contains(report, "1 group: 0 ok, 0 drift, 1 error") {
 		t.Fatalf("report = %s", report)
+	}
+	if !strings.Contains(report, "\nDrift\n") {
+		t.Fatalf("report = %s", report)
+	}
+	if !strings.Contains(result.FinalErrorLine(), "command failed (exit 1)") || strings.Contains(result.FinalErrorLine(), "group drifted") {
+		t.Fatalf("final = %q", result.FinalErrorLine())
+	}
+}
+
+func TestCheckExit3TouchesNothing(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "greeting",
+		Command: "exit 3",
+		Outputs: []string{"generated/hello.txt"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupError {
+		t.Fatalf("status = %q, want error", result.Groups[0].Status)
+	}
+	if len(result.Groups[0].Drifts) != 0 {
+		t.Fatalf("drifts = %v", result.Groups[0].Drifts)
+	}
+	if result.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", result.ExitCode())
+	}
+	report, err := check.FormatFailureReport(result, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "Summary\n" +
+		"  greeting: error (command failed (exit 3): no output)\n" +
+		"1 group: 0 ok, 0 drift, 1 error\n" +
+		"\n" +
+		"error: command failed (exit 3): no output\n"
+	if report != want {
+		t.Fatalf("report = %q, want %q", report, want)
+	}
+}
+
+func TestCheckErrorWithDriftPlusOtherDrift(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "greeting", Command: "python3 scripts/gen.py", Outputs: []string{"generated/hello.txt"}},
+		{Name: "broken", Command: "printf 'changed\\n' > other/out.txt; exit 1", Outputs: []string{"other/out.txt"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitPath(t, root, "other/out.txt", "ok\n")
+	commitNameChange(t, root)
+
+	result := mustCheckConfig(t, root)
+	if result.Groups[0].Status != check.GroupDrift {
+		t.Fatalf("greeting status = %q", result.Groups[0].Status)
+	}
+	if result.Groups[1].Status != check.GroupError {
+		t.Fatalf("broken status = %q", result.Groups[1].Status)
+	}
+	if !strings.Contains(result.Groups[1].SummaryLine(), "); drift (1 modified)") {
+		t.Fatalf("summary = %q", result.Groups[1].SummaryLine())
+	}
+	lines := result.SummaryLines()
+	if lines[len(lines)-1] != "2 groups: 0 ok, 1 drift, 1 error" {
+		t.Fatalf("totals = %q", lines[len(lines)-1])
+	}
+	if result.FinalErrorLine() != "error: 1 group failed; 1 group drifted" {
+		t.Fatalf("final = %q", result.FinalErrorLine())
+	}
+	if result.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", result.ExitCode())
 	}
 }
 
@@ -1350,6 +1428,10 @@ func TestCheckCleanCommandFailureReportsRewrite(t *testing.T) {
 	if len(result.Groups[0].Drifts) != 1 || result.Groups[0].Drifts[0].Kind != "modified" || result.Groups[0].Drifts[0].Path != "generated/hello.txt" {
 		t.Fatalf("drifts = %v", result.Groups[0].Drifts)
 	}
+	const wantSummary = "  greeting: error (command failed after cleaning outputs: command failed (exit 1): no output); drift (1 modified)"
+	if result.Groups[0].SummaryLine() != wantSummary {
+		t.Fatalf("summary = %q", result.Groups[0].SummaryLine())
+	}
 }
 
 func TestCheckCleanCommandFailureReportsRewriteNotSiblingWipe(t *testing.T) {
@@ -1377,6 +1459,63 @@ func TestCheckCleanCommandFailureReportsRewriteNotSiblingWipe(t *testing.T) {
 	}
 	if len(result.Groups[0].Drifts) != 1 || result.Groups[0].Drifts[0].Kind != "modified" || result.Groups[0].Drifts[0].Path != "generated/hello.txt" {
 		t.Fatalf("drifts = %v", result.Groups[0].Drifts)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "generated", "other.txt")); !os.IsNotExist(statErr) {
+		t.Fatalf("other.txt should have been wiped: %v", statErr)
+	}
+}
+
+func TestCheckFailedCleanRewriteVisibleAndLaterGroupOmitsWipe(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{
+			Name:    "broken",
+			Command: "printf 'changed\\n' > generated/hello.txt; exit 1",
+			Outputs: []string{"generated/hello.txt", "generated/other.txt"},
+			Clean:   true,
+		},
+		{
+			Name:    "later",
+			Command: "true",
+			Outputs: []string{"generated/other.txt"},
+		},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitPath(t, root, "generated/other.txt", "other\n")
+
+	result := mustCheckConfig(t, root)
+	if len(result.Groups) != 2 {
+		t.Fatalf("groups = %d, want 2", len(result.Groups))
+	}
+	if result.Groups[0].Status != check.GroupError {
+		t.Fatalf("broken status = %q", result.Groups[0].Status)
+	}
+	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "after cleaning outputs") {
+		t.Fatalf("broken err = %v", result.Groups[0].Err)
+	}
+	if len(result.Groups[0].Drifts) != 1 || result.Groups[0].Drifts[0].Kind != "modified" || result.Groups[0].Drifts[0].Path != "generated/hello.txt" {
+		t.Fatalf("broken drifts = %v", result.Groups[0].Drifts)
+	}
+	if result.Groups[1].Status != check.GroupOK {
+		t.Fatalf("later status = %q, err = %v, drifts = %v", result.Groups[1].Status, result.Groups[1].Err, result.Groups[1].Drifts)
+	}
+	if len(result.Groups[1].Drifts) != 0 {
+		t.Fatalf("later drifts = %v", result.Groups[1].Drifts)
+	}
+	if result.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", result.ExitCode())
+	}
+	report, err := check.FormatFailureReport(result, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(report, "\nDrift\n") || !strings.Contains(report, "[modified] broken: generated/hello.txt") {
+		t.Fatalf("report = %s", report)
+	}
+	if strings.Contains(report, "generated/other.txt") {
+		t.Fatalf("wipe residue listed: %s", report)
 	}
 	if _, statErr := os.Stat(filepath.Join(root, "generated", "other.txt")); !os.IsNotExist(statErr) {
 		t.Fatalf("other.txt should have been wiped: %v", statErr)
