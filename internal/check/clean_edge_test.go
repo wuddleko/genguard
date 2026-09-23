@@ -19,6 +19,13 @@ func TestCleanOutputsRejectsFileAsDirectoryPrefix(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not a directory") {
 		t.Fatalf("error = %v", err)
 	}
+	got, readErr := os.ReadFile(root)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != "x" {
+		t.Fatalf("file = %q", got)
+	}
 }
 
 func TestCleanOutputsWrapsRemoveError(t *testing.T) {

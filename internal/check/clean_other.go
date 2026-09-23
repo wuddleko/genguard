@@ -16,6 +16,9 @@ func removePinned(root string, parts []string, isDir bool) error {
 			if !os.IsNotExist(err) {
 				return err
 			}
+			if err := refuseFileInPath(cur); err != nil {
+				return err
+			}
 			if !isDir {
 				return nil
 			}

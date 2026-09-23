@@ -110,11 +110,12 @@ func refuseGlobPrefix(root, spec string) error {
 	}
 	cur := root
 	for i, part := range prefix {
+		parent := cur
 		cur = filepath.Join(cur, part)
 		info, err := os.Lstat(cur)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return nil
+				return refuseFileInPath(parent)
 			}
 			return err
 		}
@@ -251,6 +252,24 @@ func pathComponents(rel string) ([]string, error) {
 	return parts, nil
 }
 
+// refuseFileInPath rejects a lookup through parent when parent is a file.
+// A missing parent is left alone: that output was never created. Windows
+// reports a path through a file as not-exist, so the parent is what
+// distinguishes it from a path that is simply absent.
+func refuseFileInPath(parent string) error {
+	info, err := os.Lstat(parent)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil
+	}
+	return newGenguardError("%s is not a directory", parent)
+}
+
 func refuseSymlinksInPath(root, target string) error {
 	rel, err := filepath.Rel(root, target)
 	if err != nil {
@@ -262,11 +281,12 @@ func refuseSymlinksInPath(root, target string) error {
 	}
 	cur := root
 	for i, part := range parts {
+		parent := cur
 		cur = filepath.Join(cur, part)
 		info, err := os.Lstat(cur)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return nil
+				return refuseFileInPath(parent)
 			}
 			return err
 		}
