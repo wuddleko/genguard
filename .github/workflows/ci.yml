@@ -11,14 +11,41 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
+      - name: Disable git autocrlf
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Set up Python
+        if: runner.os == 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Tests invoke python3, and commands run through sh when it is on PATH.
+      - name: Prepare Windows tools
+        if: runner.os == 'Windows'
+        run: |
+          if [[ ! -e "$pythonLocation/python3.exe" ]]; then
+            cp "$pythonLocation/python.exe" "$pythonLocation/python3.exe"
+          fi
+          echo "$PROGRAMFILES/Git/bin" >> "$GITHUB_PATH"
 
       - name: Lint
         run: go vet ./...
@@ -30,4 +57,4 @@ jobs:
         run: go build -o bin/genguard ./cmd/genguard
 
       - name: Validate example configs
-        run: make validate-examples
+        run: go test ./tests/config/ -run TestExampleYAMLTemplatesLoad -count=1
