@@ -659,6 +659,133 @@ func TestCLICheckAllIsolatedDriftUsesCapturedDiff(t *testing.T) {
 	}
 }
 
+func TestCLIIsolatedFromCwd(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirty := filepath.Join(root, "generated", "hello.txt")
+	if err := os.WriteFile(dirty, []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"check", "--isolated"})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files match the generators.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	got, err := os.ReadFile(dirty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "dirty\n" {
+		t.Fatalf("user output = %q", got)
+	}
+}
+
+func TestCLIIsolatedDriftLeavesCheckout(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitNameChange(t, root)
+
+	_, stderr, code := runCLI([]string{"check", "--isolated", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stderr, "[modified] greeting: generated/hello.txt") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "-hello world") || !strings.Contains(stderr, "+hello genguard") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello world\n" {
+		t.Fatalf("user output = %q, --isolated wrote the checkout", got)
+	}
+}
+
+func TestCLIIsolatedSinceSkipsUnstagedInput(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "greeting",
+		Command: "python3 scripts/gen.py",
+		Inputs:  []string{"name.txt"},
+		Outputs: []string{"generated/hello.txt"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"check", "--isolated", "--since", "HEAD", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "Generated files match the generators.") || !strings.Contains(stdout, "greeting: skipped") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "name.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "dirty\n" {
+		t.Fatalf("user name.txt = %q", got)
+	}
+}
+
+func TestCLIIsolatedAddFailureExit2(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(root, "out.txt", `python3 -c "open('ran','w').close()"`, "", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"check", "--isolated", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "error:") || !strings.Contains(stderr, "git worktree add:") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); !os.IsNotExist(err) {
+		t.Fatal("command ran after isolate failed")
+	}
+}
+
+func TestCLICheckAllIsolatedAddFailureExit2(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"check", "--all", "--isolated"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "error:") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
 func TestCLICheckAllRejectsConfigFlag(t *testing.T) {
 	testutil.Chdir(t, t.TempDir())
 	for _, args := range [][]string{
