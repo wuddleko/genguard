@@ -1,6 +1,7 @@
 package check
 
 import (
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -13,11 +14,10 @@ import (
 // RepoRoot is resolved to the git repository toplevel, whether it is
 // empty (current working directory), a relative path, or a subdirectory
 // of the repository. When Paths is empty, configs are discovered under
-// that toplevel with config.FindAll. When Paths is set, those paths are
-// checked as given and are not required to live under RepoRoot.
+// that toplevel with config.FindAll. Isolated discovery lists configs
+// tracked at HEAD instead. When Paths is set, those paths are checked
+// as given and are not required to live under RepoRoot.
 // RunResult.RepoRoot is always the resolved toplevel.
-//
-// CheckAll always runs configs sequentially on the shared working tree.
 type CheckAllOptions struct {
 	RepoRoot string
 	Paths    []string
@@ -26,11 +26,20 @@ type CheckAllOptions struct {
 	// merge-base of HEAD and Since. A declared output file that is not on
 	// disk also runs it. A blank Since checks every group.
 	Since string
+	// Isolated checks each config in its own detached HEAD worktree.
+	// With Paths empty, configs are those tracked at HEAD: a committed
+	// config deleted in the checkout still runs, and an untracked config
+	// does not. Dirty files in the user's tree are not read or written.
+	// Configs do not share a clean wipe. Groups in one file still share
+	// that one tree.
+	Isolated bool
 }
 
 // CheckAll loads and checks each config, continuing after per-config
-// failures. It returns a fatal error only when the run cannot start
-// (the starting directory is not a git work tree, or discovery fails).
+// failures. Configs always run sequentially. Without Isolated they share
+// the working tree and one damage map. It returns a fatal error only when
+// the run cannot start (the starting directory is not a git work tree,
+// or discovery fails).
 func CheckAll(opts CheckAllOptions) (RunResult, error) {
 	repoRoot, err := gitRepoRoot(opts.RepoRoot)
 	if err != nil {
@@ -39,7 +48,13 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 
 	paths := opts.Paths
 	if len(paths) == 0 {
-		found, err := config.FindAll(repoRoot)
+		var found []string
+		var err error
+		if opts.Isolated {
+			found, err = findCommittedConfigs(repoRoot)
+		} else {
+			found, err = config.FindAll(repoRoot)
+		}
 		if err != nil {
 			return RunResult{}, err
 		}
@@ -63,13 +78,101 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 		RepoRoot: repoRoot,
 		Configs:  make([]ConfigRun, 0, len(paths)),
 	}
+	if opts.Isolated {
+		for _, configPath := range paths {
+			run.Configs = append(run.Configs, checkOneIsolated(configPath, base))
+		}
+		return run, nil
+	}
 	// One map for the whole run: a config that fails after clean shares
 	// the wiped paths with configs checked later.
 	damage := map[string]pathSnap{}
-	for _, path := range paths {
-		run.Configs = append(run.Configs, checkOne(path, base, damage))
+	for _, configPath := range paths {
+		run.Configs = append(run.Configs, checkOne(configPath, base, damage))
 	}
 	return run, nil
+}
+
+func checkOneIsolated(path, since string) ConfigRun {
+	result, err := CheckSinceIsolated(path, since)
+	return isolatedRun(path, result, err)
+}
+
+// isolatedRun keeps a completed check when worktree removal fails.
+// Err means the config never ran (load, worktree add, bad --since).
+// A removal failure after groups ran is recorded on the result: a
+// passing check exits 2, and drift or a command error keeps its code.
+func isolatedRun(configPath string, result ConfigResult, err error) ConfigRun {
+	if err != nil && len(result.Groups) > 0 {
+		result.noteCleanup(err)
+	}
+	run := ConfigRun{Path: configPath, Result: result}
+	if err != nil && len(result.Groups) == 0 {
+		run.Err = err
+	}
+	return run
+}
+
+// findCommittedConfigs lists genguard.yaml and genguard.yml at HEAD.
+// Paths are absolute under repoRoot. Directories named .git, vendor,
+// and node_modules are skipped, matching config.FindAll. A directory
+// with both config names is an error. An empty result is not an error.
+func findCommittedConfigs(repoRoot string) ([]string, error) {
+	out, code, err := git(repoRoot, "ls-tree", "-r", "-z", "--name-only", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	if code != 0 {
+		detail := strings.TrimSpace(out)
+		if detail == "" {
+			detail = "git ls-tree failed"
+		}
+		return nil, newGenguardError("%s", detail)
+	}
+	found := make([]string, 0)
+	for _, name := range parseGitNameList(out) {
+		if !committedConfig(name) {
+			continue
+		}
+		found = append(found, filepath.Join(repoRoot, filepath.FromSlash(name)))
+	}
+	sort.Strings(found)
+	if err := rejectBothCommitted(found); err != nil {
+		return nil, err
+	}
+	return found, nil
+}
+
+func committedConfig(rel string) bool {
+	switch path.Base(rel) {
+	case "genguard.yaml", "genguard.yml":
+	default:
+		return false
+	}
+	dir := path.Dir(rel)
+	if dir == "." {
+		return true
+	}
+	for _, part := range strings.Split(dir, "/") {
+		switch part {
+		case ".git", "vendor", "node_modules":
+			return false
+		}
+	}
+	return true
+}
+
+func rejectBothCommitted(paths []string) error {
+	seen := make(map[string]string, len(paths))
+	for _, configPath := range paths {
+		dir := filepath.Dir(configPath)
+		base := filepath.Base(configPath)
+		if prev, ok := seen[dir]; ok && prev != base {
+			return newGenguardError("%s contains both genguard.yaml and genguard.yml; keep one", dir)
+		}
+		seen[dir] = base
+	}
+	return nil
 }
 
 func checkOne(path, base string, damage map[string]pathSnap) ConfigRun {

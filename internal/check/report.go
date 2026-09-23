@@ -25,13 +25,7 @@ func FormatFailureReport(result ConfigResult, root string) (string, error) {
 		for _, item := range drifts {
 			fmt.Fprintf(&b, "[%s] %s: %s\n", item.Kind, item.Group, item.Path)
 		}
-		var diff string
-		var err error
-		if result.captured != nil {
-			diff, err = result.captured.text, result.captured.err
-		} else {
-			diff, err = DriftDiff(root, drifts)
-		}
+		diff, err := resultDriftDiff(result, root, drifts)
 		if err != nil {
 			return b.String(), err
 		}
@@ -54,9 +48,10 @@ func FormatFailureReport(result ConfigResult, root string) (string, error) {
 // one block per config, drift lines and git diffs for configs that
 // drifted, and an aggregated final error line.
 //
-// Diffs are taken from each config's directory. If a git diff cannot be
-// produced, the report built so far is returned without the final error
-// line, along with the error.
+// An isolated check supplies its diff from the worktree that was checked.
+// Otherwise diffs are taken from each config's directory. If a git diff
+// cannot be produced, the report built so far is returned without the
+// final error line, along with the error.
 func FormatRunFailureReport(run RunResult) (string, error) {
 	var b strings.Builder
 	b.WriteString("Summary\n")
@@ -85,7 +80,7 @@ func FormatRunFailureReport(run RunResult) (string, error) {
 		for _, item := range drifts {
 			fmt.Fprintf(&b, "[%s] %s: %s\n", item.Kind, item.Group, item.Path)
 		}
-		diff, err := DriftDiff(filepath.Dir(cfg.Path), drifts)
+		diff, err := resultDriftDiff(cfg.Result, filepath.Dir(cfg.Path), drifts)
 		if err != nil {
 			return b.String(), err
 		}
@@ -102,6 +97,13 @@ func FormatRunFailureReport(run RunResult) (string, error) {
 		b.WriteString("\n")
 	}
 	return b.String(), nil
+}
+
+func resultDriftDiff(result ConfigResult, root string, drifts []Drift) (string, error) {
+	if result.captured != nil {
+		return result.captured.text, result.captured.err
+	}
+	return DriftDiff(root, drifts)
 }
 
 func driftKindSummary(drifts []Drift) string {

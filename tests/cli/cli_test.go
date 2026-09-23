@@ -484,6 +484,9 @@ func TestCLIHelp(t *testing.T) {
 	if !strings.Contains(stderr, "--since") {
 		t.Fatalf("stderr = %q", stderr)
 	}
+	if !strings.Contains(stderr, "--isolated") {
+		t.Fatalf("stderr = %q", stderr)
+	}
 	if !strings.Contains(stderr, "genguard version") {
 		t.Fatalf("stderr = %q", stderr)
 	}
@@ -497,6 +500,9 @@ func TestCLICheckHelpExit0(t *testing.T) {
 		}
 		if !strings.Contains(stderr, "-all") || !strings.Contains(stderr, "genguard.yml") {
 			t.Fatalf("%v: stderr = %q", args, stderr)
+		}
+		if !strings.Contains(stderr, "-isolated") {
+			t.Fatalf("%v: missing -isolated: %q", args, stderr)
 		}
 		if !strings.Contains(stderr, "-config") && !strings.Contains(stderr, "-c") {
 			t.Fatalf("%v: stderr = %q", args, stderr)
@@ -569,6 +575,90 @@ func TestCLICheckAllDriftExit1(t *testing.T) {
 	})
 }
 
+func TestCLIIsolatedLeavesDirtyCheckout(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirty := filepath.Join(root, "generated", "hello.txt")
+	if err := os.WriteFile(dirty, []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"check", "--isolated", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files match the generators.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	got, err := os.ReadFile(dirty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "dirty\n" {
+		t.Fatalf("user output = %q, --isolated wrote the checkout", got)
+	}
+}
+
+func TestCLICheckAllIsolatedLeavesDirtyCheckout(t *testing.T) {
+	root := initCLIRepo(t)
+	apiDir := filepath.Join(root, "api")
+	writeCLIConfig(t, apiDir, "api", "true")
+	writeCLIConfig(t, filepath.Join(root, "web"), "web", "true")
+	commitRepo(t, root)
+	out := filepath.Join(apiDir, "out.txt")
+	if err := os.WriteFile(out, []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"check", "--all", "--isolated"})
+	requireCheckAllSuccess(t, stdout, stderr, code,
+		filepath.Join("api", "genguard.yaml"),
+		filepath.Join("web", "genguard.yaml"),
+	)
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "dirty\n" {
+		t.Fatalf("user out.txt = %q, --all --isolated wrote the checkout", got)
+	}
+}
+
+func TestCLICheckAllIsolatedDriftUsesCapturedDiff(t *testing.T) {
+	root := initCLIRepo(t)
+	apiDir := filepath.Join(root, "api")
+	writeCLIConfig(t, apiDir, "api", "printf 'new\\n' > out.txt")
+	if err := os.WriteFile(filepath.Join(apiDir, "out.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCLIConfig(t, filepath.Join(root, "web"), "web", "true")
+	commitRepo(t, root)
+	if err := os.WriteFile(filepath.Join(apiDir, "out.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"check", "--all", "--isolated"})
+	requireCheckAllFailure(t, stdout, stderr, code, 1, []string{
+		filepath.Join("api", "genguard.yaml") + "\n[modified] api: out.txt\n",
+		"+new",
+		"error: 1 generated path drifted; commit the generator output or fix the command",
+	}, []string{
+		"genguard-",
+		"dirty",
+	})
+	got, err := os.ReadFile(filepath.Join(apiDir, "out.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "dirty\n" {
+		t.Fatalf("user out.txt = %q", got)
+	}
+}
+
 func TestCLICheckAllRejectsConfigFlag(t *testing.T) {
 	testutil.Chdir(t, t.TempDir())
 	for _, args := range [][]string{
@@ -611,6 +701,9 @@ func TestCLICheckAllHelpDoesNotRun(t *testing.T) {
 		}
 		if !strings.Contains(stderr, "-all") || !strings.Contains(stderr, "genguard.yml") {
 			t.Fatalf("%v: stderr = %q", args, stderr)
+		}
+		if !strings.Contains(stderr, "-isolated") {
+			t.Fatalf("%v: missing -isolated: %q", args, stderr)
 		}
 		if strings.Contains(stderr, "git work tree") {
 			t.Fatalf("%v: ran the check: %q", args, stderr)

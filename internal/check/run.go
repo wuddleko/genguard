@@ -77,6 +77,9 @@ func (r RunResult) SummaryLines() []string {
 			continue
 		}
 		lines = append(lines, cfg.Result.SummaryLines()...)
+		if cfg.Result.cleanup != nil {
+			lines = append(lines, fmt.Sprintf("  error (%s)", oneLineError(cfg.Result.cleanup)))
+		}
 	}
 	if len(r.Configs) > 0 {
 		lines = append(lines, "")

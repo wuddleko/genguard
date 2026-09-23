@@ -27,6 +27,10 @@ type ConfigResult struct {
 	// Nil means FormatFailureReport diffs the root it was given.
 	// An isolated check sets it before deleting its worktree.
 	captured *capturedDriftDiff
+	// cleanup is a worktree remove failure after groups ran.
+	// A passing check then exits 2. Drift or a command error keeps
+	// its own exit code and the report includes this error too.
+	cleanup error
 }
 
 type capturedDriftDiff struct {
@@ -36,6 +40,13 @@ type capturedDriftDiff struct {
 
 func (r *ConfigResult) captureDriftDiff(text string, err error) {
 	r.captured = &capturedDriftDiff{text: text, err: err}
+}
+
+func (r *ConfigResult) noteCleanup(err error) {
+	if err == nil || r.cleanup != nil {
+		return
+	}
+	r.cleanup = err
 }
 
 func (r ConfigResult) AllDrifts() []Drift {
@@ -53,6 +64,9 @@ func (r ConfigResult) ExitCode() int {
 	}
 	if drift > 0 {
 		return 1
+	}
+	if r.cleanup != nil {
+		return 2
 	}
 	return 0
 }
@@ -125,6 +139,18 @@ func (r ConfigResult) Skipped() int {
 }
 
 func (r ConfigResult) FinalErrorLine() string {
+	line := r.groupFinalErrorLine()
+	if r.cleanup == nil {
+		return line
+	}
+	cleanup := "error: " + oneLineError(r.cleanup)
+	if line == "" {
+		return cleanup
+	}
+	return line + "\n" + cleanup
+}
+
+func (r ConfigResult) groupFinalErrorLine() string {
 	_, drift, errors := r.Counts()
 	switch {
 	case errors > 0 && drift > 0:

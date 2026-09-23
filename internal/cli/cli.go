@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/wuddleko/genguard/internal/check"
 	"github.com/wuddleko/genguard/internal/config"
@@ -47,6 +48,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	configPath := fs.String("config", "", "Path to genguard.yaml (default: walk parents from cwd)")
 	configShort := fs.String("c", "", "Path to genguard.yaml (default: walk parents from cwd)")
 	since := fs.String("since", "", "Run a group with inputs when its inputs, outputs, or config file differ from HEAD or from the merge-base of this ref, or a declared output file is missing")
+	isolated := fs.Bool("isolated", false, "Check the HEAD copy in a throwaway worktree (do not read or write the current checkout)")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -63,7 +65,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *all {
-		return runCheckAll(stdout, stderr, *since)
+		return runCheckAll(stdout, stderr, *since, *isolated)
 	}
 
 	path := selected
@@ -80,16 +82,27 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		path = found
 	}
 
-	cfg, err := config.LoadConfig(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
-	}
-
-	result, err := check.CheckSince(cfg, *since)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
+	var result check.ConfigResult
+	root := filepath.Dir(path)
+	if *isolated {
+		var err error
+		result, err = check.CheckSinceIsolated(path, *since)
+		if err != nil && len(result.Groups) == 0 {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+	} else {
+		cfg, err := config.LoadConfig(path)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		result, err = check.CheckSince(cfg, *since)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		root = cfg.Root()
 	}
 	if result.ExitCode() == 0 {
 		fmt.Fprintln(stdout, "Generated files match the generators.")
@@ -101,7 +114,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	report, err := check.FormatFailureReport(result, cfg.Root())
+	report, err := check.FormatFailureReport(result, root)
 	fmt.Fprint(stderr, report)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -110,8 +123,8 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	return result.ExitCode()
 }
 
-func runCheckAll(stdout, stderr io.Writer, since string) int {
-	run, err := check.CheckAll(check.CheckAllOptions{Since: since})
+func runCheckAll(stdout, stderr io.Writer, since string, isolated bool) int {
+	run, err := check.CheckAll(check.CheckAllOptions{Since: since, Isolated: isolated})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
@@ -141,8 +154,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, `genguard — fail CI when committed generated outputs drift from their generators
 
 Usage:
-  genguard check [-c|--config path/to/genguard.yaml] [--since ref]
-  genguard check --all [--since ref]
+  genguard check [-c|--config path/to/genguard.yaml] [--since ref] [--isolated]
+  genguard check --all [--since ref] [--isolated]
   genguard version
 
 `)

@@ -225,8 +225,8 @@ func TestIsolatedMissingConfigIsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), cfgPath) || strings.Contains(err.Error(), "genguard-") {
-		t.Fatalf("err = %q, want the caller path", err)
+	if !strings.Contains(err.Error(), cfgPath+" is not in HEAD") || strings.Contains(err.Error(), "genguard-") {
+		t.Fatalf("err = %q, want not in HEAD at the caller path", err)
 	}
 	if _, err := config.LoadConfig(cfgPath); err != nil {
 		t.Fatal(err)

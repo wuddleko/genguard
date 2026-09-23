@@ -396,3 +396,47 @@ func repoWithModifiedFile(t *testing.T) string {
 	}
 	return root
 }
+
+func TestIsolatedRunKeepsCompletedCheck(t *testing.T) {
+	removeErr := newGenguardError("git worktree remove: busy")
+	result := ConfigResult{Groups: []GroupResult{{Name: "api", Status: GroupDrift, Drifts: []Drift{{
+		Group: "api", Path: "out.txt", Kind: "modified",
+	}}}}}
+	run := isolatedRun("genguard.yaml", result, removeErr)
+	if run.Err != nil {
+		t.Fatalf("Err = %v, want the drift result", run.Err)
+	}
+	if len(run.Result.Groups) != 1 || run.Result.Groups[0].Status != GroupDrift {
+		t.Fatalf("Result = %+v", run.Result)
+	}
+	if run.ExitCode() != 1 {
+		t.Fatalf("exit = %d, want 1", run.ExitCode())
+	}
+	line := run.Result.FinalErrorLine()
+	if !strings.Contains(line, "generated path drifted") || !strings.Contains(line, "git worktree remove: busy") {
+		t.Fatalf("line = %q", line)
+	}
+
+	run = isolatedRun("genguard.yaml", ConfigResult{Groups: []GroupResult{{Name: "api", Status: GroupOK}}}, removeErr)
+	if run.Err != nil {
+		t.Fatalf("Err = %v", run.Err)
+	}
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", run.ExitCode())
+	}
+	report, err := FormatRunFailureReport(RunResult{Configs: []ConfigRun{run}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(report, "api: OK") || !strings.Contains(report, "error (git worktree remove: busy)") || !strings.Contains(report, "error: git worktree remove: busy") {
+		t.Fatalf("report = %q", report)
+	}
+
+	run = isolatedRun("genguard.yaml", ConfigResult{}, newGenguardError("git worktree add: failed"))
+	if run.Err == nil || !strings.Contains(run.Err.Error(), "git worktree add") {
+		t.Fatalf("Err = %v", run.Err)
+	}
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", run.ExitCode())
+	}
+}

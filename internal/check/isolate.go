@@ -26,6 +26,9 @@ func CheckSinceIsolated(path, since string) (ConfigResult, error) {
 		result = r
 		return nil
 	})
+	if err != nil && len(result.Groups) > 0 {
+		result.noteCleanup(err)
+	}
 	return result, err
 }
 
@@ -51,6 +54,9 @@ func withIsolatedCheck(path, since string, fn func(config.Config, ConfigResult) 
 		}
 		cfg, err := config.LoadConfig(mapped)
 		if err != nil {
+			if os.IsNotExist(err) {
+				return newGenguardError("%s is not in HEAD", path)
+			}
 			return callerPathError(err, mapped, path)
 		}
 		result, err := CheckSince(cfg, since)
