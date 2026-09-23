@@ -51,31 +51,29 @@ The diff is against `HEAD` in the checkout you just made. On a pull request that
 
 ## Install
 
-Download an archive from [GitHub Releases](https://github.com/wuddleko/genguard/releases). The filename drops the leading `v`; the URL keeps the tag. Each release also has `checksums.txt`.
+With Go 1.22+:
 
 ```bash
-GENGUARD_TAG=v0.2.0
-GENGUARD_VERSION=${GENGUARD_TAG#v}
-curl -fsSL \
-  "https://github.com/wuddleko/genguard/releases/download/${GENGUARD_TAG}/genguard_${GENGUARD_VERSION}_linux_amd64.tar.gz" \
-  -o genguard.tar.gz
-tar xzf genguard.tar.gz genguard
-sudo install genguard /usr/local/bin/genguard
-```
-
-Change the archive name for the machine (`darwin_arm64`, `linux_amd64`, `windows_amd64.zip`, and so on). On Windows the binary is `genguard.exe`.
-
-From source, with Go 1.22+:
-
-```bash
-make install
-# or, from this repository
-go install ./cmd/genguard
-# or a published module version
-go install github.com/wuddleko/genguard/cmd/genguard@v0.2.0
+go install github.com/wuddleko/genguard/cmd/genguard@v0.3.0
 ```
 
 `$(go env GOPATH)/bin` has to be on your `PATH`.
+
+From a checkout of this repository:
+
+```bash
+make install
+# or
+go install ./cmd/genguard
+```
+
+Without Go, [install.sh](install.sh) downloads the release for this machine, checks the archive against `checksums.txt`, and installs into a directory already on `PATH`. From a checkout of this repository:
+
+```bash
+sh install.sh
+```
+
+Pass a tag, or set `GENGUARD_TAG`, to choose another release. Run `sh install.sh --help` for install location and platform options.
 
 ## Config
 

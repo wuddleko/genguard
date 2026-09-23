@@ -38,4 +38,4 @@ genguard check
 
 ## CI
 
-See [docs/ci.md](../docs/ci.md) for GitHub Actions snippets that install `genguard` and run `genguard check`.
+See [docs/ci.md](../docs/ci.md) for GitHub Actions and GitLab snippets that install `genguard` and run `genguard check`.

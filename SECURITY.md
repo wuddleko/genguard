@@ -18,4 +18,4 @@ A failed command includes its output in the error. Drift includes a git diff. Wh
 
 ## Releases
 
-Download archives from [GitHub Releases](https://github.com/wuddleko/genguard/releases) and check them against the `checksums.txt` published with that release. Fixes ship on the latest release.
+Download archives from [GitHub Releases](https://github.com/wuddleko/genguard/releases) and check them against the `checksums.txt` published with that release. [install.sh](install.sh) does that check for the release it downloads. Pin an `install.sh` URL to a release tag that contains the script. Fixes ship on the latest release.
