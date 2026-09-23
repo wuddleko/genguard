@@ -160,7 +160,7 @@ func TestCheckFailsOnUntrackedOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	extra := "(out / 'extra.txt').write_text('bonus\\n', encoding='utf-8')\n"
+	extra := "(out / 'extra.txt').write_bytes(b'bonus\\n')\n"
 	if err := os.WriteFile(genPath, append(gen, []byte(extra)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1627,7 +1627,7 @@ func TestCheckCleanGlobSqlcPackage(t *testing.T) {
 	session := "package db\n\ntype OidcSession struct{}\n"
 	groups := []testutil.GroupSpec{{
 		Name:    "sqlc",
-		Command: `python3 -c 'open("oidc_queries.sql.go","w").write("package db\n\nfunc Queries() {}\n"); open("session_queries.sql.go","w").write("package db\n\ntype OidcSession struct{}\n")'`,
+		Command: `python3 -c 'open("oidc_queries.sql.go","wb").write(b"package db\n\nfunc Queries() {}\n"); open("session_queries.sql.go","wb").write(b"package db\n\ntype OidcSession struct{}\n")'`,
 		Outputs: []string{"*_queries.sql.go"},
 		Clean:   true,
 	}, {

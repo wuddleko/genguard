@@ -14,7 +14,8 @@ root = Path(__file__).resolve().parents[1]
 src = (root / "name.txt").read_text(encoding="utf-8").strip()
 out = root / "generated"
 out.mkdir(exist_ok=True)
-(out / "hello.txt").write_text(f"hello {src}\n", encoding="utf-8")
+# Binary write keeps a single LF on every platform.
+(out / "hello.txt").write_bytes(f"hello {src}\n".encode("utf-8"))
 `
 
 type GroupSpec struct {
