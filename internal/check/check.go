@@ -58,21 +58,39 @@ func checkGroup(root string, group config.Group, damage map[string]pathSnap) Gro
 	// Drop snapshots this group changes so a later wipe is that group's drift.
 	defer dropRepairedDamage(damage)
 
+	// wipe is the tree immediately after a successful clean, before the
+	// command. A failed command still diffs. Paths that still match an
+	// earlier group's residue, or this wipe, are left out. damage is
+	// updated afterward with the residue after the command, for later groups.
+	var wipe map[string]pathSnap
 	if group.Clean {
 		if err := cleanOutputs(root, group); err != nil {
 			result.Status = GroupError
 			result.Err = err
 			return result
 		}
+		wipe = snapshotClean(root, group)
 	}
 
 	if err := runCommand(root, group.Command); err != nil {
 		result.Status = GroupError
 		if group.Clean {
 			result.Err = newGenguardError("command failed after cleaning outputs: %s", err.Error())
-			recordCleanDamage(damage, root, group)
 		} else {
 			result.Err = err
+		}
+		found, driftErr := driftForGroup(root, group)
+		if driftErr != nil {
+			result.Err = driftErr
+			return result
+		}
+		// The report leaves out wipe residue. damage records the full list,
+		// including that residue, for later groups.
+		reported := omitUnchangedDamage(root, found, damage)
+		reported = omitUnchangedDamage(root, reported, wipe)
+		result.Drifts = reported
+		if group.Clean {
+			recordFoundDamage(damage, root, found)
 		}
 		return result
 	}
@@ -105,11 +123,21 @@ type pathSnap struct {
 	hashed  bool
 }
 
+func snapshotClean(root string, group config.Group) map[string]pathSnap {
+	snap := map[string]pathSnap{}
+	recordCleanDamage(snap, root, group)
+	return snap
+}
+
 func recordCleanDamage(damage map[string]pathSnap, root string, group config.Group) {
 	found, err := driftForGroup(root, group)
 	if err != nil {
 		return
 	}
+	recordFoundDamage(damage, root, found)
+}
+
+func recordFoundDamage(damage map[string]pathSnap, root string, found []Drift) {
 	for _, item := range found {
 		abs := absDriftPath(root, item.Path)
 		damage[abs] = snapPath(abs)
