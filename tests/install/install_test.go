@@ -87,11 +87,11 @@ func TestPrintAsset(t *testing.T) {
 	cases := []struct {
 		os, arch, tag, want string
 	}{
-		{"linux", "amd64", "", "genguard_0.3.0_linux_amd64.tar.gz"},
-		{"linux", "arm64", "", "genguard_0.3.0_linux_arm64.tar.gz"},
-		{"darwin", "amd64", "", "genguard_0.3.0_darwin_amd64.tar.gz"},
-		{"darwin", "arm64", "", "genguard_0.3.0_darwin_arm64.tar.gz"},
-		{"windows", "amd64", "", "genguard_0.3.0_windows_amd64.zip"},
+		{"linux", "amd64", "", "genguard_0.4.0_linux_amd64.tar.gz"},
+		{"linux", "arm64", "", "genguard_0.4.0_linux_arm64.tar.gz"},
+		{"darwin", "amd64", "", "genguard_0.4.0_darwin_amd64.tar.gz"},
+		{"darwin", "arm64", "", "genguard_0.4.0_darwin_arm64.tar.gz"},
+		{"windows", "amd64", "", "genguard_0.4.0_windows_amd64.zip"},
 		{"linux", "amd64", "v1.2.3", "genguard_1.2.3_linux_amd64.tar.gz"},
 		{"linux", "amd64", "v1.2.3-rc.1", "genguard_1.2.3-rc.1_linux_amd64.tar.gz"},
 	}
