@@ -2,9 +2,13 @@
 
 `genguard check` is meant to run in CI after checkout, inside a git work tree. It re-runs your declared generator commands and fails if `git diff HEAD` would show changes under the declared `outputs` (working tree vs committed files, including staged but uncommitted generated output). Gitignored files under `outputs` are not reported as untracked — commit the generated files.
 
-Groups run in order. Every group runs even when an earlier one fails or drifts; on failure genguard prints a **Summary** (one line per group, with drift kinds), then **Drift** details and diffs. Later groups see the working tree as earlier groups left it. When an earlier group fails after `clean`, paths it wiped and a later group leaves untouched stay out of that later group's drift. A later command that writes those paths is checked as usual. Prefer disjoint `outputs` so a group that drifts cannot change the tree the next group checks.
+Groups run in order. Without `--since`, every group runs even when an earlier one fails or drifts. On failure genguard prints a **Summary** (one line per group, with drift kinds), then **Drift** details and diffs. A failed command is still diffed: the group counts as an error, and the summary line names the drift it left behind. A `clean` wipe the command never rewrote is left out of that list. Later groups see the working tree as earlier groups left it. When an earlier group fails after `clean`, paths it wiped and a later group leaves untouched stay out of that later group's drift. A later command that writes those paths is checked as usual. Prefer disjoint `outputs` so a group that drifts cannot change the tree the next group checks.
+
+`genguard check --since origin/main` reruns a group that declares `inputs` when those inputs, its outputs, or the config file differ between the working tree and the merge-base of that ref and `HEAD`. A group with no `inputs` still runs. An unchanged group is `skipped`: its command does not run, and `clean: true` does not delete its outputs. `genguard check --all --since origin/main` uses one merge-base, then the same rule per group. A missing or unrelated ref exits `2` before any group runs.
 
 Exit codes:
+
+A skip does not add a code. A matching run is `0`, including when some groups were skipped. Drift is `1`. A bad `--since` ref, an empty `inputs` list, and a failed command are `2`.
 
 | Code | Meaning |
 |---|---|
@@ -94,7 +98,7 @@ Place `genguard.yaml` or `genguard.yml` at the repository root. Paths in `output
 
 ## Monorepo with config per service
 
-`genguard check --all` discovers every config under the repository root, one `genguard.yaml` or `genguard.yml` per directory. It skips directories named `.git`, `vendor`, and `node_modules`, and it does not read `.gitignore`, so a config inside an ignored directory still runs. A passing run prints each config path and a totals line. Both names in one directory exit `2`.
+`genguard check --all` discovers every config under the repository root, one `genguard.yaml` or `genguard.yml` per directory. It skips directories named `.git`, `vendor`, and `node_modules`, and it does not read `.gitignore`, so a config inside an ignored directory still runs. A passing run prints each config path and a totals line. A config that skipped a group is printed again with that group's lines. Both names in one directory exit `2`. `genguard check --all --since origin/main` applies `--since` to every group.
 
 ```yaml
       - uses: actions/checkout@v4
@@ -125,7 +129,7 @@ This repository validates that every file under `examples/*.yaml` parses:
 
 ## What to commit
 
-- Source files your generator reads (`.proto`, OpenAPI spec, SQL queries, etc.)
+- Source files your generator reads (`.proto`, OpenAPI spec, SQL queries, etc.). List those paths under `inputs` when a pull request should be able to skip the group
 - The generator command in `genguard.yaml` or `genguard.yml`
 - The generated output paths listed under `outputs` (tracked, not gitignored)
 
@@ -170,6 +174,9 @@ groups:
 
   - name: sqlc
     command: sqlc generate
+    inputs:
+      - queries/
+      - sqlc.yaml
     outputs:
       - internal/db/
 
