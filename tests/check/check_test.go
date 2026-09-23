@@ -2699,8 +2699,10 @@ func sinceGroups() []testutil.GroupSpec {
 			Outputs: []string{"internal/db/out.txt"},
 		},
 		{
-			Name:    "protobuf",
-			Command: `python3 -c "open('proto-ran','w').close(); open('gen/a.pb.go','w').write('package gen'+chr(10))"`,
+			Name: "protobuf",
+			// Text mode on Windows turns the LF into CRLF, so the file
+			// cleaned and rewritten no longer matches HEAD.
+			Command: `python3 -c "open('proto-ran','w').close(); open('gen/a.pb.go','wb').write(b'package gen\n')"`,
 			Inputs:  []string{"proto/"},
 			Outputs: []string{"gen/a.pb.go"},
 			Clean:   true,
