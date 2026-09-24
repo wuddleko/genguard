@@ -1213,7 +1213,7 @@ func TestRunAllOverlappingCleanSharesTree(t *testing.T) {
 	}
 	nested, err := testutil.WriteGenguardConfig(nestedDir, "", "", "", []testutil.GroupSpec{{
 		Name:    "nested",
-		Command: "true",
+		Command: "test ! -f out.txt",
 		Outputs: []string{"out.txt"},
 	}})
 	if err != nil {
@@ -1257,11 +1257,12 @@ func TestRunAllSinceSelectsPerGroup(t *testing.T) {
 	}
 	sqlc := groupInRun(t, run, "sqlc")
 	protobuf := groupInRun(t, run, "protobuf")
+	plain := groupInRun(t, run, "plain")
 	api := groupInRun(t, run, "api")
-	if sqlc.Status != check.GroupOK || protobuf.Status != check.GroupSkipped || api.Status != check.GroupSkipped {
-		t.Fatalf("sqlc=%s protobuf=%s api=%s", sqlc.Status, protobuf.Status, api.Status)
+	if sqlc.Status != check.GroupOK || protobuf.Status != check.GroupSkipped || plain.Status != check.GroupOK || api.Status != check.GroupSkipped {
+		t.Fatalf("sqlc=%s protobuf=%s plain=%s api=%s", sqlc.Status, protobuf.Status, plain.Status, api.Status)
 	}
-	if !markerExists(root, "sqlc-ran") || markerExists(root, "proto-ran") || markerExists(filepath.Join(root, "api"), "api-ran") {
+	if !markerExists(root, "sqlc-ran") || !markerExists(root, "plain-ran") || markerExists(root, "proto-ran") || markerExists(filepath.Join(root, "api"), "api-ran") {
 		t.Fatal("run --all did not select per group")
 	}
 	got, err := os.ReadFile(filepath.Join(root, "gen", "a.pb.go"))
@@ -1288,6 +1289,705 @@ func TestRunAllRejectsIsolated(t *testing.T) {
 	_, err := check.RunAll(check.CheckAllOptions{Isolated: true})
 	if err == nil || !strings.Contains(err.Error(), "--isolated is not valid") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunAllCleanSuccessLaterCommandSeesWipe(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	nestedDir := filepath.Join(apiDir, "nested")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "api",
+		Command: "true",
+		Outputs: []string{"nested/out.txt"},
+		Clean:   true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested, err := testutil.WriteGenguardConfig(nestedDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "nested",
+		Command: "test ! -f out.txt",
+		Outputs: []string{"out.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(nestedDir, "out.txt")
+	if err := os.WriteFile(out, []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	assertConfigPaths(t, run, api, nested)
+	if configByPath(t, run, api).Result.Groups[0].Status != check.GroupOK {
+		t.Fatal("api clean should succeed")
+	}
+	if configByPath(t, run, nested).Result.Groups[0].Status != check.GroupOK {
+		t.Fatalf("nested did not see the wipe: %+v", configByPath(t, run, nested).Result.Groups[0])
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Fatalf("shared tree kept %s: %v", out, err)
+	}
+}
+
+func TestRunAllLaterCommandSeesEarlierWrite(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	nestedDir := filepath.Join(apiDir, "nested")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	note := filepath.Join(nestedDir, "note.txt")
+	if err := os.WriteFile(note, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "api",
+		Command: `python3 -c "open('nested/note.txt','wb').write(b'from-api\n')"`,
+		Outputs: []string{"nested/note.txt"},
+		Clean:   true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested, err := testutil.WriteGenguardConfig(nestedDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "nested",
+		Command: `python3 -c "import pathlib; assert pathlib.Path('note.txt').read_bytes()==b'from-api\n'"`,
+		Outputs: []string{"note.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	assertConfigPaths(t, run, api, nested)
+	if configByPath(t, run, nested).Result.Groups[0].Status != check.GroupOK {
+		t.Fatalf("nested did not see the earlier write: %+v", configByPath(t, run, nested).Result.Groups[0])
+	}
+	got, err := os.ReadFile(note)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "from-api\n" {
+		t.Fatalf("note.txt = %q", got)
+	}
+}
+
+func TestRunAllSinceCleanedLiteralOutputRunsLaterConfig(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	nestedDir := filepath.Join(apiDir, "nested")
+	if err := os.MkdirAll(filepath.Join(nestedDir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "src", "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(nestedDir, "out.txt")
+	if err := os.WriteFile(out, []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "api",
+		Command: "true",
+		Outputs: []string{"nested/out.txt"},
+		Clean:   true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested, err := testutil.WriteGenguardConfig(nestedDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "nested",
+		Command: `test ! -f out.txt && python3 -c "open('ran','w').close()"`,
+		Inputs:  []string{"src/"},
+		Outputs: []string{"out.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitBase(t, root)
+
+	alone, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base", Paths: []string{nested}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alone.ExitCode() != 0 || groupInRun(t, alone, "nested").Status != check.GroupSkipped {
+		t.Fatalf("unchanged nested = %+v", alone.Configs)
+	}
+	if markerExists(nestedDir, "ran") {
+		t.Fatal("unchanged nested ran")
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	assertConfigPaths(t, run, api, nested)
+	if configByPath(t, run, api).Result.Groups[0].Status != check.GroupOK {
+		t.Fatalf("api = %+v", configByPath(t, run, api).Result.Groups[0])
+	}
+	if groupInRun(t, run, "nested").Status != check.GroupOK || !markerExists(nestedDir, "ran") {
+		t.Fatalf("deleted literal output did not run nested: %+v", groupInRun(t, run, "nested"))
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Fatalf("out.txt = %v", err)
+	}
+}
+
+func TestRunAllSinceCleanedTrackedOutputRunsDirectoryAndGlob(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	nestedDir := filepath.Join(apiDir, "nested")
+	genDir := filepath.Join(nestedDir, "gen")
+	if err := os.MkdirAll(filepath.Join(nestedDir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(genDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "src", "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kept := filepath.Join(genDir, "kept.txt")
+	if err := os.WriteFile(kept, []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "api",
+		Command: "true",
+		Outputs: []string{"nested/gen/kept.txt"},
+		Clean:   true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested, err := testutil.WriteGenguardConfig(nestedDir, "", "", "", []testutil.GroupSpec{
+		{
+			Name:    "dir",
+			Command: `test ! -f gen/kept.txt && python3 -c "open('dir-ran','w').close()"`,
+			Inputs:  []string{"src/"},
+			Outputs: []string{"gen/"},
+		},
+		{
+			Name:    "glob",
+			Command: `test ! -f gen/kept.txt && python3 -c "open('glob-ran','w').close()"`,
+			Inputs:  []string{"src/"},
+			Outputs: []string{"gen/*.txt"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitBase(t, root)
+
+	alone, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base", Paths: []string{nested}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alone.ExitCode() != 0 || groupInRun(t, alone, "dir").Status != check.GroupSkipped || groupInRun(t, alone, "glob").Status != check.GroupSkipped {
+		t.Fatalf("unchanged nested = %+v", alone.Configs)
+	}
+	if markerExists(nestedDir, "dir-ran") || markerExists(nestedDir, "glob-ran") {
+		t.Fatal("unchanged nested ran")
+	}
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	assertConfigPaths(t, run, api, nested)
+	if groupInRun(t, run, "dir").Status != check.GroupOK || groupInRun(t, run, "glob").Status != check.GroupOK {
+		t.Fatalf("dir=%+v glob=%+v", groupInRun(t, run, "dir"), groupInRun(t, run, "glob"))
+	}
+	if !markerExists(nestedDir, "dir-ran") || !markerExists(nestedDir, "glob-ran") {
+		t.Fatal("tracked deletion did not run the later groups")
+	}
+	if _, err := os.Stat(kept); !os.IsNotExist(err) {
+		t.Fatalf("kept.txt = %v", err)
+	}
+}
+
+func TestRunAllSinceCleanedUntrackedFileLeavesDirectoryAndGlobSkipped(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	nestedDir := filepath.Join(apiDir, "nested")
+	if err := os.MkdirAll(filepath.Join(nestedDir, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "src", "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "api",
+		Command: "true",
+		Outputs: []string{"nested/gen/extra.txt"},
+		Clean:   true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested, err := testutil.WriteGenguardConfig(nestedDir, "", "", "", []testutil.GroupSpec{
+		{
+			Name:    "dir",
+			Command: `python3 -c "open('dir-ran','w').close()"`,
+			Inputs:  []string{"src/"},
+			Outputs: []string{"gen/"},
+		},
+		{
+			Name:    "glob",
+			Command: `python3 -c "open('glob-ran','w').close()"`,
+			Inputs:  []string{"src/"},
+			Outputs: []string{"gen/*.txt"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitBase(t, root)
+
+	alone, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base", Paths: []string{nested}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alone.ExitCode() != 0 || groupInRun(t, alone, "dir").Status != check.GroupSkipped || groupInRun(t, alone, "glob").Status != check.GroupSkipped {
+		t.Fatalf("unchanged nested = %+v", alone.Configs)
+	}
+
+	extra := filepath.Join(nestedDir, "gen", "extra.txt")
+	if err := os.MkdirAll(filepath.Dir(extra), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(extra, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	assertConfigPaths(t, run, api, nested)
+	if configByPath(t, run, api).Result.Groups[0].Status != check.GroupOK {
+		t.Fatalf("api = %+v", configByPath(t, run, api).Result.Groups[0])
+	}
+	if groupInRun(t, run, "dir").Status != check.GroupSkipped || groupInRun(t, run, "glob").Status != check.GroupSkipped {
+		t.Fatalf("dir=%+v glob=%+v", groupInRun(t, run, "dir"), groupInRun(t, run, "glob"))
+	}
+	if markerExists(nestedDir, "dir-ran") || markerExists(nestedDir, "glob-ran") {
+		t.Fatal("untracked deletion ran a later group")
+	}
+	if _, err := os.Stat(extra); !os.IsNotExist(err) {
+		t.Fatalf("extra.txt = %v", err)
+	}
+}
+
+func TestRunAllSkipsVendorGitNodeModules(t *testing.T) {
+	root := initMonorepo(t)
+	for _, dir := range []string{
+		filepath.Join(root, ".git", "hooks"),
+		filepath.Join(root, "vendor", "lib"),
+		filepath.Join(root, "web", "node_modules", "pkg"),
+	} {
+		writeMiniConfig(t, dir, "hidden", `python3 -c "open('ran','w').close()"`)
+	}
+	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	assertConfigPaths(t, run, api)
+	if !markerExists(filepath.Join(root, "api"), "api-ran") {
+		t.Fatal("api did not run")
+	}
+	for _, dir := range []string{
+		filepath.Join(root, ".git", "hooks"),
+		filepath.Join(root, "vendor", "lib"),
+		filepath.Join(root, "web", "node_modules", "pkg"),
+	} {
+		if markerExists(dir, "ran") {
+			t.Fatalf("ran a skipped config in %s", dir)
+		}
+	}
+}
+
+func TestRunAllDiscoversAndRunsYml(t *testing.T) {
+	root := initMonorepo(t)
+	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
+	webDir := filepath.Join(root, "web")
+	if err := os.MkdirAll(webDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	web, err := testutil.WriteGenguardConfig(webDir, "", "", "genguard.yml", []testutil.GroupSpec{{
+		Name:    "web",
+		Command: `python3 -c "open('web-ran','w').close()"`,
+		Outputs: []string{"out.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webDir, "out.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	assertConfigPaths(t, run, api, web)
+	if !markerExists(filepath.Join(root, "api"), "api-ran") || !markerExists(webDir, "web-ran") {
+		t.Fatal("yaml or yml config did not run")
+	}
+}
+
+func TestRunAllBothNamesRunsNothing(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	writeMiniConfig(t, apiDir, "yaml", `python3 -c "open('yaml-ran','w').close()"`)
+	if _, err := testutil.WriteGenguardConfig(apiDir, "", "", "genguard.yml", []testutil.GroupSpec{{
+		Name:    "yml",
+		Command: `python3 -c "open('yml-ran','w').close()"`,
+		Outputs: []string{"other.txt"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	writeMiniConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
+	commitAll(t, root)
+
+	_, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err == nil || !strings.Contains(err.Error(), "both genguard.yaml and genguard.yml") || !strings.Contains(err.Error(), apiDir) {
+		t.Fatalf("err = %v", err)
+	}
+	if markerExists(apiDir, "yaml-ran") || markerExists(apiDir, "yml-ran") || markerExists(filepath.Join(root, "web"), "web-ran") {
+		t.Fatal("both names ran a command")
+	}
+}
+
+func TestRunAllUntrackedConfigRuns(t *testing.T) {
+	root := initMonorepo(t)
+	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
+	commitAll(t, root)
+	extra := writeMiniConfig(t, filepath.Join(root, "extra"), "extra", `python3 -c "open('extra-ran','w').close()"`)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	assertConfigPaths(t, run, api, extra)
+	if !markerExists(filepath.Join(root, "api"), "api-ran") || !markerExists(filepath.Join(root, "extra"), "extra-ran") {
+		t.Fatal("untracked config did not run")
+	}
+}
+
+func TestRunAllIgnoredDirectoryStillRuns(t *testing.T) {
+	root := initMonorepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
+	commitAll(t, root)
+	ignored := writeMiniConfig(t, filepath.Join(root, "ignored"), "ignored", `python3 -c "open('ignored-ran','w').close()"`)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	assertConfigPaths(t, run, api, ignored)
+	if !markerExists(filepath.Join(root, "ignored"), "ignored-ran") {
+		t.Fatal("ignored directory did not run")
+	}
+}
+
+func TestRunAllDoesNotRunConfigDeletedFromCheckout(t *testing.T) {
+	root := initMonorepo(t)
+	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
+	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
+	commitAll(t, root)
+	if err := os.Remove(web); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	assertConfigPaths(t, run, api)
+	if !markerExists(filepath.Join(root, "api"), "api-ran") || markerExists(filepath.Join(root, "web"), "web-ran") {
+		t.Fatal("deleted checkout config ran")
+	}
+	if _, err := os.Stat(web); !os.IsNotExist(err) {
+		t.Fatal("deleted config was restored")
+	}
+}
+
+func TestRunAllSortsDedupsAndRunsInPathOrder(t *testing.T) {
+	root := initMonorepo(t)
+	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", "printf a >> ../order.txt")
+	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "printf b >> ../order.txt")
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{
+		RepoRoot: root,
+		Paths:    []string{web, api, web},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	assertConfigPaths(t, run, api, web)
+	got, err := os.ReadFile(filepath.Join(root, "order.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "ab" {
+		t.Fatalf("execution order = %q, want ab", got)
+	}
+}
+
+func TestRunAllRunsInDiscoveredPathOrder(t *testing.T) {
+	root := initMonorepo(t)
+	writeMiniConfig(t, filepath.Join(root, "z"), "z", "printf z >> ../order.txt")
+	writeMiniConfig(t, filepath.Join(root, "a"), "a", "printf a >> ../order.txt")
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "order.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "az" {
+		t.Fatalf("execution order = %q, want az", got)
+	}
+}
+
+func TestRunAllMissingPathStillRunsOthers(t *testing.T) {
+	root := initMonorepo(t)
+	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
+	commitAll(t, root)
+	missing := filepath.Join(root, "missing.yaml")
+
+	run, err := check.RunAll(check.CheckAllOptions{
+		RepoRoot: root,
+		Paths:    []string{missing, web},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", run.ExitCode())
+	}
+	if configByPath(t, run, missing).Err == nil {
+		t.Fatal("expected load error for missing config")
+	}
+	if !markerExists(filepath.Join(root, "web"), "web-ran") {
+		t.Fatal("web did not run")
+	}
+}
+
+func TestRunAllOutsideRepoStillRunsOthers(t *testing.T) {
+	root := initMonorepo(t)
+	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
+	commitAll(t, root)
+	orphanDir := t.TempDir()
+	orphan := writeMiniConfig(t, orphanDir, "orphan", `python3 -c "open('ran','w').close()"`)
+
+	run, err := check.RunAll(check.CheckAllOptions{
+		RepoRoot: root,
+		Paths:    []string{orphan, web},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", run.ExitCode())
+	}
+	orphanRun := configByPath(t, run, orphan)
+	if orphanRun.Err == nil || !strings.Contains(orphanRun.Err.Error(), "git work tree") {
+		t.Fatalf("orphan = %+v", orphanRun)
+	}
+	if markerExists(orphanDir, "ran") || !markerExists(filepath.Join(root, "web"), "web-ran") {
+		t.Fatal("outside repo changed which configs ran")
+	}
+}
+
+func TestRunAllCleanRefusalStillRunsOthers(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "api",
+		Command: `python3 -c "open('api-ran','w').close()"`,
+		Outputs: []string{"."},
+		Clean:   true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", run.ExitCode())
+	}
+	assertConfigPaths(t, run, api, web)
+	apiRun := configByPath(t, run, api)
+	if apiRun.Err != nil || apiRun.Result.Groups[0].Status != check.GroupError {
+		t.Fatalf("api = %+v, err = %v", apiRun.Result.Groups[0], apiRun.Err)
+	}
+	if apiRun.Result.Groups[0].Err == nil || !strings.Contains(apiRun.Result.Groups[0].Err.Error(), "clean refuses") {
+		t.Fatalf("api error = %v", apiRun.Result.Groups[0].Err)
+	}
+	if markerExists(apiDir, "api-ran") || !markerExists(filepath.Join(root, "web"), "web-ran") {
+		t.Fatal("refused clean ran its command or skipped web")
+	}
+}
+
+func TestRunAllEmptyDiscovery(t *testing.T) {
+	root := initMonorepo(t)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.Configs) != 0 || run.ExitCode() != 0 {
+		t.Fatalf("configs = %+v, exit = %d", run.Configs, run.ExitCode())
+	}
+}
+
+func TestRunAllExplicitEmptyPathsDiscovers(t *testing.T) {
+	root := initMonorepo(t)
+	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Paths: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertConfigPaths(t, run, api)
+	if !markerExists(filepath.Join(root, "api"), "api-ran") {
+		t.Fatal("empty paths did not discover")
+	}
+}
+
+func TestRunAllRepoRootNormalizesToToplevel(t *testing.T) {
+	root := initMonorepo(t)
+	top := writeMiniConfig(t, root, "top", `python3 -c "open('top-ran','w').close()"`)
+	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: filepath.Join(root, "api")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.RepoRoot != root {
+		t.Fatalf("RepoRoot = %q, want %q", run.RepoRoot, root)
+	}
+	assertConfigPaths(t, run, api, top)
+	if !markerExists(root, "top-ran") || !markerExists(filepath.Join(root, "api"), "api-ran") {
+		t.Fatal("subdir root did not run every config")
+	}
+}
+
+func TestRunAllMissingRepoRoot(t *testing.T) {
+	testutil.Chdir(t, t.TempDir())
+	_, err := check.RunAll(check.CheckAllOptions{})
+	if err == nil || !strings.Contains(err.Error(), "git work tree") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunAllExplicitRepoRootMustBeGit(t *testing.T) {
+	dir := t.TempDir()
+	path := writeMiniConfig(t, dir, "lone", `python3 -c "open('ran','w').close()"`)
+	_, err := check.RunAll(check.CheckAllOptions{
+		RepoRoot: dir,
+		Paths:    []string{path},
+	})
+	if err == nil || !strings.Contains(err.Error(), "git work tree") {
+		t.Fatalf("err = %v", err)
+	}
+	if markerExists(dir, "ran") {
+		t.Fatal("non-repo ran a command")
+	}
+}
+
+func TestRunAllDiscoveryWalkError(t *testing.T) {
+	root := initMonorepo(t)
+	blocked := filepath.Join(root, "blocked")
+	if err := os.Mkdir(blocked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(blocked, 0o755)
+	})
+	if f, err := os.Open(blocked); err == nil {
+		f.Close()
+		t.Skip("directory permissions are not enforced")
+	}
+
+	_, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err == nil {
+		t.Fatal("expected discovery error")
 	}
 }
 
@@ -1325,6 +2025,14 @@ func commitAll(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func commitBase(t *testing.T, root string) {
+	t.Helper()
+	commitAll(t, root)
+	if err := testutil.Git(root, "branch", "base"); err != nil {
 		t.Fatal(err)
 	}
 }

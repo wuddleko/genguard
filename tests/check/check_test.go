@@ -2665,6 +2665,65 @@ func TestCLISinceAllLabelsSkippedGroups(t *testing.T) {
 	}
 }
 
+func TestCLIRunAllSinceLabelsSkippedGroups(t *testing.T) {
+	root := writeSinceRepo(t)
+	commitPath(t, root, "queries/q.sql", "select 2;\n")
+	testutil.Chdir(t, filepath.Join(root, "api"))
+
+	stdout, stderr, code := runCLI([]string{"run", "--all", "--since", "base"})
+	if code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, stderr)
+	}
+	want := strings.Join([]string{
+		"Generated files written.",
+		filepath.Join("api", "genguard.yaml"),
+		"genguard.yaml",
+		"2 configs: 2 ok, 0 drift, 0 error",
+		"",
+		filepath.Join("api", "genguard.yaml"),
+		"  api: skipped",
+		"1 group: 0 ok, 0 drift, 0 error, 1 skipped",
+		"",
+		"genguard.yaml",
+		"  sqlc: OK",
+		"  protobuf: skipped",
+		"  plain: OK",
+		"3 groups: 2 ok, 0 drift, 0 error, 1 skipped",
+	}, "\n") + "\n"
+	if stdout != want {
+		t.Fatalf("stdout =\n%s\nwant\n%s", stdout, want)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !markerExists(root, "sqlc-ran") || !markerExists(root, "plain-ran") || markerExists(root, "proto-ran") || markerExists(filepath.Join(root, "api"), "api-ran") {
+		t.Fatal("run --all --since did not select per group")
+	}
+	got, err := os.ReadFile(filepath.Join(root, "gen", "a.pb.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "package gen\n" {
+		t.Fatalf("clean ran on a skipped group: %q", got)
+	}
+}
+
+func TestCLIRunAllBadSinceDoesNotRun(t *testing.T) {
+	root := writeSinceRepo(t)
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"run", "--all", "--since", "not-a-ref"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "bad --since ref") {
+		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
+	}
+	if markerExists(root, "plain-ran") || markerExists(root, "sqlc-ran") || markerExists(filepath.Join(root, "api"), "api-ran") {
+		t.Fatal("bad ref ran a group")
+	}
+}
+
 func writeSinceRepo(t *testing.T) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "repo")

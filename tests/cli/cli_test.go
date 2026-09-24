@@ -733,15 +733,20 @@ func TestCLIRunAllCommandErrorStillRunsOther(t *testing.T) {
 	testutil.Chdir(t, root)
 
 	stdout, stderr, code := runCLI([]string{"run", "--all"})
-	if code != 2 {
-		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
-	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q", stdout)
-	}
-	if !strings.Contains(stderr, "api: error") || !strings.Contains(stderr, "web: OK") {
-		t.Fatalf("stderr = %q", stderr)
-	}
+	requireCheckAllFailure(t, stdout, stderr, code, 2, []string{
+		filepath.Join("api", "genguard.yaml"),
+		filepath.Join("web", "genguard.yaml"),
+		"api: error (command failed (exit 3): no output)",
+		"web: OK",
+		"2 configs: 1 ok, 0 drift, 1 error",
+		"error: command failed (exit 3): no output",
+	}, []string{"\nDrift\n", "Generated files written."})
+	requireOrder(t, stderr,
+		"api: error (command failed (exit 3): no output)",
+		"web: OK",
+		"2 configs: 1 ok, 0 drift, 1 error",
+		"error: command failed (exit 3): no output",
+	)
 	if _, err := os.Stat(filepath.Join(root, "web", "web-ran")); err != nil {
 		t.Fatal(err)
 	}
@@ -817,6 +822,269 @@ func TestCLIRunAllHelpDoesNotRun(t *testing.T) {
 	}
 	if strings.Contains(stderr, "git work tree") {
 		t.Fatalf("ran the command: %q", stderr)
+	}
+}
+
+func TestCLIRunAllIsolatedBeforeSince(t *testing.T) {
+	testutil.Chdir(t, t.TempDir())
+	for _, args := range [][]string{
+		{"run", "--all", "--isolated", "--since", "not-a-ref"},
+		{"run", "--since", "not-a-ref", "--all", "--isolated"},
+	} {
+		stdout, stderr, code := runCLI(args)
+		if code != 2 {
+			t.Fatalf("%v: code = %d, want 2; stderr = %q", args, code, stderr)
+		}
+		if stdout != "" || !strings.Contains(stderr, "--isolated is not valid") {
+			t.Fatalf("%v: stdout = %q stderr = %q", args, stdout, stderr)
+		}
+		if strings.Contains(stderr, "bad --since ref") || strings.Contains(stderr, "git work tree") {
+			t.Fatalf("%v: stderr = %q", args, stderr)
+		}
+	}
+}
+
+func TestCLIRunAllDiscoversYml(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
+	writeNamedCLIConfig(t, filepath.Join(root, "web"), "genguard.yml", "web", `python3 -c "open('web-ran','w').close()"`, []string{"out.txt"}, false)
+	if err := os.WriteFile(filepath.Join(root, "web", "out.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitRepo(t, root)
+
+	stdout, stderr, code := cliRunAll(t, root)
+	requireRunAllSuccess(t, stdout, stderr, code,
+		filepath.Join("api", "genguard.yaml"),
+		filepath.Join("web", "genguard.yml"),
+	)
+	if _, err := os.Stat(filepath.Join(root, "api", "api-ran")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "web", "web-ran")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCLIRunAllSameDirectoryYamlAndYml(t *testing.T) {
+	root := initCLIRepo(t)
+	dir := filepath.Join(root, "api")
+	writeCLIConfig(t, dir, "yaml", `python3 -c "open('yaml-ran','w').close()"`)
+	writeNamedCLIConfig(t, dir, "genguard.yml", "yml", `python3 -c "open('yml-ran','w').close()"`, []string{"other.txt"}, false)
+	writeCLIConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
+	commitRepo(t, root)
+
+	stdout, stderr, code := cliRunAll(t, root)
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stdout = %q stderr = %q", code, stdout, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "both genguard.yaml and genguard.yml") || !strings.Contains(stderr, dir) {
+		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
+	}
+	if strings.Contains(stderr, "web") || strings.Contains(stdout, "Generated files written.") {
+		t.Fatalf("other configs ran\nstdout = %q\nstderr = %q", stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "yaml-ran")); err == nil {
+		t.Fatal("yaml ran")
+	}
+	if _, err := os.Stat(filepath.Join(root, "web", "web-ran")); err == nil {
+		t.Fatal("web ran")
+	}
+}
+
+func TestCLIRunAllSkipsVendorGitNodeModules(t *testing.T) {
+	root := initCLIRepo(t)
+	for _, dir := range []string{
+		filepath.Join(root, ".git", "hooks"),
+		filepath.Join(root, "vendor", "lib"),
+		filepath.Join(root, "web", "node_modules", "pkg"),
+	} {
+		writeCLIConfig(t, dir, "hidden", `python3 -c "open('ran','w').close()"`)
+	}
+	writeCLIConfig(t, filepath.Join(root, "api"), "api", "true")
+	commitRepo(t, root)
+
+	stdout, stderr, code := cliRunAll(t, root)
+	requireRunAllSuccess(t, stdout, stderr, code, filepath.Join("api", "genguard.yaml"))
+	for _, dir := range []string{
+		filepath.Join(root, ".git", "hooks"),
+		filepath.Join(root, "vendor", "lib"),
+		filepath.Join(root, "web", "node_modules", "pkg"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, "ran")); err == nil {
+			t.Fatalf("ran a skipped config in %s", dir)
+		}
+	}
+}
+
+func TestCLIRunAllUntrackedConfigRuns(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
+	commitRepo(t, root)
+	writeCLIConfig(t, filepath.Join(root, "extra"), "extra", `python3 -c "open('extra-ran','w').close()"`)
+
+	stdout, stderr, code := cliRunAll(t, root)
+	requireRunAllSuccess(t, stdout, stderr, code,
+		filepath.Join("api", "genguard.yaml"),
+		filepath.Join("extra", "genguard.yaml"),
+	)
+	if _, err := os.Stat(filepath.Join(root, "extra", "extra-ran")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCLIRunAllIgnoredDirectoryStillRuns(t *testing.T) {
+	root := initCLIRepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCLIConfig(t, filepath.Join(root, "api"), "api", "true")
+	commitRepo(t, root)
+	writeCLIConfig(t, filepath.Join(root, "ignored"), "ignored", `python3 -c "open('ignored-ran','w').close()"`)
+
+	stdout, stderr, code := cliRunAll(t, root)
+	requireRunAllSuccess(t, stdout, stderr, code,
+		filepath.Join("api", "genguard.yaml"),
+		filepath.Join("ignored", "genguard.yaml"),
+	)
+	if _, err := os.Stat(filepath.Join(root, "ignored", "ignored-ran")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCLIRunAllNestedFromDeepest(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, filepath.Join(root, "api"), "api", "true")
+	writeCLIConfig(t, filepath.Join(root, "api", "proto"), "proto", "true")
+	commitRepo(t, root)
+
+	stdout, stderr, code := cliRunAll(t, filepath.Join(root, "api", "proto"))
+	requireRunAllSuccess(t, stdout, stderr, code,
+		filepath.Join("api", "genguard.yaml"),
+		filepath.Join("api", "proto", "genguard.yaml"),
+	)
+}
+
+func TestCLIRunAllSingleConfigFromEmptyDir(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, root, "root", "true")
+	commitRepo(t, root)
+	empty := filepath.Join(root, "services", "worker")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, empty)
+
+	for _, args := range [][]string{{"run", "--all"}, {"run", "-all"}} {
+		stdout, stderr, code := runCLI(args)
+		requireRunAllSuccess(t, stdout, stderr, code, "genguard.yaml")
+	}
+}
+
+func TestCLIRunAllTwoCommandErrorsExit2(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, filepath.Join(root, "api"), "api", "exit 3")
+	writeCLIConfig(t, filepath.Join(root, "web"), "web", "exit 4")
+	commitRepo(t, root)
+
+	stdout, stderr, code := cliRunAll(t, root)
+	requireCheckAllFailure(t, stdout, stderr, code, 2, []string{
+		"api: error (command failed (exit 3): no output)",
+		"web: error (command failed (exit 4): no output)",
+		"2 configs: 0 ok, 0 drift, 2 error",
+		"error: 2 configs failed",
+	}, []string{"\nDrift\n", "Generated files written.", ": OK"})
+}
+
+func TestCLIRunAllInvalidYAMLStillRunsOthers(t *testing.T) {
+	root := initCLIRepo(t)
+	apiDir := filepath.Join(root, "api")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apiDir, "genguard.yaml"), []byte("groups: [\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCLIConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
+	commitRepo(t, root)
+
+	stdout, stderr, code := cliRunAll(t, root)
+	requireCheckAllFailure(t, stdout, stderr, code, 2, []string{
+		filepath.Join("api", "genguard.yaml"),
+		"  error (parse ",
+		"web: OK",
+		"2 configs: 1 ok, 0 drift, 1 error",
+		"error: parse ",
+	}, []string{"\nDrift\n", "Generated files written."})
+	if _, err := os.Stat(filepath.Join(root, "web", "web-ran")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCLIRunAllCleanRefusalStillRunsOther(t *testing.T) {
+	root := initCLIRepo(t)
+	writeNamedCLIConfig(t, filepath.Join(root, "api"), "genguard.yaml", "api", `python3 -c "open('api-ran','w').close()"`, []string{"."}, true)
+	writeCLIConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
+	commitRepo(t, root)
+
+	stdout, stderr, code := cliRunAll(t, root)
+	requireCheckAllFailure(t, stdout, stderr, code, 2, []string{
+		`api: error (clean refuses "."`,
+		"web: OK",
+		"2 configs: 1 ok, 0 drift, 1 error",
+		`error: clean refuses "."`,
+	}, []string{"\nDrift\n", "Generated files written."})
+	if _, err := os.Stat(filepath.Join(root, "api", "api-ran")); err == nil {
+		t.Fatal("refused clean ran its command")
+	}
+	if _, err := os.Stat(filepath.Join(root, "web", "web-ran")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCLIRunAllNotGitRepoExit2(t *testing.T) {
+	testutil.Chdir(t, t.TempDir())
+
+	stdout, stderr, code := runCLI([]string{"run", "--all"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "git work tree") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stderr, "no genguard.yaml") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestCLIRunAllDiscoveryErrorExit2(t *testing.T) {
+	root := initCLIRepo(t)
+	blocked := filepath.Join(root, "blocked")
+	if err := os.Mkdir(blocked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(blocked, 0o755) })
+	if f, err := os.Open(blocked); err == nil {
+		f.Close()
+		t.Skip("directory permissions are not enforced")
+	}
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"run", "--all"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "error:") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stderr, "no genguard.yaml or genguard.yml found") {
+		t.Fatalf("walk error treated as empty discovery:\n%s", stderr)
 	}
 }
 
@@ -2255,6 +2523,37 @@ func cliCheckAll(t *testing.T, dir string) (string, string, int) {
 	}
 	testutil.Chdir(t, empty)
 	return runCLI([]string{"check", "--all"})
+}
+
+func cliRunAll(t *testing.T, dir string) (string, string, int) {
+	t.Helper()
+	empty := filepath.Join(dir, "empty")
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, empty)
+	return runCLI([]string{"run", "--all"})
+}
+
+func requireRunAllSuccess(t *testing.T, stdout, stderr string, code int, paths ...string) {
+	t.Helper()
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	noun := "configs"
+	if len(paths) == 1 {
+		noun = "config"
+	}
+	totals := strconv.Itoa(len(paths)) + " " + noun + ": " + strconv.Itoa(len(paths)) + " ok, 0 drift, 0 error"
+	lines := append([]string{"Generated files written."}, paths...)
+	lines = append(lines, totals, "")
+	want := strings.Join(lines, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q\nwant %q", stdout, want)
+	}
 }
 
 func requireCheckAllSuccess(t *testing.T, stdout, stderr string, code int, paths ...string) {
