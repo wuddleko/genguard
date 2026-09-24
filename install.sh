@@ -8,7 +8,7 @@
 
 set -eu
 
-default_tag=v0.3.0
+default_tag=v0.4.0
 repo=wuddleko/genguard
 
 die() {

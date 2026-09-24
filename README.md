@@ -44,6 +44,8 @@ genguard check -c path/to/genguard.yaml   # same as --config
 genguard check --all                      # every config in the repo
 genguard check --since origin/main        # rerun groups this change can affect
 genguard check --all --since origin/main
+genguard check --isolated                 # HEAD copy; leaves the checkout alone
+genguard check --all --isolated
 genguard version
 ```
 
@@ -54,7 +56,7 @@ The diff is against `HEAD` in the checkout you just made. On a pull request that
 With Go 1.22+:
 
 ```bash
-go install github.com/wuddleko/genguard/cmd/genguard@v0.3.0
+go install github.com/wuddleko/genguard/cmd/genguard@v0.4.0
 ```
 
 `$(go env GOPATH)/bin` has to be on your `PATH`.
@@ -80,6 +82,8 @@ Pass a tag, or set `GENGUARD_TAG`, to choose another release. Run `sh install.sh
 With no `--config`, genguard walks up from the current directory until it finds `genguard.yaml` or `genguard.yml`. That file has to sit inside a git work tree. A directory gets one of those names. Both files in the same directory make `genguard check` and `genguard check --all` exit 2. `--config` still checks the path you gave it.
 
 `genguard check --all` runs every config under the repository root, in path order, on the same working tree. It skips directories named `.git`, `vendor`, and `node_modules`. It does not read `.gitignore`, so a config inside an ignored directory still runs. A clean run prints each config path and a totals line. `--all` and `--config` are separate invocations.
+
+`genguard check --isolated` checks the committed copy of the config in a throwaway worktree and does not read or write dirty files in the checkout. Groups in that file still share the worktree. `--all --isolated` finds configs tracked at HEAD, including one deleted in the checkout, and skips a config that is not committed. Each config gets its own full worktree, one after another, so a failed `clean` in one file does not wipe files another config is judging.
 
 A group has:
 
@@ -195,7 +199,7 @@ error: bad --since ref: fatal: Not a valid object name not-a-ref
 
 Groups run in the order you listed them. Without `--since`, every group runs. Drift or a command error in the first one still lets the rest go. You get a Summary line per group, then the Drift paths and diffs.
 
-Each group sees the working tree the previous group left behind. Give them outputs that don't overlap, or a drift in one group changes what the next group is judging. `genguard check --all` follows the same rule across config files.
+Each group sees the working tree the previous group left behind. Give them outputs that don't overlap, or a drift in one group changes what the next group is judging. `genguard check --all` follows the same rule across config files. `--all --isolated` gives each config its own tree. Groups in one file still share that tree.
 
 If an earlier group has `clean: true` and then the command fails, paths it wiped and a later group never writes stay out of that later group's drift. A later command that does write them is checked as usual.
 
