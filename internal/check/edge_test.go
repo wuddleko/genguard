@@ -31,6 +31,14 @@ func TestCheckSinceRejectsNonRepo(t *testing.T) {
 	}
 }
 
+func TestRunSinceRejectsNonRepo(t *testing.T) {
+	dir := t.TempDir()
+	_, err := RunSince(config.Config{Path: filepath.Join(dir, "genguard.yaml")}, "HEAD")
+	if err == nil || !strings.Contains(err.Error(), "not a git work tree") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestCheckConfigNilDamage(t *testing.T) {
 	root := gitRepo(t)
 	writeTracked(t, root, "generated/hello.txt", "hello\n")

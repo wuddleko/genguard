@@ -487,6 +487,9 @@ func TestCLIHelp(t *testing.T) {
 	if !strings.Contains(stderr, "--isolated") {
 		t.Fatalf("stderr = %q", stderr)
 	}
+	if !strings.Contains(stderr, "genguard run") {
+		t.Fatalf("stderr = %q", stderr)
+	}
 	if !strings.Contains(stderr, "genguard version") {
 		t.Fatalf("stderr = %q", stderr)
 	}
@@ -507,6 +510,193 @@ func TestCLICheckHelpExit0(t *testing.T) {
 		if !strings.Contains(stderr, "-config") && !strings.Contains(stderr, "-c") {
 			t.Fatalf("%v: stderr = %q", args, stderr)
 		}
+	}
+}
+
+func TestCLIRunWritesWithoutFailingOnDrift(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("genguard\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "name.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "rename"); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files written.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello genguard\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestCLIRunSinceSkipsUnchangedDoesNotClean(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{
+			Name:    "sqlc",
+			Command: `python3 -c "open('sqlc-ran','w').close()"`,
+			Inputs:  []string{"queries/"},
+			Outputs: []string{"internal/db/out.txt"},
+		},
+		{
+			Name:    "protobuf",
+			Command: `python3 -c "open('proto-ran','w').close(); open('gen/a.pb.go','wb').write(b'NEW\n')"`,
+			Inputs:  []string{"proto/"},
+			Outputs: []string{"gen/a.pb.go"},
+			Clean:   true,
+		},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"queries/q.sql", "internal/db/out.txt", "proto/a.proto", "gen/a.pb.go"} {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "ok\n"
+		if rel == "gen/a.pb.go" {
+			body = "package gen\n"
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "base"); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--since", "HEAD", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stdout, "Generated files written.") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stdout, "protobuf: skipped") || !strings.Contains(stdout, "sqlc: skipped") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(root, "sqlc-ran")); err == nil {
+		t.Fatal("skipped group ran")
+	}
+	if _, err := os.Stat(filepath.Join(root, "proto-ran")); err == nil {
+		t.Fatal("skipped group ran")
+	}
+	got, err := os.ReadFile(filepath.Join(root, "gen", "a.pb.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "package gen\n" {
+		t.Fatalf("clean ran on a skipped group: %q", got)
+	}
+}
+
+func TestCLIRunCommandFailureExit2(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "broken",
+		Command: "exit 3",
+		Outputs: []string{"generated/hello.txt"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q, want no success sentence", stdout)
+	}
+	if !strings.Contains(stderr, "broken: error") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "error: command failed") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stderr, "Generated files written.") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestCLIRunIsolatedExit2(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", []testutil.GroupSpec{{
+		Name:    "greeting",
+		Command: `python3 -c "open('ran','w').close()"`,
+		Outputs: []string{"generated/hello.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--isolated", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "--isolated is not valid") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); err == nil {
+		t.Fatal("--isolated ran the command")
+	}
+}
+
+func TestCLIRunHelpExit0(t *testing.T) {
+	for _, args := range [][]string{{"run", "-h"}, {"run", "--help"}} {
+		stdout, stderr, code := runCLI(args)
+		if code != 0 {
+			t.Fatalf("%v: code = %d, want 0; stderr = %q", args, code, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("%v: stdout = %q", args, stdout)
+		}
+		if !strings.Contains(stderr, "-config") && !strings.Contains(stderr, "-c") {
+			t.Fatalf("%v: stderr = %q", args, stderr)
+		}
+		if !strings.Contains(stderr, "-since") {
+			t.Fatalf("%v: missing -since: %q", args, stderr)
+		}
+	}
+}
+
+func TestCLIRunAutoDiscoversConfig(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"run"})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files written.\n" {
+		t.Fatalf("stdout = %q", stdout)
 	}
 }
 

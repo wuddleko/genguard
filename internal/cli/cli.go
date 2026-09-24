@@ -27,6 +27,8 @@ func RunWithIO(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "check":
 		return runCheck(args[1:], stdout, stderr)
+	case "run":
+		return runRun(args[1:], stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintln(stdout, Version)
 		return 0
@@ -148,12 +150,78 @@ func runCheckAll(stdout, stderr io.Writer, since string, isolated bool) int {
 	return run.ExitCode()
 }
 
+func runRun(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "", "Path to genguard.yaml (default: walk parents from cwd)")
+	configShort := fs.String("c", "", "Path to genguard.yaml (default: walk parents from cwd)")
+	since := fs.String("since", "", "Run a group with inputs when its inputs, outputs, or config file differ from HEAD or from the merge-base of this ref, or a declared output file is missing")
+	isolated := fs.Bool("isolated", false, "Not valid with run; run writes the checkout")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if *isolated {
+		fmt.Fprint(stderr, "error: genguard run writes the checkout; --isolated is not valid\n")
+		return 2
+	}
+
+	selected := *configPath
+	if selected == "" {
+		selected = *configShort
+	}
+	path := selected
+	if path == "" {
+		found, err := config.FindConfig("")
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		if found == "" {
+			fmt.Fprint(stderr, "error: no genguard.yaml found (pass --config)\n")
+			return 2
+		}
+		path = found
+	}
+
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	result, err := check.RunSince(cfg, *since)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	if result.ExitCode() == 0 {
+		fmt.Fprintln(stdout, "Generated files written.")
+		if result.Skipped() > 0 {
+			for _, line := range result.SummaryLines() {
+				fmt.Fprintln(stdout, line)
+			}
+		}
+		return 0
+	}
+
+	report, err := check.FormatFailureReport(result, cfg.Root())
+	fmt.Fprint(stderr, report)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	return result.ExitCode()
+}
+
 func printUsage(w io.Writer) {
 	fmt.Fprint(w, `genguard — fail CI when committed generated outputs drift from their generators
 
 Usage:
   genguard check [-c|--config path/to/genguard.yaml] [--since ref] [--isolated]
   genguard check --all [--since ref] [--isolated]
+  genguard run [-c|--config path/to/genguard.yaml] [--since ref]
   genguard version
 
 `)
