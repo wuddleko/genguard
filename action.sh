@@ -26,7 +26,7 @@ release_ref() {
 }
 
 install_from_source() {
-  go install -mod=mod -C "$GITHUB_ACTION_PATH" ./cmd/genguard
+  go -C "$GITHUB_ACTION_PATH" install -mod=mod ./cmd/genguard
   bindir=$(go env GOBIN)
   if [ -z "$bindir" ]; then
     bindir=$(go env GOPATH)/bin

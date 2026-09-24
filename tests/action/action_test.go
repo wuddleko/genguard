@@ -75,7 +75,7 @@ func TestActionScript(t *testing.T) {
 			t.Fatal("GITHUB_ACTION_REF downloaded a release")
 		}
 		got := readFile(t, filepath.Join(out, "go"))
-		if !strings.HasPrefix(got, "install\n-mod=mod\n-C\n"+root+"\n./cmd/genguard\n") {
+		if !strings.HasPrefix(got, "-C\n"+root+"\ninstall\n-mod=mod\n./cmd/genguard\n") {
 			t.Fatalf("go args = %q", got)
 		}
 	})
@@ -132,7 +132,7 @@ func TestActionScript(t *testing.T) {
 			t.Fatal("branch ref downloaded a release")
 		}
 		got := readFile(t, filepath.Join(out, "go"))
-		if !strings.HasPrefix(got, "install\n-mod=mod\n-C\n"+root+"\n./cmd/genguard\n") {
+		if !strings.HasPrefix(got, "-C\n"+root+"\ninstall\n-mod=mod\n./cmd/genguard\n") {
 			t.Fatalf("go args = %q", got)
 		}
 		if got := readFile(t, pathFile); got != gobin+"\n" {
