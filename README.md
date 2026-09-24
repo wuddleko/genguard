@@ -46,6 +46,13 @@ genguard check --since origin/main        # rerun groups this change can affect
 genguard check --all --since origin/main
 genguard check --isolated                 # HEAD copy; leaves the checkout alone
 genguard check --all --isolated
+genguard run                              # regenerate; writes the checkout
+genguard run --since origin/main
+genguard run --all
+genguard run --all --since origin/main
+genguard check --json
+genguard check --all --json
+genguard run --json
 genguard version
 ```
 
@@ -56,7 +63,7 @@ The diff is against `HEAD` in the checkout you just made. On a pull request that
 With Go 1.22+:
 
 ```bash
-go install github.com/wuddleko/genguard/cmd/genguard@v0.4.0
+go install github.com/wuddleko/genguard/cmd/genguard@v0.5.0
 ```
 
 `$(go env GOPATH)/bin` has to be on your `PATH`.
@@ -84,6 +91,10 @@ With no `--config`, genguard walks up from the current directory until it finds 
 `genguard check --all` runs every config under the repository root, in path order, on the same working tree. It skips directories named `.git`, `vendor`, and `node_modules`. It does not read `.gitignore`, so a config inside an ignored directory still runs. A clean run prints each config path and a totals line. `--all` and `--config` are separate invocations.
 
 `genguard check --isolated` checks the committed copy of the config in a throwaway worktree and does not read or write dirty files in the checkout. Groups in that file still share the worktree. `--all --isolated` finds configs tracked at HEAD, including one deleted in the checkout, and skips a config that is not committed. Each config gets its own full worktree, one after another, so a failed `clean` in one file does not wipe files another config is judging.
+
+`genguard run` runs the same commands as `genguard check` and leaves the tree as the generator wrote it. It does not fail when that differs from HEAD. A skip under `--since` does not run `clean`. `--isolated` is not valid: run writes the checkout. `genguard run --all` runs every config in path order on that same checkout, so a `clean` in one file still deletes paths a later config is about to use.
+
+`--json` prints one JSON object on stdout and does not print the human report. The object has `exit` and `configs`. Each config has `path`, `exit`, and `groups`, and `error` when loading that config failed or an isolated worktree could not be removed. `path` is relative to the repository root for one config and for `--all`. A group has `name`, `status` (`ok`, `drift`, `error`, `skipped`), and, when present, `error` and `drifts` (`kind`, `path`). A drift `path` is relative to the repository root. Diffs stay in the human report. Exit codes are unchanged. A non-empty `error` does not replace `exit`. A failure before any config runs still prints `error:` on stderr and leaves stdout empty.
 
 A group has:
 
