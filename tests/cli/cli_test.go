@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -27,6 +28,33 @@ func runCLI(args []string) (stdout, stderr string, code int) {
 	var outBuf, errBuf bytes.Buffer
 	code = cli.RunWithIO(args, &outBuf, &errBuf)
 	return outBuf.String(), errBuf.String(), code
+}
+
+type cliJSON struct {
+	Exit    int `json:"exit"`
+	Configs []struct {
+		Path   string `json:"path"`
+		Exit   int    `json:"exit"`
+		Error  string `json:"error"`
+		Groups []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+			Error  string `json:"error"`
+			Drifts []struct {
+				Kind string `json:"kind"`
+				Path string `json:"path"`
+			} `json:"drifts"`
+		} `json:"groups"`
+	} `json:"configs"`
+}
+
+func decodeCLIJSON(t *testing.T, text string) cliJSON {
+	t.Helper()
+	var doc cliJSON
+	if err := json.Unmarshal([]byte(text), &doc); err != nil {
+		t.Fatalf("unmarshal %s: %v", text, err)
+	}
+	return doc
 }
 
 func commitPath(t *testing.T, root, rel, content string) {
@@ -493,6 +521,9 @@ func TestCLIHelp(t *testing.T) {
 	if !strings.Contains(stderr, "genguard run --all") {
 		t.Fatalf("stderr = %q", stderr)
 	}
+	if !strings.Contains(stderr, "--json") {
+		t.Fatalf("stderr = %q", stderr)
+	}
 	if !strings.Contains(stderr, "genguard version") {
 		t.Fatalf("stderr = %q", stderr)
 	}
@@ -510,9 +541,211 @@ func TestCLICheckHelpExit0(t *testing.T) {
 		if !strings.Contains(stderr, "-isolated") {
 			t.Fatalf("%v: missing -isolated: %q", args, stderr)
 		}
+		if !strings.Contains(stderr, "-json") {
+			t.Fatalf("%v: missing -json: %q", args, stderr)
+		}
 		if !strings.Contains(stderr, "-config") && !strings.Contains(stderr, "-c") {
 			t.Fatalf("%v: stderr = %q", args, stderr)
 		}
+	}
+}
+
+func TestCLICheckJSONDriftOmitsDiff(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("genguard\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "name.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "rename"); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(root, "genguard.yaml")
+
+	stdout, stderr, code := runCLI([]string{"check", "--json", "--config", configPath})
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stderr = %q\nstdout = %s", code, stderr, stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stdout, "Summary") || strings.Contains(stdout, "diff --git") || strings.Contains(stdout, "Generated files match") {
+		t.Fatalf("stdout = %s", stdout)
+	}
+	doc := decodeCLIJSON(t, stdout)
+	if doc.Exit != 1 || len(doc.Configs) != 1 || doc.Configs[0].Path != "genguard.yaml" {
+		t.Fatalf("doc = %+v", doc)
+	}
+	group := doc.Configs[0].Groups[0]
+	if group.Name != "greeting" || group.Status != "drift" || len(group.Drifts) != 1 {
+		t.Fatalf("group = %+v", group)
+	}
+	if group.Drifts[0].Kind != "modified" || group.Drifts[0].Path != "generated/hello.txt" {
+		t.Fatalf("drift = %+v", group.Drifts)
+	}
+
+	sub := filepath.Join(root, "generated")
+	testutil.Chdir(t, sub)
+	stdout, stderr, code = runCLI([]string{"check", "--json", "--config", filepath.Join("..", "genguard.yaml")})
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stderr = %q\nstdout = %s", code, stderr, stdout)
+	}
+	doc = decodeCLIJSON(t, stdout)
+	if doc.Configs[0].Path != "genguard.yaml" || doc.Configs[0].Groups[0].Drifts[0].Path != "generated/hello.txt" {
+		t.Fatalf("doc = %+v", doc)
+	}
+}
+
+func TestCLICheckJSONSinceSkipped(t *testing.T) {
+	root := initCLIRepo(t)
+	if _, err := testutil.WriteGenguardConfig(root, "", "", "", []testutil.GroupSpec{{
+		Name:    "sqlc",
+		Command: `python3 -c "open('ran','w').close()"`,
+		Inputs:  []string{"queries/"},
+		Outputs: []string{"out.txt"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"queries/q.sql", "out.txt"} {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("ok\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	commitRepo(t, root)
+
+	stdout, stderr, code := runCLI([]string{"check", "--json", "--since", "HEAD", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q\nstdout = %s", code, stderr, stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	doc := decodeCLIJSON(t, stdout)
+	if doc.Exit != 0 || doc.Configs[0].Path != "genguard.yaml" || doc.Configs[0].Groups[0].Status != "skipped" {
+		t.Fatalf("doc = %+v", doc)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); err == nil {
+		t.Fatal("skipped group ran")
+	}
+}
+
+func TestCLICheckAllJSON(t *testing.T) {
+	root := initCLIRepo(t)
+	apiDir := filepath.Join(root, "api")
+	writeCLIConfig(t, apiDir, "api", "printf 'new\\n' > out.txt")
+	if err := os.WriteFile(filepath.Join(apiDir, "out.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCLIConfig(t, filepath.Join(root, "web"), "web", "true")
+	commitRepo(t, root)
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"check", "--all", "--json"})
+	if code != 1 {
+		t.Fatalf("code = %d, want 1; stderr = %q\nstdout = %s", code, stderr, stdout)
+	}
+	if stderr != "" || strings.Contains(stdout, "diff --git") || strings.Contains(stdout, "Summary") {
+		t.Fatalf("stderr = %q\nstdout = %s", stderr, stdout)
+	}
+	doc := decodeCLIJSON(t, stdout)
+	if doc.Exit != 1 || len(doc.Configs) != 2 {
+		t.Fatalf("doc = %+v", doc)
+	}
+	if doc.Configs[0].Path != filepath.Join("api", "genguard.yaml") || doc.Configs[0].Exit != 1 {
+		t.Fatalf("api = %+v", doc.Configs[0])
+	}
+	if doc.Configs[0].Groups[0].Status != "drift" || doc.Configs[0].Groups[0].Drifts[0].Kind != "modified" || doc.Configs[0].Groups[0].Drifts[0].Path != "api/out.txt" {
+		t.Fatalf("api group = %+v", doc.Configs[0].Groups[0])
+	}
+	if doc.Configs[1].Path != filepath.Join("web", "genguard.yaml") || doc.Configs[1].Groups[0].Status != "ok" {
+		t.Fatalf("web = %+v", doc.Configs[1])
+	}
+}
+
+func TestCLICheckJSONSetupErrorLeavesStdoutEmpty(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "genguard.yaml")
+	if err := os.WriteFile(configPath, []byte("groups: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := runCLI([]string{"check", "--json", "--config", configPath})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "error:") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestCLIRunJSONWritesWithoutDriftStatus(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("genguard\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "name.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "rename"); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--json", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q\nstdout = %s", code, stderr, stdout)
+	}
+	if stderr != "" || strings.Contains(stdout, "Generated files written") || strings.Contains(stdout, "diff --git") {
+		t.Fatalf("stderr = %q\nstdout = %s", stderr, stdout)
+	}
+	doc := decodeCLIJSON(t, stdout)
+	if doc.Exit != 0 || doc.Configs[0].Path != "genguard.yaml" || doc.Configs[0].Groups[0].Status != "ok" || len(doc.Configs[0].Groups[0].Drifts) != 0 {
+		t.Fatalf("doc = %+v", doc)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello genguard\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestCLIRunAllJSONCommandError(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, filepath.Join(root, "api"), "api", "exit 3")
+	writeCLIConfig(t, filepath.Join(root, "web"), "web", "true")
+	commitRepo(t, root)
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"run", "--all", "--json"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q\nstdout = %s", code, stderr, stdout)
+	}
+	if stderr != "" || strings.Contains(stdout, "Summary") {
+		t.Fatalf("stderr = %q\nstdout = %s", stderr, stdout)
+	}
+	doc := decodeCLIJSON(t, stdout)
+	if doc.Exit != 2 || len(doc.Configs) != 2 {
+		t.Fatalf("doc = %+v", doc)
+	}
+	if doc.Configs[0].Groups[0].Status != "error" || doc.Configs[0].Groups[0].Error == "" {
+		t.Fatalf("api = %+v", doc.Configs[0].Groups[0])
+	}
+	if doc.Configs[1].Groups[0].Status != "ok" {
+		t.Fatalf("web = %+v", doc.Configs[1])
 	}
 }
 
@@ -689,6 +922,9 @@ func TestCLIRunHelpExit0(t *testing.T) {
 		}
 		if !strings.Contains(stderr, "-all") || !strings.Contains(stderr, "genguard.yml") {
 			t.Fatalf("%v: stderr = %q", args, stderr)
+		}
+		if !strings.Contains(stderr, "-json") {
+			t.Fatalf("%v: missing -json: %q", args, stderr)
 		}
 		if !strings.Contains(stderr, "Not valid with run") {
 			t.Fatalf("%v: missing isolated rejection: %q", args, stderr)

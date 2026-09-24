@@ -49,6 +49,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	configShort := fs.String("c", "", "Path to genguard.yaml (default: walk parents from cwd)")
 	since := fs.String("since", "", "Run a group with inputs when its inputs, outputs, or config file differ from HEAD or from the merge-base of this ref, or a declared output file is missing")
 	isolated := fs.Bool("isolated", false, "Check the HEAD copy in a throwaway worktree (do not read or write the current checkout)")
+	asJSON := fs.Bool("json", false, "Print the result as JSON on stdout")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -65,7 +66,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *all {
-		return runCheckAll(stdout, stderr, *since, *isolated)
+		return runCheckAll(stdout, stderr, *since, *isolated, *asJSON)
 	}
 
 	path := selected
@@ -104,26 +105,10 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		}
 		root = cfg.Root()
 	}
-	if result.ExitCode() == 0 {
-		fmt.Fprintln(stdout, "Generated files match the generators.")
-		if result.Skipped() > 0 {
-			for _, line := range result.SummaryLines() {
-				fmt.Fprintln(stdout, line)
-			}
-		}
-		return 0
-	}
-
-	report, err := check.FormatFailureReport(result, root)
-	fmt.Fprint(stderr, report)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
-	}
-	return result.ExitCode()
+	return finishConfig(stdout, stderr, result, path, root, "Generated files match the generators.", *asJSON)
 }
 
-func runCheckAll(stdout, stderr io.Writer, since string, isolated bool) int {
+func runCheckAll(stdout, stderr io.Writer, since string, isolated, asJSON bool) int {
 	run, err := check.CheckAll(check.CheckAllOptions{Since: since, Isolated: isolated})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -133,21 +118,7 @@ func runCheckAll(stdout, stderr io.Writer, since string, isolated bool) int {
 		fmt.Fprint(stderr, "error: no genguard.yaml or genguard.yml found under repository root\n")
 		return 2
 	}
-	if run.ExitCode() == 0 {
-		fmt.Fprintln(stdout, "Generated files match the generators.")
-		for _, line := range run.SuccessLines() {
-			fmt.Fprintln(stdout, line)
-		}
-		return 0
-	}
-
-	report, err := check.FormatRunFailureReport(run)
-	fmt.Fprint(stderr, report)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
-	}
-	return run.ExitCode()
+	return finishRun(stdout, stderr, run, "Generated files match the generators.", asJSON)
 }
 
 func runRun(args []string, stdout, stderr io.Writer) int {
@@ -158,6 +129,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	configShort := fs.String("c", "", "Path to genguard.yaml (default: walk parents from cwd)")
 	since := fs.String("since", "", "Run a group with inputs when its inputs, outputs, or config file differ from HEAD or from the merge-base of this ref, or a declared output file is missing")
 	isolated := fs.Bool("isolated", false, "Not valid with run; run writes the checkout")
+	asJSON := fs.Bool("json", false, "Print the result as JSON on stdout")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -178,7 +150,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *all {
-		return runRunAll(stdout, stderr, *since)
+		return runRunAll(stdout, stderr, *since, *asJSON)
 	}
 	path := selected
 	if path == "" {
@@ -204,26 +176,10 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 2
 	}
-	if result.ExitCode() == 0 {
-		fmt.Fprintln(stdout, "Generated files written.")
-		if result.Skipped() > 0 {
-			for _, line := range result.SummaryLines() {
-				fmt.Fprintln(stdout, line)
-			}
-		}
-		return 0
-	}
-
-	report, err := check.FormatFailureReport(result, cfg.Root())
-	fmt.Fprint(stderr, report)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
-	}
-	return result.ExitCode()
+	return finishConfig(stdout, stderr, result, path, cfg.Root(), "Generated files written.", *asJSON)
 }
 
-func runRunAll(stdout, stderr io.Writer, since string) int {
+func runRunAll(stdout, stderr io.Writer, since string, asJSON bool) int {
 	run, err := check.RunAll(check.CheckAllOptions{Since: since})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -233,14 +189,47 @@ func runRunAll(stdout, stderr io.Writer, since string) int {
 		fmt.Fprint(stderr, "error: no genguard.yaml or genguard.yml found under repository root\n")
 		return 2
 	}
+	return finishRun(stdout, stderr, run, "Generated files written.", asJSON)
+}
+
+func finishConfig(stdout, stderr io.Writer, result check.ConfigResult, path, root, success string, asJSON bool) int {
+	if asJSON {
+		run, err := check.SingleConfigRun(path, result)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			return 2
+		}
+		return writeJSON(stdout, stderr, run)
+	}
+	if result.ExitCode() == 0 {
+		fmt.Fprintln(stdout, success)
+		if result.Skipped() > 0 {
+			for _, line := range result.SummaryLines() {
+				fmt.Fprintln(stdout, line)
+			}
+		}
+		return 0
+	}
+	report, err := check.FormatFailureReport(result, root)
+	fmt.Fprint(stderr, report)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	return result.ExitCode()
+}
+
+func finishRun(stdout, stderr io.Writer, run check.RunResult, success string, asJSON bool) int {
+	if asJSON {
+		return writeJSON(stdout, stderr, run)
+	}
 	if run.ExitCode() == 0 {
-		fmt.Fprintln(stdout, "Generated files written.")
+		fmt.Fprintln(stdout, success)
 		for _, line := range run.SuccessLines() {
 			fmt.Fprintln(stdout, line)
 		}
 		return 0
 	}
-
 	report, err := check.FormatRunFailureReport(run)
 	fmt.Fprint(stderr, report)
 	if err != nil {
@@ -250,14 +239,24 @@ func runRunAll(stdout, stderr io.Writer, since string) int {
 	return run.ExitCode()
 }
 
+func writeJSON(stdout, stderr io.Writer, run check.RunResult) int {
+	text, err := check.FormatJSON(run)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	fmt.Fprint(stdout, text)
+	return run.ExitCode()
+}
+
 func printUsage(w io.Writer) {
 	fmt.Fprint(w, `genguard — fail CI when committed generated outputs drift from their generators
 
 Usage:
-  genguard check [-c|--config path/to/genguard.yaml] [--since ref] [--isolated]
-  genguard check --all [--since ref] [--isolated]
-  genguard run [-c|--config path/to/genguard.yaml] [--since ref]
-  genguard run --all [--since ref]
+  genguard check [-c|--config path/to/genguard.yaml] [--since ref] [--isolated] [--json]
+  genguard check --all [--since ref] [--isolated] [--json]
+  genguard run [-c|--config path/to/genguard.yaml] [--since ref] [--json]
+  genguard run --all [--since ref] [--json]
   genguard version
 
 `)
