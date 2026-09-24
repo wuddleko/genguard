@@ -153,6 +153,7 @@ func runCheckAll(stdout, stderr io.Writer, since string, isolated bool) int {
 func runRun(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	all := fs.Bool("all", false, "Run every genguard.yaml or genguard.yml under the git repository root")
 	configPath := fs.String("config", "", "Path to genguard.yaml (default: walk parents from cwd)")
 	configShort := fs.String("c", "", "Path to genguard.yaml (default: walk parents from cwd)")
 	since := fs.String("since", "", "Run a group with inputs when its inputs, outputs, or config file differ from HEAD or from the merge-base of this ref, or a declared output file is missing")
@@ -171,6 +172,13 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	selected := *configPath
 	if selected == "" {
 		selected = *configShort
+	}
+	if *all && selected != "" {
+		fmt.Fprint(stderr, "error: --all and --config are mutually exclusive\n")
+		return 2
+	}
+	if *all {
+		return runRunAll(stdout, stderr, *since)
 	}
 	path := selected
 	if path == "" {
@@ -215,6 +223,33 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	return result.ExitCode()
 }
 
+func runRunAll(stdout, stderr io.Writer, since string) int {
+	run, err := check.RunAll(check.CheckAllOptions{Since: since})
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	if len(run.Configs) == 0 {
+		fmt.Fprint(stderr, "error: no genguard.yaml or genguard.yml found under repository root\n")
+		return 2
+	}
+	if run.ExitCode() == 0 {
+		fmt.Fprintln(stdout, "Generated files written.")
+		for _, line := range run.SuccessLines() {
+			fmt.Fprintln(stdout, line)
+		}
+		return 0
+	}
+
+	report, err := check.FormatRunFailureReport(run)
+	fmt.Fprint(stderr, report)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 2
+	}
+	return run.ExitCode()
+}
+
 func printUsage(w io.Writer) {
 	fmt.Fprint(w, `genguard — fail CI when committed generated outputs drift from their generators
 
@@ -222,6 +257,7 @@ Usage:
   genguard check [-c|--config path/to/genguard.yaml] [--since ref] [--isolated]
   genguard check --all [--since ref] [--isolated]
   genguard run [-c|--config path/to/genguard.yaml] [--since ref]
+  genguard run --all [--since ref]
   genguard version
 
 `)

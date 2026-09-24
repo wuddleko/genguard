@@ -490,6 +490,9 @@ func TestCLIHelp(t *testing.T) {
 	if !strings.Contains(stderr, "genguard run") {
 		t.Fatalf("stderr = %q", stderr)
 	}
+	if !strings.Contains(stderr, "genguard run --all") {
+		t.Fatalf("stderr = %q", stderr)
+	}
 	if !strings.Contains(stderr, "genguard version") {
 		t.Fatalf("stderr = %q", stderr)
 	}
@@ -684,9 +687,136 @@ func TestCLIRunHelpExit0(t *testing.T) {
 		if !strings.Contains(stderr, "-since") {
 			t.Fatalf("%v: missing -since: %q", args, stderr)
 		}
+		if !strings.Contains(stderr, "-all") || !strings.Contains(stderr, "genguard.yml") {
+			t.Fatalf("%v: stderr = %q", args, stderr)
+		}
 		if !strings.Contains(stderr, "Not valid with run") {
 			t.Fatalf("%v: missing isolated rejection: %q", args, stderr)
 		}
+	}
+}
+
+func TestCLIRunAllSuccess(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
+	writeCLIConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
+	commitRepo(t, root)
+	testutil.Chdir(t, filepath.Join(root, "web"))
+
+	stdout, stderr, code := runCLI([]string{"run", "--all"})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	want := strings.Join([]string{
+		"Generated files written.",
+		filepath.Join("api", "genguard.yaml"),
+		filepath.Join("web", "genguard.yaml"),
+		"2 configs: 2 ok, 0 drift, 0 error",
+		"",
+	}, "\n")
+	if stdout != want {
+		t.Fatalf("stdout = %q\nwant %q", stdout, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "api", "api-ran")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "web", "web-ran")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCLIRunAllCommandErrorStillRunsOther(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, filepath.Join(root, "api"), "api", "exit 3")
+	writeCLIConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
+	commitRepo(t, root)
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"run", "--all"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "api: error") || !strings.Contains(stderr, "web: OK") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "web", "web-ran")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCLIRunAllRejectsConfigFlag(t *testing.T) {
+	testutil.Chdir(t, t.TempDir())
+	for _, args := range [][]string{
+		{"run", "--all", "-c", "genguard.yaml"},
+		{"run", "--all", "--config", "genguard.yaml"},
+		{"run", "-c", "genguard.yaml", "--all"},
+	} {
+		stdout, stderr, code := runCLI(args)
+		if code != 2 {
+			t.Fatalf("%v: code = %d, want 2; stderr = %q", args, code, stderr)
+		}
+		if stdout != "" {
+			t.Fatalf("%v: stdout = %q", args, stdout)
+		}
+		if !strings.Contains(stderr, "--all and --config are mutually exclusive") {
+			t.Fatalf("%v: stderr = %q", args, stderr)
+		}
+		if strings.Contains(stderr, "git work tree") {
+			t.Fatalf("%v: ran the command: %q", args, stderr)
+		}
+	}
+}
+
+func TestCLIRunAllIsolatedDoesNotRun(t *testing.T) {
+	testutil.Chdir(t, t.TempDir())
+	stdout, stderr, code := runCLI([]string{"run", "--all", "--isolated"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "--isolated is not valid") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stderr, "git work tree") {
+		t.Fatalf("discovered configs: %q", stderr)
+	}
+}
+
+func TestCLIRunAllNoConfigsExit2(t *testing.T) {
+	root := initCLIRepo(t)
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"run", "--all"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "no genguard.yaml or genguard.yml found under repository root") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestCLIRunAllHelpDoesNotRun(t *testing.T) {
+	testutil.Chdir(t, t.TempDir())
+	stdout, stderr, code := runCLI([]string{"run", "--all", "-h"})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "-all") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stderr, "git work tree") {
+		t.Fatalf("ran the command: %q", stderr)
 	}
 }
 
@@ -1290,7 +1420,7 @@ func TestCLIRunIsolatedBeforeSince(t *testing.T) {
 	}
 }
 
-func TestCLIRunAllIsUnknown(t *testing.T) {
+func TestCLIRunAllAndConfigDoesNotRun(t *testing.T) {
 	groups := []testutil.GroupSpec{{
 		Name:    "greeting",
 		Command: `python3 -c "open('ran','w').close()"`,
@@ -1305,7 +1435,7 @@ func TestCLIRunAllIsUnknown(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
 	}
-	if stdout != "" || !strings.Contains(stderr, "flag provided but not defined: -all") {
+	if stdout != "" || !strings.Contains(stderr, "--all and --config are mutually exclusive") {
 		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
 	}
 	if _, err := os.Stat(filepath.Join(root, "ran")); err == nil {

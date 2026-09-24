@@ -1122,6 +1122,175 @@ func TestCheckAllIsolatedWorktreeAddFailureStillRunsOthers(t *testing.T) {
 	}
 }
 
+func TestRunAllWritesEveryConfig(t *testing.T) {
+	root := initMonorepo(t)
+	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
+	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	assertConfigPaths(t, run, api, web)
+	if !markerExists(filepath.Join(root, "api"), "api-ran") || !markerExists(filepath.Join(root, "web"), "web-ran") {
+		t.Fatal("a config did not run")
+	}
+}
+
+func TestRunAllCommandErrorStillRunsOthers(t *testing.T) {
+	root := initMonorepo(t)
+	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", "exit 3")
+	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", run.ExitCode())
+	}
+	assertConfigPaths(t, run, api, web)
+	apiRun := configByPath(t, run, api)
+	if apiRun.Result.Groups[0].Status != check.GroupError {
+		t.Fatalf("api status = %+v", apiRun.Result.Groups[0])
+	}
+	webRun := configByPath(t, run, web)
+	if webRun.Result.Groups[0].Status != check.GroupOK || !markerExists(filepath.Join(root, "web"), "web-ran") {
+		t.Fatalf("web did not run: %+v", webRun)
+	}
+}
+
+func TestRunAllInvalidYAMLStillRunsOthers(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	api := filepath.Join(apiDir, "genguard.yaml")
+	if err := os.WriteFile(api, []byte("::::\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "true")
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", run.ExitCode())
+	}
+	apiRun := configByPath(t, run, api)
+	if apiRun.Err == nil {
+		t.Fatal("expected load error for api")
+	}
+	webRun := configByPath(t, run, web)
+	if webRun.Err != nil || webRun.Result.Groups[0].Status != check.GroupOK {
+		t.Fatalf("web did not run: %+v", webRun)
+	}
+}
+
+func TestRunAllOverlappingCleanSharesTree(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	nestedDir := filepath.Join(apiDir, "nested")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "api",
+		Command: "exit 1",
+		Outputs: []string{"nested/out.txt"},
+		Clean:   true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested, err := testutil.WriteGenguardConfig(nestedDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "nested",
+		Command: "true",
+		Outputs: []string{"out.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(nestedDir, "out.txt")
+	if err := os.WriteFile(out, []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, root)
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", run.ExitCode())
+	}
+	assertConfigPaths(t, run, api, nested)
+	if configByPath(t, run, api).Result.Groups[0].Status != check.GroupError {
+		t.Fatal("api clean command should fail")
+	}
+	if configByPath(t, run, nested).Result.Groups[0].Status != check.GroupOK {
+		t.Fatal("nested command should still run")
+	}
+	if _, err := os.Stat(out); !os.IsNotExist(err) {
+		t.Fatalf("shared tree kept %s: %v", out, err)
+	}
+}
+
+func TestRunAllSinceSelectsPerGroup(t *testing.T) {
+	root := writeSinceRepo(t)
+	commitPath(t, root, "queries/q.sql", "select 2;\n")
+
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d", run.ExitCode())
+	}
+	sqlc := groupInRun(t, run, "sqlc")
+	protobuf := groupInRun(t, run, "protobuf")
+	api := groupInRun(t, run, "api")
+	if sqlc.Status != check.GroupOK || protobuf.Status != check.GroupSkipped || api.Status != check.GroupSkipped {
+		t.Fatalf("sqlc=%s protobuf=%s api=%s", sqlc.Status, protobuf.Status, api.Status)
+	}
+	if !markerExists(root, "sqlc-ran") || markerExists(root, "proto-ran") || markerExists(filepath.Join(root, "api"), "api-ran") {
+		t.Fatal("run --all did not select per group")
+	}
+	got, err := os.ReadFile(filepath.Join(root, "gen", "a.pb.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "package gen\n" {
+		t.Fatalf("clean ran on a skipped group: %q", got)
+	}
+}
+
+func TestRunAllBadSinceRunsNothing(t *testing.T) {
+	root := writeSinceRepo(t)
+	_, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "not-a-ref"})
+	if err == nil || !strings.Contains(err.Error(), "bad --since ref") {
+		t.Fatalf("err = %v", err)
+	}
+	if markerExists(root, "plain-ran") || markerExists(filepath.Join(root, "api"), "api-ran") {
+		t.Fatal("bad ref ran a group")
+	}
+}
+
+func TestRunAllRejectsIsolated(t *testing.T) {
+	_, err := check.RunAll(check.CheckAllOptions{Isolated: true})
+	if err == nil || !strings.Contains(err.Error(), "--isolated is not valid") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func initMonorepo(t *testing.T) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "repo")

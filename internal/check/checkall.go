@@ -17,39 +17,10 @@ type CheckAllOptions struct {
 }
 
 func CheckAll(opts CheckAllOptions) (RunResult, error) {
-	repoRoot, err := gitRepoRoot(opts.RepoRoot)
+	repoRoot, paths, base, err := discoverConfigs(opts)
 	if err != nil {
 		return RunResult{}, err
 	}
-
-	paths := opts.Paths
-	if len(paths) == 0 {
-		var found []string
-		var err error
-		if opts.Isolated {
-			found, err = findCommittedConfigs(repoRoot)
-		} else {
-			found, err = config.FindAll(repoRoot)
-		}
-		if err != nil {
-			return RunResult{}, err
-		}
-		paths = found
-	}
-
-	paths, err = normalizeConfigPaths(paths)
-	if err != nil {
-		return RunResult{}, err
-	}
-
-	base := ""
-	if strings.TrimSpace(opts.Since) != "" {
-		base, err = mergeBase(repoRoot, opts.Since)
-		if err != nil {
-			return RunResult{}, err
-		}
-	}
-
 	run := RunResult{
 		RepoRoot: repoRoot,
 		Configs:  make([]ConfigRun, 0, len(paths)),
@@ -65,6 +36,39 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 		run.Configs = append(run.Configs, checkOne(configPath, base, damage))
 	}
 	return run, nil
+}
+
+func discoverConfigs(opts CheckAllOptions) (repoRoot string, paths []string, base string, err error) {
+	repoRoot, err = gitRepoRoot(opts.RepoRoot)
+	if err != nil {
+		return "", nil, "", err
+	}
+
+	paths = opts.Paths
+	if len(paths) == 0 {
+		var found []string
+		if opts.Isolated {
+			found, err = findCommittedConfigs(repoRoot)
+		} else {
+			found, err = config.FindAll(repoRoot)
+		}
+		if err != nil {
+			return "", nil, "", err
+		}
+		paths = found
+	}
+
+	paths, err = normalizeConfigPaths(paths)
+	if err != nil {
+		return "", nil, "", err
+	}
+	if strings.TrimSpace(opts.Since) != "" {
+		base, err = mergeBase(repoRoot, opts.Since)
+		if err != nil {
+			return "", nil, "", err
+		}
+	}
+	return repoRoot, paths, base, nil
 }
 
 func checkOneIsolated(path, since string) ConfigRun {
