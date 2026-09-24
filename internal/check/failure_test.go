@@ -347,7 +347,11 @@ func TestRefuseFileInPathAllowsSymlinkParent(t *testing.T) {
 func TestAnnotationPathsWhenLookupFails(t *testing.T) {
 	outside := filepath.Join(t.TempDir(), "genguard.yaml")
 	text := FormatErrorAnnotation(outside, "boom")
-	want := "::error file=" + filepath.ToSlash(outside) + "::boom\n"
+	abs, err := filepath.Abs(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "::error file=" + escapeProperty(filepath.ToSlash(abs)) + "::boom\n"
 	if text != want {
 		t.Fatalf("outside = %q", text)
 	}

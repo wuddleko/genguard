@@ -150,12 +150,25 @@ func gitShimMain() int {
 		}
 	case "drop-on-toplevel":
 		if containsArg(args, "--show-toplevel") {
-			_ = os.Remove(os.Args[0])
+			dropShim()
 		}
 	case "drop-after-proxy":
-		_ = os.Remove(os.Args[0])
+		dropShim()
 	}
 	return execRealGit(args)
+}
+
+func dropShim() {
+	path, err := os.Executable()
+	if err != nil {
+		path = os.Args[0]
+	}
+	if os.Remove(path) == nil {
+		return
+	}
+	// Windows will not delete a running executable. Renaming it off PATH
+	// makes the next git lookup fail.
+	_ = os.Rename(path, path+".dropped")
 }
 
 func execRealGit(args []string) int {
