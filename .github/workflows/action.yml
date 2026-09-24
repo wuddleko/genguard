@@ -112,6 +112,8 @@ jobs:
           cache: true
 
       - name: Install genguard
+        env:
+          GITHUB_ACTION_PATH: ${{ github.workspace }}
         run: sh action.sh install
 
       - name: Change an input
