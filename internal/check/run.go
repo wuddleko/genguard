@@ -6,9 +6,6 @@ import (
 	"strings"
 )
 
-// ConfigRun is the outcome of loading and checking one config file.
-// Err is a load or setup failure (invalid YAML, not a git work tree);
-// groups did not run in that case.
 type ConfigRun struct {
 	Path   string
 	Result ConfigResult
@@ -22,10 +19,6 @@ func (c ConfigRun) ExitCode() int {
 	return c.Result.ExitCode()
 }
 
-// RunResult is the aggregated outcome of CheckAll.
-// Configs is sorted by Path, regardless of execution strategy.
-// RepoRoot is the git toplevel the run resolved, including when Paths
-// named configs outside that tree.
 type RunResult struct {
 	RepoRoot string
 	Configs  []ConfigRun
@@ -44,9 +37,6 @@ func (r RunResult) ExitCode() int {
 	return code
 }
 
-// Counts returns the number of configs and the summed group statuses.
-// Config-level setup failures are not included in the group totals;
-// they still force ExitCode 2.
 func (r RunResult) Counts() (configs, ok, drift, errors int) {
 	configs = len(r.Configs)
 	for _, cfg := range r.Configs {
@@ -61,10 +51,6 @@ func (r RunResult) Counts() (configs, ok, drift, errors int) {
 	return configs, ok, drift, errors
 }
 
-// SummaryLines returns one block per config (header, then group summaries
-// or a setup error), then a config-level totals line. Paths under RepoRoot
-// are shown relative to it. Setup failures count as config errors in the
-// totals; they are separate from the group totals inside each block.
 func (r RunResult) SummaryLines() []string {
 	lines := make([]string, 0, len(r.Configs)*4+1)
 	for i, cfg := range r.Configs {
@@ -88,10 +74,6 @@ func (r RunResult) SummaryLines() []string {
 	return lines
 }
 
-// SuccessLines lists each config path, relative to RepoRoot, then the
-// config-level totals line. Each config that skipped a group then adds a
-// blank line, its path, and that config's group summary. Callers print
-// this when ExitCode is 0.
 func (r RunResult) SuccessLines() []string {
 	lines := make([]string, 0, len(r.Configs)+1)
 	for _, cfg := range r.Configs {
@@ -120,10 +102,6 @@ func (r RunResult) configStatusLine() string {
 	)
 }
 
-// FinalErrorLine is the aggregated error line for the run.
-// A single failing or drifting config keeps that config's own detail.
-// More than one is summarized by config counts. An empty string means
-// every config passed.
 func (r RunResult) FinalErrorLine() string {
 	var failed, drifted []ConfigRun
 	for _, cfg := range r.Configs {

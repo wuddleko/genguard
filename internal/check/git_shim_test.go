@@ -33,8 +33,7 @@ func installGitShim(t *testing.T, mode string) {
 	}
 	t.Setenv("GENGUARD_REAL_GIT", real)
 	t.Setenv("GENGUARD_GIT_MODE", mode)
-	// Only the shim is visible. It execs GENGUARD_REAL_GIT by absolute path,
-	// so a mode that removes the shim makes the next lookup fail.
+	// The shim is the only git on PATH and execs GENGUARD_REAL_GIT by absolute path.
 	t.Setenv("PATH", bin)
 }
 

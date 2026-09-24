@@ -8,23 +8,12 @@ import (
 	"sort"
 )
 
-// Directories skipped at any depth while searching for configs.
-// .gitignore is not consulted in v0.2.
 var skipDirNames = map[string]struct{}{
 	".git":         {},
 	"vendor":       {},
 	"node_modules": {},
 }
 
-// FindAll returns every genguard.yaml / genguard.yml under repoRoot,
-// as absolute paths sorted lexicographically. A directory that contains
-// both names is an error. Directories named .git, vendor, or
-// node_modules are not searched. An empty result is not an error; the
-// caller decides how to treat "no configs".
-//
-// repoRoot need not be a git repository. Empty repoRoot means the
-// current working directory. A symlink root is followed; directory
-// symlinks under it are not.
 func FindAll(repoRoot string) ([]string, error) {
 	root, err := resolveStart(repoRoot)
 	if err != nil {

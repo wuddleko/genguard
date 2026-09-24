@@ -1354,9 +1354,7 @@ func requireOrder(t *testing.T, s string, parts ...string) {
 	}
 }
 
-// failGitDiffIn makes git diff --no-color fail when -C names a directory
-// ending in suffix. Drift detection does not pass --no-color, so the check
-// still records drift and the CLI hits the report-error exit.
+// failGitDiffIn breaks only `git diff --no-color`, which drift detection does not use.
 func failGitDiffIn(t *testing.T, suffix string) {
 	t.Helper()
 	real, err := exec.LookPath("git")
@@ -1399,8 +1397,7 @@ func installUnixGitShim(t *testing.T, bin, real, suffix string) {
 	}
 }
 
-// Windows resolves git.exe on PATH and will not run an extensionless script.
-// The shim is a copy of this test binary.
+// Windows will not run an extensionless git shim, so this copies the test binary.
 func installWindowsGitShim(t *testing.T, bin, real, suffix string) {
 	t.Helper()
 	src, err := os.Open(os.Args[0])

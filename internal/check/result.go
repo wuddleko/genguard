@@ -22,15 +22,9 @@ type GroupResult struct {
 }
 
 type ConfigResult struct {
-	Groups []GroupResult
-	// captured is the drift diff from the tree that was checked.
-	// Nil means FormatFailureReport diffs the root it was given.
-	// An isolated check sets it before deleting its worktree.
+	Groups   []GroupResult
 	captured *capturedDriftDiff
-	// cleanup is a worktree remove failure after groups ran.
-	// A passing check then exits 2. Drift or a command error keeps
-	// its own exit code and the report includes this error too.
-	cleanup error
+	cleanup  error
 }
 
 type capturedDriftDiff struct {
@@ -127,7 +121,6 @@ func (r ConfigResult) SummaryLines() []string {
 	return lines
 }
 
-// Skipped counts groups left unrun by --since.
 func (r ConfigResult) Skipped() int {
 	n := 0
 	for _, group := range r.Groups {

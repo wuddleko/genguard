@@ -6,11 +6,6 @@ import (
 	"strings"
 )
 
-// FormatFailureReport renders the human-readable failure output: summary,
-// drift lines, optional git diff, and the final error line.
-//
-// If the git diff cannot be produced, the summary and drift lines are still
-// returned (without the final error line) along with the error.
 func FormatFailureReport(result ConfigResult, root string) (string, error) {
 	var b strings.Builder
 	b.WriteString("Summary\n")
@@ -44,14 +39,6 @@ func FormatFailureReport(result ConfigResult, root string) (string, error) {
 	return b.String(), nil
 }
 
-// FormatRunFailureReport renders a multi-config failure: a summary with
-// one block per config, drift lines and git diffs for configs that
-// drifted, and an aggregated final error line.
-//
-// An isolated check supplies its diff from the worktree that was checked.
-// Otherwise diffs are taken from each config's directory. If a git diff
-// cannot be produced, the report built so far is returned without the
-// final error line, along with the error.
 func FormatRunFailureReport(run RunResult) (string, error) {
 	var b strings.Builder
 	b.WriteString("Summary\n")

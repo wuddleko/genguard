@@ -1,10 +1,6 @@
 #!/bin/sh
 # Download a genguard release and install the binary.
 # Usage: install.sh [tag]
-#
-# default_tag is the release this script installs. README.md and docs/ci.md
-# pin `go install` to the same tag. Pin an install.sh URL to a release tag
-# that contains this file. Do not point CI at the default branch.
 
 set -eu
 
@@ -136,8 +132,7 @@ extract_binary() {
   tar -xzf "$tmpdir/$asset" -C "$tmpdir" "$binary"
 }
 
-# GENGUARD_INSTALL_ROOT prefixes /usr/local/bin and /opt/homebrew/bin.
-# Tests set it. Leave it unset.
+# GENGUARD_INSTALL_ROOT prefixes the default bindirs. Tests set it.
 choose_bindir() {
   root=${GENGUARD_INSTALL_ROOT:-}
   sys_bindir=${root}/usr/local/bin

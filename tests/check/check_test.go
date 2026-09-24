@@ -780,8 +780,7 @@ func TestDriftForGroupIgnoresCRLFRenormalizeWarning(t *testing.T) {
 	if !strings.Contains(warn, "LF will be replaced by CRLF") {
 		t.Fatalf("git diff stderr = %q, want a CRLF renormalize warning", warn)
 	}
-	// The probe refreshed the clean file's stat cache. Age it again so the
-	// check itself is the diff that sees the warning.
+	// The probe refreshed the stat cache. Age the file again before the check.
 	ageFile(t, same)
 
 	group := config.Group{Name: "greeting", Outputs: []string{"generated/same.txt", "generated/changed.txt"}}
@@ -2607,8 +2606,7 @@ func TestSinceRunsDeletionOfOutputAddedAfterBase(t *testing.T) {
 	if err := testutil.Git(root, "commit", "-m", "declare extra"); err != nil {
 		t.Fatal(err)
 	}
-	// The declaration is part of base, so the config file does not select
-	// protobuf. The file itself arrives in a later commit, then goes missing.
+	// The declaration is in base, so the missing file, not the config, selects the group.
 	if err := testutil.Git(root, "branch", "-f", "base"); err != nil {
 		t.Fatal(err)
 	}
@@ -2715,8 +2713,7 @@ func sinceGroups() []testutil.GroupSpec {
 		},
 		{
 			Name: "protobuf",
-			// Text mode on Windows turns the LF into CRLF, so the file
-			// cleaned and rewritten no longer matches HEAD.
+			// Text mode on Windows rewrites LF as CRLF, so the file no longer matches HEAD.
 			Command: `python3 -c "open('proto-ran','w').close(); open('gen/a.pb.go','wb').write(b'package gen\n')"`,
 			Inputs:  []string{"proto/"},
 			Outputs: []string{"gen/a.pb.go"},

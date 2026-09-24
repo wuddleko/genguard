@@ -36,12 +36,6 @@ func CheckConfig(cfg config.Config) (ConfigResult, error) {
 	return checkConfig(cfg, "", map[string]pathSnap{})
 }
 
-// CheckSince checks cfg. A blank since checks every group. Otherwise a group
-// that declares inputs runs when its inputs, its outputs, or its config
-// file differ between the working tree and either HEAD or the merge-base of
-// HEAD and since. A declared output file that is not on disk also runs it.
-// Untracked files count. Gitignored files do not. Groups with no inputs
-// always run.
 func CheckSince(cfg config.Config, since string) (ConfigResult, error) {
 	if strings.TrimSpace(since) == "" {
 		return CheckConfig(cfg)
@@ -75,8 +69,6 @@ func checkConfig(cfg config.Config, base string, damage map[string]pathSnap) (Co
 
 func checkGroup(root string, group config.Group, damage map[string]pathSnap, base string) GroupResult {
 	result := GroupResult{Name: group.Name}
-	// Residue is exempt only while it still matches the failed clean.
-	// Drop snapshots this group changes so a later wipe is that group's drift.
 	defer dropRepairedDamage(damage)
 
 	if base != "" && len(group.Inputs) > 0 {
@@ -92,10 +84,6 @@ func checkGroup(root string, group config.Group, damage map[string]pathSnap, bas
 		}
 	}
 
-	// wipe is the tree immediately after a successful clean, before the
-	// command. A failed command still diffs. Paths that still match an
-	// earlier group's residue, or this wipe, are left out. damage is
-	// updated afterward with the residue after the command, for later groups.
 	var wipe map[string]pathSnap
 	if group.Clean {
 		if err := cleanOutputs(root, group); err != nil {
@@ -118,8 +106,6 @@ func checkGroup(root string, group config.Group, damage map[string]pathSnap, bas
 			result.Err = driftErr
 			return result
 		}
-		// The report leaves out wipe residue. damage records the full list,
-		// including that residue, for later groups.
 		reported := omitUnchangedDamage(root, found, damage)
 		reported = omitUnchangedDamage(root, reported, wipe)
 		result.Drifts = reported
@@ -146,9 +132,6 @@ func checkGroup(root string, group config.Group, damage map[string]pathSnap, bas
 	return result
 }
 
-// pathSnap is the on-disk state of a path after a group wiped it and then
-// failed. Later groups leave that residue out of their drift while it still
-// matches. A group that changes the path drops the snapshot.
 type pathSnap struct {
 	missing bool
 	mode    os.FileMode
@@ -194,9 +177,6 @@ func omitUnchangedDamage(root string, found []Drift, damage map[string]pathSnap)
 	return kept
 }
 
-// dropRepairedDamage forgets residue a group has changed. Comparing to the
-// original snapshot, not to this group's drift list, catches a restore that
-// matches HEAD and would otherwise leave the exemption in place.
 func dropRepairedDamage(damage map[string]pathSnap) {
 	if len(damage) == 0 {
 		return
@@ -341,10 +321,7 @@ func gitRepoRoot(dir string) (string, error) {
 	return callerRepoRoot(abs, root), nil
 }
 
-// callerRepoRoot returns gitRoot, using start's path spelling when start
-// is that toplevel or a directory inside it. git rev-parse --show-toplevel
-// resolves symlinks (/var -> /private/var on macOS); discovery should keep
-// the path the caller passed.
+// rev-parse --show-toplevel resolves symlinks; keep the caller's spelling.
 func callerRepoRoot(start, gitRoot string) string {
 	resolvedStart, err := filepath.EvalSymlinks(start)
 	if err != nil {
@@ -459,8 +436,6 @@ func driftForGroup(root string, group config.Group) ([]Drift, error) {
 	return found, nil
 }
 
-// mergeBase resolves since against HEAD. A missing or unrelated ref is an
-// error so the caller can exit 2 before any group runs.
 func mergeBase(root, since string) (string, error) {
 	since = strings.TrimSpace(since)
 	if since == "" {
@@ -484,12 +459,6 @@ func mergeBase(root, since string) (string, error) {
 	return base, nil
 }
 
-// groupAffected reports whether a group with inputs should run. Inputs,
-// outputs, and the config file are compared to base and to HEAD, so a
-// worktree that matches the merge-base but not HEAD still runs. The config
-// file counts so a command or clean change runs the group. A declared
-// output file that is not on disk runs it too. Untracked files count.
-// Gitignored files do not.
 func groupAffected(root, base string, group config.Group) (bool, error) {
 	for _, spec := range group.Outputs {
 		if literalOutputAbsent(root, spec) {
@@ -499,8 +468,6 @@ func groupAffected(root, base string, group config.Group) (bool, error) {
 	specs := make([]string, 0, len(group.Inputs)+len(group.Outputs)+2)
 	specs = append(specs, group.Inputs...)
 	specs = append(specs, group.Outputs...)
-	// Both names: a directory keeps one, and a rename or an untracked
-	// config uses whichever is on disk.
 	specs = append(specs, "genguard.yaml", "genguard.yml")
 	for _, rev := range []string{base, "HEAD"} {
 		names, err := gitDiffNames(root, rev, specs)
@@ -512,8 +479,6 @@ func groupAffected(root, base string, group config.Group) (bool, error) {
 	return len(untracked) > 0, err
 }
 
-// literalOutputAbsent reports a declared output that names a file and is
-// not on disk. Globs and directory outputs are left to git.
 func literalOutputAbsent(root, spec string) bool {
 	if isGlob(spec) || strings.HasSuffix(spec, "/") {
 		return false
@@ -522,10 +487,7 @@ func literalOutputAbsent(root, spec string) bool {
 	return err != nil
 }
 
-// gitDiffNames lists repo-root paths that differ between rev and the working
-// tree. Names are not --relative: that drops paths outside the config
-// directory, so a tracked edit at ../sibling/file.go would pass.
-// diff.relative is forced off in case the user has it set.
+// --relative hides paths outside this directory, so names stay repo-root paths.
 func gitDiffNames(root, rev string, specs []string) ([]string, error) {
 	args := append([]string{"-c", "diff.relative=false", "diff", "--name-only", "-z", rev, "--"}, specs...)
 	return gitNames(root, args...)
@@ -577,9 +539,6 @@ func gitPrefix(root string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// configRelativeGitPath maps a repo-root path from git diff onto the config
-// directory. prefix is git rev-parse --show-prefix: empty at the toplevel,
-// "api/" when the config lives in api/.
 func configRelativeGitPath(prefix, gitPath string) (string, error) {
 	base := strings.TrimSuffix(prefix, "/")
 	if base == "" {
@@ -618,9 +577,7 @@ func git(root string, args ...string) (string, int, error) {
 	var exitErr *exec.ExitError
 	if errorsAsExit(err, &exitErr) {
 		code := exitErr.ExitCode()
-		// Exit 1 is a diff with changes. The patch is on stdout. A CRLF
-		// warning on stderr must not be appended to it. A failure that
-		// exits 1 with an empty stdout still has its message on stderr.
+		// Exit 1 with a patch is a diff. A CRLF warning on stderr must not join it.
 		if code == 1 {
 			if strings.TrimSpace(stdout.String()) == "" && strings.TrimSpace(stderr.String()) != "" {
 				return stderr.String(), code, nil

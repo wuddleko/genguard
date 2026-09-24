@@ -160,7 +160,7 @@ func TestFindAllRejectsBothNamesWhenNestedPathSortsBetween(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	api := filepath.Join(root, "api")
-	// genguard.yaml.bak sorts between genguard.yaml and genguard.yml.
+	// genguard.yaml.bak sorts between the two config names.
 	backup := filepath.Join(api, "genguard.yaml.bak")
 	if err := os.MkdirAll(backup, 0o755); err != nil {
 		t.Fatal(err)
@@ -226,7 +226,6 @@ func TestFindAllReturnsAbsolutePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Start beside the temp directory so the relative path stays on one drive.
 	// filepath.Rel cannot cross Windows drive letters.
 	testutil.Chdir(t, filepath.Dir(root))
 	found, err := config.FindAll(filepath.Base(root))

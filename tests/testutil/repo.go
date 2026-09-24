@@ -26,8 +26,7 @@ type GroupSpec struct {
 	Clean   bool
 }
 
-// Chdir changes the process working directory for the rest of the test and
-// restores it afterward. Prefer this over t.Chdir so tests compile on Go 1.22.
+// Chdir changes the working directory for the test. t.Chdir needs Go 1.24.
 func Chdir(t *testing.T, dir string) {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -52,10 +51,7 @@ func Chdir(t *testing.T, dir string) {
 	})
 }
 
-// WithoutWorkingDirectory moves into a child directory and removes search
-// permission from its parent, so os.Getwd and filepath.Abs of a relative
-// path fail. It restores both when the test ends, and skips when the OS
-// still resolves the working directory.
+// WithoutWorkingDirectory drops search permission on the parent so Getwd and Abs fail.
 func WithoutWorkingDirectory(t *testing.T) {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -70,7 +66,7 @@ func WithoutWorkingDirectory(t *testing.T) {
 	if err := os.Chdir(child); err != nil {
 		t.Fatal(err)
 	}
-	// PWD must not name this directory, or Getwd returns it without asking the OS.
+	// A set PWD makes Getwd return it without asking the OS.
 	t.Setenv("PWD", filepath.Join(parent, "not-the-cwd"))
 	if err := os.Chmod(parent, 0); err != nil {
 		if chdirErr := os.Chdir(wd); chdirErr != nil {
@@ -202,8 +198,7 @@ func MakeRepo(tmp string, outputs, configName string, groups []GroupSpec) (strin
 	return root, nil
 }
 
-// SkipIfFilenameRejected skips when dir cannot hold a file named name.
-// Windows rejects names that contain a newline.
+// SkipIfFilenameRejected skips when the OS rejects name.
 func SkipIfFilenameRejected(t *testing.T, dir, name string) {
 	t.Helper()
 	if strings.ContainsAny(name, `/\`) {

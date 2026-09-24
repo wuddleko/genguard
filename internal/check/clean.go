@@ -9,8 +9,6 @@ import (
 	"github.com/wuddleko/genguard/internal/config"
 )
 
-// cleanTarget is one filesystem path clean will remove. spec is the output
-// entry it came from, used in errors.
 type cleanTarget struct {
 	spec   string
 	target string
@@ -26,9 +24,6 @@ func cleanOutputs(root string, group config.Group) error {
 	configYAML := filepath.Join(absRoot, "genguard.yaml")
 	configYML := filepath.Join(absRoot, "genguard.yml")
 
-	// Resolve every output before deleting any. A later refusal must not
-	// leave earlier outputs wiped: the command never runs, and the next
-	// group sees the broken tree.
 	planned := make([]cleanTarget, 0, len(group.Outputs))
 	for _, spec := range group.Outputs {
 		items, err := planCleanSpec(absRoot, spec)
@@ -61,17 +56,11 @@ func planCleanSpec(root, spec string) ([]cleanTarget, error) {
 	return []cleanTarget{{spec: spec, target: target, isDir: isDir}}, nil
 }
 
-// planCleanGlob expands a git pathspec to the files drift would check:
-// tracked files and untracked files that are not ignored. Those files are
-// removed. The rest of the directory, including hand-written files, stays.
 func planCleanGlob(root, spec string) ([]cleanTarget, error) {
 	spec = strings.TrimSpace(spec)
 	if err := validateGlobSpec(spec); err != nil {
 		return nil, err
 	}
-	// Git does not list files through a directory symlink, so a prefix link
-	// with no matches would skip the per-file checks and the command would
-	// write through it.
 	if err := refuseGlobPrefix(root, spec); err != nil {
 		return nil, err
 	}
@@ -94,9 +83,6 @@ func planCleanGlob(root, spec string) ([]cleanTarget, error) {
 	return items, nil
 }
 
-// refuseGlobPrefix rejects a symlink in the literal directory prefix of a
-// glob. generated/*_queries.sql.go checks generated. *_queries.sql.go has
-// no directory prefix.
 func refuseGlobPrefix(root, spec string) error {
 	var prefix []string
 	for _, part := range strings.Split(filepath.ToSlash(spec), "/") {
@@ -252,10 +238,7 @@ func pathComponents(rel string) ([]string, error) {
 	return parts, nil
 }
 
-// refuseFileInPath rejects a lookup through parent when parent is a file.
-// A missing parent is left alone: that output was never created. Windows
-// reports a path through a file as not-exist, so the parent is what
-// distinguishes it from a path that is simply absent.
+// Windows reports a path through a file as not-exist.
 func refuseFileInPath(parent string) error {
 	info, err := os.Lstat(parent)
 	if err != nil {
@@ -297,11 +280,6 @@ func refuseSymlinksInPath(root, target string) error {
 	return nil
 }
 
-// treeContainsGit returns the absolute path of a .git file or directory that
-// clean would delete under target. An empty path means there is none.
-// Symlinks are not followed: clean unlinks them instead of descending, so a
-// .git reachable only through a link is not deleted. The name is resolved by
-// the filesystem, so a case-insensitive volume treats .GIT as .git.
 func treeContainsGit(target string) (string, error) {
 	info, err := os.Lstat(target)
 	if err != nil {
@@ -335,9 +313,6 @@ func treeContainsGit(target string) (string, error) {
 	return found, nil
 }
 
-// gitEntryPath returns the .git path in path's parent when path is that
-// entry. Lookup is Lstat(".git"), so it follows the volume's case rules
-// and does not follow a symlink named .git.
 func gitEntryPath(path string) (string, error) {
 	if !strings.EqualFold(filepath.Base(path), ".git") {
 		return "", nil

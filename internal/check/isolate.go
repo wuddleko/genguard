@@ -10,12 +10,6 @@ import (
 	"github.com/wuddleko/genguard/internal/config"
 )
 
-// CheckSinceIsolated checks the HEAD copy of the config at path in a
-// throwaway worktree. Dirty files in the user's tree are not read or
-// written. A blank since checks every group. Groups in the file still
-// share that one tree, including the damage map used by clean. The drift
-// diff is captured before the worktree is removed, so FormatFailureReport
-// does not diff the caller's files.
 func CheckSinceIsolated(path, since string) (ConfigResult, error) {
 	var result ConfigResult
 	err := withIsolatedCheck(path, since, func(cfg config.Config, r ConfigResult) error {
@@ -32,17 +26,12 @@ func CheckSinceIsolated(path, since string) (ConfigResult, error) {
 	return result, err
 }
 
-// withIsolatedCheck loads path from a detached HEAD worktree, checks it,
-// and calls fn before the worktree is removed so a caller can format a
-// report against that tree.
 func withIsolatedCheck(path, since string, fn func(config.Config, ConfigResult) error) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err
 	}
-	// Resolve before the detached worktree exists. That checkout has no
-	// branch and no reflog, so @{u} and HEAD@{1} would not mean what they
-	// mean in the caller's tree. A blank since still checks every group.
+	// @{u} and HEAD@{1} are meaningless in the detached worktree.
 	since, err = isolateSince(filepath.Dir(abs), since)
 	if err != nil {
 		return err
@@ -67,9 +56,6 @@ func withIsolatedCheck(path, since string, fn func(config.Config, ConfigResult) 
 	})
 }
 
-// isolateSince resolves since to a commit in the caller's checkout.
-// The throwaway worktree then merges that commit with its own HEAD, which
-// is the caller's HEAD at the moment the worktree was added.
 func isolateSince(dir, since string) (string, error) {
 	since = strings.TrimSpace(since)
 	if since == "" {
@@ -97,8 +83,6 @@ func isolateSince(dir, since string) (string, error) {
 	return rev, nil
 }
 
-// callerPathError names path instead of the worktree copy. That copy is
-// deleted before the error reaches the caller.
 func callerPathError(err error, mapped, path string) error {
 	if err == nil {
 		return nil
@@ -116,16 +100,11 @@ func callerPathError(err error, mapped, path string) error {
 	return fmt.Errorf("%s: %w", path, err)
 }
 
-// isolatedWorktree is a detached HEAD checkout of a repository. Dirty files
-// in the user's tree are not copied, so a later check cannot write them.
 type isolatedWorktree struct {
 	repo string
 	root string
 }
 
-// withIsolatedWorktree adds a throwaway worktree of repoRoot's HEAD, calls
-// fn, then removes that worktree. fn's error wins over a later remove
-// error so a failed check is not reported as a cleanup failure.
 func withIsolatedWorktree(repoRoot string, fn func(isolatedWorktree) error) (err error) {
 	wt, err := addIsolatedWorktree(repoRoot)
 	if err != nil {
@@ -152,9 +131,7 @@ func addIsolatedWorktree(repoRoot string) (isolatedWorktree, error) {
 	if err := os.Remove(dir); err != nil {
 		return isolatedWorktree{}, err
 	}
-	// post-checkout runs in the new tree and can edit it, or write the
-	// caller's files through an absolute path. A missing hooks directory
-	// skips that hook, so the check sees HEAD.
+	// A missing hooks directory skips post-checkout, which would edit the new tree.
 	hooks := dir + "-hooks"
 	out, code, err := git(repo, "-c", "core.hooksPath="+hooks, "worktree", "add", "--detach", dir, "HEAD")
 	if err != nil || code != 0 {
@@ -184,9 +161,6 @@ func (w isolatedWorktree) close() error {
 	return isolateGitError("remove", out, err)
 }
 
-// mapPath returns the same relative path inside the worktree. The user's
-// api/genguard.yaml maps to that file at HEAD, which is the copy a check
-// should load.
 func (w isolatedWorktree) mapPath(path string) (string, error) {
 	rel, err := relInsideRepo(w.repo, path)
 	if err != nil {

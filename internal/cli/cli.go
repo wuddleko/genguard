@@ -12,8 +12,6 @@ import (
 	"github.com/wuddleko/genguard/internal/config"
 )
 
-// Version is shown by `genguard version` and `--version`. Releases overwrite it
-// via main.version ldflags; local builds keep "dev".
 var Version = "dev"
 
 func Run(args []string) int {

@@ -515,8 +515,7 @@ func TestAwkRequired(t *testing.T) {
 	linkTool(t, fake, "rm")
 	env := shellBase(t, fake, filepath.Join(root, "home"))
 	env = append(env, "BINDIR="+bindir, "GENGUARD_INSTALL_ROOT="+root)
-	// BINDIR is not on PATH. awk is checked before the directory is chosen,
-	// and this PATH has no awk, so the failure has to name awk.
+	// PATH has no awk, which is checked before a bindir is chosen.
 	out, code := runScriptEnv(t, []string{"v9.9.9"}, env)
 	if code == 0 {
 		t.Fatalf("expected failure, got %q", out)

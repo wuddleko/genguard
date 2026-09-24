@@ -17,7 +17,7 @@ func FuzzParseConfig(f *testing.F) {
 	f.Add([]byte("clean: 1\ngroups:\n  - command: echo\n    outputs:\n      - gen/\n"))
 	f.Add([]byte("clean: true\ngroups:\n  - command: echo\n    outputs:\n      - gen/\n    clean: false\n"))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		// Large documents spend the fuzz budget inside the YAML decoder.
+		// Large inputs spend the fuzz budget in the YAML decoder.
 		if len(data) > 8<<10 {
 			return
 		}
