@@ -591,11 +591,14 @@ func TestCLIRunSinceSkipsUnchangedDoesNotClean(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
 	}
-	if !strings.Contains(stdout, "Generated files written.") {
-		t.Fatalf("stdout = %q", stdout)
-	}
-	if !strings.Contains(stdout, "protobuf: skipped") || !strings.Contains(stdout, "sqlc: skipped") {
-		t.Fatalf("stdout = %q", stdout)
+	want := strings.Join([]string{
+		"Generated files written.",
+		"  sqlc: skipped",
+		"  protobuf: skipped",
+		"2 groups: 0 ok, 0 drift, 0 error, 2 skipped",
+	}, "\n") + "\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
 	}
 	if _, err := os.Stat(filepath.Join(root, "sqlc-ran")); err == nil {
 		t.Fatal("skipped group ran")
@@ -681,6 +684,9 @@ func TestCLIRunHelpExit0(t *testing.T) {
 		if !strings.Contains(stderr, "-since") {
 			t.Fatalf("%v: missing -since: %q", args, stderr)
 		}
+		if !strings.Contains(stderr, "Not valid with run") {
+			t.Fatalf("%v: missing isolated rejection: %q", args, stderr)
+		}
 	}
 }
 
@@ -697,6 +703,636 @@ func TestCLIRunAutoDiscoversConfig(t *testing.T) {
 	}
 	if stdout != "Generated files written.\n" {
 		t.Fatalf("stdout = %q", stdout)
+	}
+}
+
+func TestCLIRunAutoDiscoversFromNested(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitNameChange(t, root)
+	nested := filepath.Join(root, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, nested)
+
+	stdout, stderr, code := runCLI([]string{"run"})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files written.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello genguard\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestCLIRunSinceSelectsChangedGroup(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{
+			Name:    "sqlc",
+			Command: `python3 -c "open('sqlc-ran','w').close()"`,
+			Inputs:  []string{"queries/"},
+			Outputs: []string{"internal/db/out.txt"},
+		},
+		{
+			Name:    "protobuf",
+			Command: `python3 -c "open('proto-ran','w').close(); open('gen/a.pb.go','wb').write(b'NEW\n')"`,
+			Inputs:  []string{"proto/"},
+			Outputs: []string{"gen/a.pb.go"},
+			Clean:   true,
+		},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"queries/q.sql", "internal/db/out.txt", "proto/a.proto", "gen/a.pb.go"} {
+		path := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "ok\n"
+		if rel == "gen/a.pb.go" {
+			body = "package gen\n"
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "base"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "queries", "q.sql"), []byte("select 2;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--since", "HEAD", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	want := strings.Join([]string{
+		"Generated files written.",
+		"  sqlc: OK",
+		"  protobuf: skipped",
+		"2 groups: 1 ok, 0 drift, 0 error, 1 skipped",
+	}, "\n") + "\n"
+	if stdout != want {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "sqlc-ran")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "proto-ran")); err == nil {
+		t.Fatal("unchanged group ran")
+	}
+	got, err := os.ReadFile(filepath.Join(root, "gen", "a.pb.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "package gen\n" {
+		t.Fatalf("clean ran on a skipped group: %q", got)
+	}
+}
+
+func TestCLIRunNoConfigExit2(t *testing.T) {
+	testutil.Chdir(t, t.TempDir())
+
+	stdout, stderr, code := runCLI([]string{"run"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2", code)
+	}
+	if stdout != "" || !strings.Contains(stderr, "no genguard.yaml found") {
+		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
+	}
+}
+
+func TestCLIRunInvalidConfigExit2(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "genguard.yaml")
+	if err := os.WriteFile(configPath, []byte("groups: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--config", configPath})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "non-empty 'groups' list") {
+		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
+	}
+}
+
+func TestCLIRunEmptyInputsExit2(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "genguard.yaml")
+	content := "groups:\n" +
+		"  - name: sqlc\n" +
+		"    command: \"true\"\n" +
+		"    inputs: []\n" +
+		"    outputs:\n" +
+		"      - generated/\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--since", "HEAD", "--config", configPath})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "non-empty 'inputs' list") {
+		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
+	}
+}
+
+func TestCLIRunNotGitRepoExit2(t *testing.T) {
+	root := t.TempDir()
+	configPath, err := testutil.WriteGenguardConfig(root, "generated/hello.txt", `python3 -c "open('ran','w').close()"`, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--config", configPath})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "not a git work tree") {
+		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); err == nil {
+		t.Fatal("non-repo ran the command")
+	}
+}
+
+func TestCLIRunBadSinceDoesNotRun(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "greeting",
+		Command: `python3 -c "open('ran','w').close()"`,
+		Outputs: []string{"generated/hello.txt"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--since", "not-a-ref", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "bad --since ref") {
+		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); err == nil {
+		t.Fatal("bad ref ran the command")
+	}
+}
+
+func TestCLIRunBlankSinceRuns(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitNameChange(t, root)
+
+	stdout, stderr, code := runCLI([]string{"run", "--since=", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files written.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello genguard\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestCLIRunShortConfig(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitNameChange(t, root)
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"run", "-c", "genguard.yaml"})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files written.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello genguard\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestCLIRunConfigFlagWinsOverShort(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := filepath.Join(root, "bad.yaml")
+	if err := os.WriteFile(bad, []byte("groups:\n  - name: broken\n    command: \"exit 3\"\n    outputs:\n      - generated/hello.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	good := filepath.Join(root, "genguard.yaml")
+
+	for _, args := range [][]string{
+		{"run", "-c", bad, "--config", good},
+		{"run", "--config", good, "-c", bad},
+	} {
+		stdout, stderr, code := runCLI(args)
+		if code != 0 {
+			t.Fatalf("%v: code = %d, want 0; stderr = %q", args, code, stderr)
+		}
+		if stdout != "Generated files written.\n" {
+			t.Fatalf("%v: stdout = %q", args, stdout)
+		}
+	}
+}
+
+func TestCLIRunContinuesAfterCommandFailure(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}},
+		{Name: "ok", Command: `python3 -c "open('ran','w').close()"`, Outputs: []string{"generated/hello.txt"}},
+	}
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "broken: error") || !strings.Contains(stderr, "ok: OK") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "2 groups: 1 ok, 0 drift, 1 error") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stderr, "\nDrift\n") || strings.Contains(stderr, "Generated files written.") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCLIRunCleanFailureOmitsDrift(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "greeting",
+		Command: "exit 3",
+		Outputs: []string{"generated/"},
+		Clean:   true,
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "after cleaning outputs") || !strings.Contains(stderr, "exit 3") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stderr, "\nDrift\n") || strings.Contains(stderr, "Generated files written.") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "generated", "hello.txt")); !os.IsNotExist(err) {
+		t.Fatalf("hello.txt = %v", err)
+	}
+}
+
+func TestCLIRunRewriteFailureOmitsDrift(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "greeting",
+		Command: "printf 'changed\\n' > generated/hello.txt; exit 1",
+		Outputs: []string{"generated/hello.txt"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, "greeting: error") || strings.Contains(stderr, "\nDrift\n") || strings.Contains(stderr, "; drift") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "changed\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestCLIRunCleanRemovesOrphanExit0(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "greeting",
+		Command: "python3 scripts/gen.py",
+		Outputs: []string{"generated/"},
+		Clean:   true,
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := filepath.Join(root, "generated", "extra.txt")
+	if err := os.WriteFile(extra, []byte("stale\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "generated/extra.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "orphan"); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files written.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if _, err := os.Stat(extra); !os.IsNotExist(err) {
+		t.Fatalf("orphan still on disk: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello world\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestCLIRunYml(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "genguard.yml", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitNameChange(t, root)
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"run"})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files written.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello genguard\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestCLIRunRejectsBothNames(t *testing.T) {
+	root := initCLIRepo(t)
+	if _, err := testutil.WriteGenguardConfig(root, "", "", "genguard.yaml", []testutil.GroupSpec{{
+		Name:    "yaml",
+		Command: `python3 -c "open('ran','w').close()"`,
+		Outputs: []string{"out.txt"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(root, "", "", "genguard.yml", []testutil.GroupSpec{{
+		Name:    "yml",
+		Command: `python3 -c "open('ran','w').close()"`,
+		Outputs: []string{"out.txt"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "out.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitRepo(t, root)
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"run"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stdout = %q stderr = %q", code, stdout, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "both genguard.yaml and genguard.yml") {
+		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); err == nil {
+		t.Fatal("both names ran a command")
+	}
+}
+
+func TestCLIRunConfigFlagSelectsOneOfBothNames(t *testing.T) {
+	root := initCLIRepo(t)
+	if _, err := testutil.WriteGenguardConfig(root, "", "", "genguard.yaml", []testutil.GroupSpec{{
+		Name:    "yaml",
+		Command: "true",
+		Outputs: []string{"out.txt"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(root, "", "", "genguard.yml", []testutil.GroupSpec{{
+		Name:    "yml",
+		Command: `python3 -c "open('yml-ran','w').close()"`,
+		Outputs: []string{"out.txt"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "out.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitRepo(t, root)
+
+	stdout, stderr, code := runCLI([]string{"run", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files written.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(root, "yml-ran")); err == nil {
+		t.Fatal("unselected config ran")
+	}
+}
+
+func TestCLIRunFromConfigRoot(t *testing.T) {
+	tmp := t.TempDir()
+	root := filepath.Join(tmp, "repo")
+	service := filepath.Join(root, "service")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.WriteGenerator(service); err != nil {
+		t.Fatal(err)
+	}
+	configPath, err := testutil.WriteGenguardConfig(service, "generated/hello.txt", "", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("python3", "scripts/gen.py")
+	cmd.Dir = service
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("seed generator: %v: %s", err, out)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	commitPath(t, root, "service/name.txt", "genguard\n")
+
+	stdout, stderr, code := runCLI([]string{"run", "--config", configPath})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files written.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	got, err := os.ReadFile(filepath.Join(service, "generated", "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello genguard\n" {
+		t.Fatalf("generated = %q", string(got))
+	}
+}
+
+func TestCLIRunHelpDoesNotRun(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "greeting",
+		Command: `python3 -c "open('ran','w').close()"`,
+		Outputs: []string{"generated/hello.txt"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, root)
+
+	for _, args := range [][]string{{"run", "-h"}, {"run", "--help"}} {
+		_, _, code := runCLI(args)
+		if code != 0 {
+			t.Fatalf("%v: code = %d, want 0", args, code)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); err == nil {
+		t.Fatal("help ran the command")
+	}
+}
+
+func TestCLIRunIsolatedBeforeSince(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "greeting",
+		Command: `python3 -c "open('ran','w').close()"`,
+		Outputs: []string{"generated/hello.txt"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(root, "genguard.yaml")
+
+	for _, args := range [][]string{
+		{"run", "--isolated", "--since", "not-a-ref", "--config", configPath},
+		{"run", "--since", "not-a-ref", "--isolated", "--config", configPath},
+	} {
+		stdout, stderr, code := runCLI(args)
+		if code != 2 {
+			t.Fatalf("%v: code = %d, want 2; stderr = %q", args, code, stderr)
+		}
+		if stdout != "" || !strings.Contains(stderr, "--isolated is not valid") {
+			t.Fatalf("%v: stdout = %q stderr = %q", args, stdout, stderr)
+		}
+		if strings.Contains(stderr, "bad --since ref") {
+			t.Fatalf("%v: stderr = %q", args, stderr)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); err == nil {
+		t.Fatal("--isolated ran the command")
+	}
+}
+
+func TestCLIRunAllIsUnknown(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "greeting",
+		Command: `python3 -c "open('ran','w').close()"`,
+		Outputs: []string{"generated/hello.txt"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--all", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "flag provided but not defined: -all") {
+		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); err == nil {
+		t.Fatal("--all ran the command")
+	}
+}
+
+func TestCLIRunUnknownFlagDoesNotRun(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "greeting",
+		Command: `python3 -c "open('ran','w').close()"`,
+		Outputs: []string{"generated/hello.txt"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"run", "--nope", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if stdout != "" || !strings.Contains(stderr, "flag provided but not defined: -nope") {
+		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); err == nil {
+		t.Fatal("unknown flag ran the command")
 	}
 }
 
