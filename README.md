@@ -1,12 +1,14 @@
 # genguard
 
-`genguard check` runs your code generators and fails if the result doesn't match the files already in git. A hand-edited `.pb.go` or a schema change nobody regenerated shows up as a diff. With `clean: true`, genguard deletes the declared outputs first, so a file the generator stopped writing fails the check too.
+`genguard check` runs your generators in the working tree and fails if the declared outputs differ from `HEAD`. It leaves that tree as the generators left it. Uncommitted input edits are part of the run. A generated file that is only staged still fails until that commit exists. In CI the checkout is usually clean, so `HEAD` is the commit under test: the pull request branch tip, or the push that started the job.
 
-The command can be anything you can run in a shell. `buf generate`, `sqlc generate`, `go generate`, a Make target, your own script.
+`genguard check --isolated` checks the committed files in a throwaway worktree and leaves your checkout alone.
+
+A hand-edited `.pb.go`, or a schema change nobody regenerated, shows up as a diff. With `clean: true`, genguard deletes the declared outputs first, so a file the generator stopped writing fails the check too. The command can be anything you can run in a shell: `buf generate`, `sqlc generate`, `go generate`, a Make target, your own script.
 
 ## Run it
 
-Put a `genguard.yaml` (or `genguard.yml`) next to the generated files, outside the output directory. Templates for the usual tools are in [examples/](examples/README.md).
+Put a `genguard.yaml` (or `genguard.yml`) next to the generated files and outside any directory listed in `outputs`. `clean: true` deletes that directory, and a delete that would take the config file with it is refused. Templates for the usual tools (`go generate`, buf, OpenAPI, sqlc, Make) are in [examples/](examples/README.md). Those files are config only. The generator stays yours.
 
 ```yaml
 groups:
@@ -16,7 +18,7 @@ groups:
       - gen/
 ```
 
-Then, from a git checkout:
+From a git checkout:
 
 ```bash
 genguard check
@@ -37,26 +39,17 @@ diff --git a/gen/foo.pb.go ...
 error: 1 generated path drifted; commit the generator output or fix the command
 ```
 
-Regenerate and commit. genguard leaves the tree as the generator wrote it and prints the diff. A generated file that is only staged still fails until that commit exists.
+Regenerate and commit. `git add` alone still fails, because the diff is the working tree against `HEAD`.
 
-```bash
-genguard check -c path/to/genguard.yaml   # same as --config
-genguard check --all                      # every config in the repo
-genguard check --since origin/main        # rerun groups this change can affect
-genguard check --all --since origin/main
-genguard check --isolated                 # HEAD copy; leaves the checkout alone
-genguard check --all --isolated
-genguard run                              # regenerate; writes the checkout
-genguard run --since origin/main
-genguard run --all
-genguard run --all --since origin/main
-genguard check --json
-genguard check --all --json
-genguard run --json
+```
+genguard check [-c|--config path] [--since ref] [--isolated] [--json]
+genguard check --all [--since ref] [--isolated] [--json]
+genguard run [-c|--config path] [--since ref] [--json]
+genguard run --all [--since ref] [--json]
 genguard version
 ```
 
-The diff is against `HEAD` in the checkout you just made. On a pull request that is the PR branch tip. genguard is asking whether this commit's outputs still match this commit's inputs.
+`-c` is `--config`.
 
 ## Install
 
@@ -86,23 +79,25 @@ Pass a tag, or set `GENGUARD_TAG`, to choose another release. Run `sh install.sh
 
 ## Config
 
-With no `--config`, genguard walks up from the current directory until it finds `genguard.yaml` or `genguard.yml`. That file has to sit inside a git work tree. A directory gets one of those names. Both files in the same directory make `genguard check` and `genguard check --all` exit 2. `--config` still checks the path you gave it.
+With no `--config`, genguard walks up from the current directory until it finds `genguard.yaml` or `genguard.yml`. That file has to sit inside a git work tree. A directory holds one of those names. Both files in the same directory make `genguard check` and `genguard check --all` exit 2. `--config` still loads the path you gave it. `--all` and `--config` together exit 2.
 
-`genguard check --all` runs every config under the repository root, in path order, on the same working tree. It skips directories named `.git`, `vendor`, and `node_modules`. It does not read `.gitignore`, so a config inside an ignored directory still runs. A clean run prints each config path and a totals line. `--all` and `--config` are separate invocations.
+`genguard check --all` runs every config under the repository root, in path order, on the same working tree. It skips directories named `.git`, `vendor`, and `node_modules`. It does not read `.gitignore`, so a config inside an ignored directory still runs. A clean run prints each config path and a totals line.
 
-`genguard check --isolated` checks the committed copy of the config in a throwaway worktree and does not read or write dirty files in the checkout. Groups in that file still share the worktree. `--all --isolated` finds configs tracked at HEAD, including one deleted in the checkout, and skips a config that is not committed. Each config gets its own full worktree, one after another, so a failed `clean` in one file does not wipe files another config is judging.
+`--isolated` uses the committed copy of the config. Groups in that file still share the throwaway worktree. `--all --isolated` finds configs tracked at `HEAD`, including one deleted in the checkout, and skips a config that is not committed. Each config gets its own worktree, so a failed `clean` in one file does not wipe files another config is judging.
 
-`genguard run` runs the same commands as `genguard check` and leaves the tree as the generator wrote it. It does not fail when that differs from HEAD. A skip under `--since` does not run `clean`. `--isolated` is not valid: run writes the checkout. `genguard run --all` runs every config in path order on that same checkout, so a `clean` in one file still deletes paths a later config is about to use.
+`genguard run` runs the same commands and leaves the tree as the generator wrote it. A success prints `Generated files written.` It does not compare with `HEAD`, so it never exits 1. A failed command still exits 2. A skip under `--since` does not run `clean`. `--isolated` is not valid with `run`. `genguard run --all` uses one checkout for every config, so a `clean` in one file still deletes paths a later config is about to use.
 
-`--json` prints one JSON object on stdout and does not print the human report. The object has `exit` and `configs`. Each config has `path`, `exit`, and `groups`, and `error` when loading that config failed or an isolated worktree could not be removed. `path` is relative to the repository root for one config and for `--all`. A group has `name`, `status` (`ok`, `drift`, `error`, `skipped`), and, when present, `error` and `drifts` (`kind`, `path`). A drift `path` is relative to the repository root. Diffs stay in the human report. Exit codes are unchanged. A non-empty `error` does not replace `exit`. A failure before any config runs still prints `error:` on stderr and leaves stdout empty.
+`--json` prints one JSON object on stdout and skips the human report. The object has `exit` and `configs`. Each config has `path` (relative to the repository root), `exit`, and `groups`, plus `error` when loading that config failed or an isolated worktree could not be removed. Read `exit`. `error` is extra detail, and a cleanup failure sets both (`exit` is 2). A group has `name`, `status` (`ok`, `drift`, `error`, `skipped`), and, when present, `error` and `drifts` (`kind`, `path`). A drift `path` is relative to the repository root. Diffs stay in the human report. A failure before any config runs prints `error:` on stderr and leaves stdout empty. `genguard run --json` has no `drift` status: a successful command is `ok`.
+
+Top-level keys are `groups` and `clean`. `groups` is required and non-empty. An unknown key is a config error.
 
 A group has:
 
 - **`name`** — label in the output. Optional. The fallback is `groups[0]`, `groups[1]`, and so on.
-- **`command`** — the shell command. genguard runs it with `sh -c` from the directory that contains the config, and it will run whatever that command is. On Windows it uses `sh` or `bash` when one of those is on `PATH` (Git Bash); otherwise it uses `cmd.exe`. A POSIX recipe needs a POSIX shell.
-- **`outputs`** — git pathspecs, relative to the config file, for the files to compare.
-- **`inputs`** — optional git pathspecs, relative to the config file, for the sources that feed the command. Used by `--since`. Leave the key off and the group runs on every check. An empty list is a config error, and so is an unknown key.
-- **`clean`** — optional, default `false`. Delete those outputs before the command runs. You can also set `clean` once at the top of the file and every group inherits it.
+- **`command`** — required. The shell command. genguard runs it with `sh -c` from the directory that contains the config, and it will run whatever that command is. On Windows it uses `sh` or `bash` when one of those is on `PATH` (Git Bash); otherwise it uses `%COMSPEC% /C` (`cmd.exe` when that variable is unset). A POSIX recipe needs a POSIX shell.
+- **`outputs`** — required, non-empty. Git pathspecs, relative to the config file, for the files to compare.
+- **`inputs`** — optional git pathspecs, relative to the config file, for the sources that feed the command. Used by `--since`. Leave the key off and the group runs on every check. An empty list is a config error.
+- **`clean`** — optional, default `false`. Delete those outputs before the command runs. A `clean` at the top of the file applies to every group; a group can override it.
 
 After the command, genguard compares `HEAD` to the working tree under `outputs`:
 
@@ -114,26 +109,7 @@ After the command, genguard compares `HEAD` to the working tree under `outputs`:
 
 Generated paths have to be tracked. Gitignored files under `outputs` are left out of the report.
 
-A command that fails is still diffed. The group counts as an error, so the run exits 2. The Drift section lists whatever that command left behind.
-
-A `clean: true` wipe that the command never rewrote is left out of that list. The error already says the outputs are gone. A file the failed command rewrote is listed.
-
-The summary line names both facts. The totals line counts the group once, as an error:
-
-```
-Summary
-  protobuf: error (command failed (exit 1): buf generate failed); drift (1 modified)
-1 group: 0 ok, 0 drift, 1 error
-
-Drift
-[modified] protobuf: gen/foo.pb.go
-
-diff --git a/gen/foo.pb.go ...
-
-error: command failed (exit 1): buf generate failed
-```
-
-When this is the only failure, the final line stays the command error. When another group drifted on its own, the final line is `error: 1 group failed; 1 group drifted`.
+A command that fails is still diffed. The group counts as an error, so the run exits 2. Drift lists files the command rewrote. A `clean: true` wipe the command never rewrote is left out; the error already says those outputs are gone. The summary line names both facts (`protobuf: error (...); drift (1 modified)`), and the totals line counts the group once, as an error. When this is the only failure, the final line stays the command error. When another group drifted on its own, the final line is `error: 1 group failed; 1 group drifted`.
 
 ### `clean`
 
@@ -145,13 +121,11 @@ The delete is real.
 - A file output is removed.
 - A glob removes the tracked and untracked files git matches, and leaves ignored files alone. `*_queries.sql.go` can live next to Go you wrote by hand.
 
-It will refuse `.`, `..`, absolute paths, anything that escapes the config directory, symlinks, and any delete that would take `.git` or the config file with it. Every output is checked before anything is removed, so one refused path leaves the tree as it was. If the command fails after a wipe, the error says the outputs are already gone. They are not put back.
-
-Starting points: [genguard.example.yaml](genguard.example.yaml) and the templates in [examples/](examples/README.md) (`go generate`, buf, OpenAPI, sqlc, Make). Those files are config only. The generator stays yours.
+It refuses `.`, `..`, absolute paths, anything that escapes the config directory, symlinks, and any delete that would take `.git` or the config file with it. Every output is checked before anything is removed, so one refused path leaves the tree as it was. If the command fails after a wipe, the error says the outputs are already gone. They are not put back.
 
 ## `--since`
 
-`genguard check --since origin/main` resolves the merge-base of that ref and `HEAD`. A group with `inputs` runs when the working tree differs from that merge-base, or from `HEAD`, under its inputs, its outputs, or its config file (`genguard.yaml` or `genguard.yml`). A committed change on the branch counts. So does an unstaged edit, a staged edit, or an untracked file that is not gitignored. A hand-edit of a generated file still runs that group. So does a change to the group's command or `clean`, a new untracked config, and a declared output file that is not on disk. Directory outputs and globs are not that check. A group with no `inputs` still runs.
+`genguard check --since origin/main` resolves the merge-base of that ref and `HEAD`. A group with `inputs` runs when the working tree differs from that merge-base, or from `HEAD`, under its inputs, its outputs, or the config file. A committed change on the branch counts, and so does a staged edit, an unstaged edit, or an untracked file that is not gitignored. A hand-edit of a generated file still runs that group. So does a change to the group's command or `clean`, a new untracked config, and a declared output file that is not on disk. Directory outputs and globs are not that last check. A group with no `inputs` still runs.
 
 ```yaml
 groups:
@@ -181,7 +155,7 @@ Generated files match the generators.
 
 Without `--since`, every group runs and `inputs` is ignored.
 
-`genguard check --all --since origin/main` uses one merge-base for the repository, then the same rule per group. One config can run sqlc and skip protobuf. A passing `--all` run still prints each config path and the config totals. Each config that skipped a group is printed again, with that config's group lines:
+`genguard check --all --since origin/main` uses one merge-base for the repository, then the same rule per group. A passing run prints each config path and the config totals, then prints again each config that skipped a group:
 
 ```
 Generated files match the generators.
@@ -208,17 +182,15 @@ error: bad --since ref: fatal: Not a valid object name not-a-ref
 
 ## More than one group
 
-Groups run in the order you listed them. Without `--since`, every group runs. Drift or a command error in the first one still lets the rest go. You get a Summary line per group, then the Drift paths and diffs.
+Groups run in the order you listed them. Drift or a command error in an earlier group still lets the rest go. Each group sees the tree the previous group left. Give them outputs that do not overlap, or a drift in one group changes what the next group is judging. `genguard check --all` follows the same rule across config files.
 
-Each group sees the working tree the previous group left behind. Give them outputs that don't overlap, or a drift in one group changes what the next group is judging. `genguard check --all` follows the same rule across config files. `--all --isolated` gives each config its own tree. Groups in one file still share that tree.
+If an earlier group has `clean: true` and the command fails, paths it wiped and a later group never writes stay out of that later group's drift. A later command that does write them is checked as usual.
 
-If an earlier group has `clean: true` and then the command fails, paths it wiped and a later group never writes stay out of that later group's drift. A later command that does write them is checked as usual.
-
-A skip does not add a code. A matching run is `0`, including when some groups were skipped. Drift is `1`. A bad `--since` ref, an empty `inputs` list, and a failed command are `2`.
+These are the exit codes for `genguard check`. A skip does not add a code. `genguard run` uses `0` and `2` only.
 
 | Exit code | Meaning |
 |---|---|
-| `0` | Generated files match |
+| `0` | Generated files match, including when some groups were skipped |
 | `1` | Drift |
 | `2` | Config, git, or the generator command failed. A command error wins over drift |
 
