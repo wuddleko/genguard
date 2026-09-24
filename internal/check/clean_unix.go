@@ -68,7 +68,7 @@ func removeNameAt(parent int, name string, isDir bool, rel string) error {
 		}
 		return unix.Mkdirat(parent, name, 0o755)
 	}
-	dirfd, err := openDirNoFollow(parent, name)
+	dirfd, err := openNoFollow(parent, name)
 	if err != nil {
 		if isSymlinkErr(err) {
 			return newGenguardError("clean refuses symlink in output path %q", rel)
@@ -112,7 +112,7 @@ func mkdirAllAt(dirfd int, prefix, rest []string) error {
 		case !isDirMode(uint32(stat.Mode)):
 			return unix.ENOTDIR
 		}
-		next, err := openDirNoFollow(fd, part)
+		next, err := openNoFollow(fd, part)
 		if err != nil {
 			if isSymlinkErr(err) {
 				return newGenguardError("clean refuses symlink in output path %q", filepath.Join(seen...))
@@ -146,8 +146,13 @@ func openDirNoFollow(dirfd int, name string) (int, error) {
 	return unix.Openat(dirfd, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 }
 
+var (
+	openNoFollow = openDirNoFollow
+	listDir      = readDirNames
+)
+
 func clearDirFd(fd int) error {
-	names, err := readDirNames(fd)
+	names, err := listDir(fd)
 	if err != nil {
 		return err
 	}
@@ -174,7 +179,7 @@ func removeAllAt(parent int, name string) error {
 	if !isDirMode(uint32(stat.Mode)) {
 		return ignoreNotExist(unix.Unlinkat(parent, name, 0))
 	}
-	fd, err := openDirNoFollow(parent, name)
+	fd, err := openNoFollow(parent, name)
 	if err != nil {
 		if isNotExist(err) {
 			return nil

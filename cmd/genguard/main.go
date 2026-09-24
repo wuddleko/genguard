@@ -8,8 +8,10 @@ import (
 
 var version = "dev"
 
+var osExit = os.Exit
+
 func main() {
-	os.Exit(run(os.Args[1:]))
+	osExit(run(os.Args[1:]))
 }
 
 func run(args []string) int {

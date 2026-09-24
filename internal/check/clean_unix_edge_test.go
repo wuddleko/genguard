@@ -169,6 +169,48 @@ func TestRemoveCleanTargetCannotReplaceLockedFile(t *testing.T) {
 	}
 }
 
+func TestRefuseFileInPathUnreadableParent(t *testing.T) {
+	if !permissionsAreEnforced(t) {
+		t.Skip("directory permissions are not enforced")
+	}
+	root := t.TempDir()
+	secret := filepath.Join(root, "secret")
+	if err := os.Mkdir(secret, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lockDir(t, secret)
+	err := refuseFileInPath(filepath.Join(secret, "child"))
+	if err == nil || os.IsNotExist(err) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRemoveCleanTargetParentNotWritable(t *testing.T) {
+	if !permissionsAreEnforced(t) {
+		t.Skip("directory permissions are not enforced")
+	}
+	root := t.TempDir()
+	target := filepath.Join(root, "generated")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+	err := removeCleanTarget(root, target, true)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	info, statErr := os.Lstat(target)
+	if statErr != nil {
+		t.Fatalf("generated removed: %v", statErr)
+	}
+	if !info.IsDir() {
+		t.Fatalf("mode = %v", info.Mode())
+	}
+}
+
 func TestRemoveCleanTargetBusyDirectory(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "generated")
@@ -193,6 +235,65 @@ func TestMkdirAllAtLongName(t *testing.T) {
 	if err := mkdirAllAt(fd, nil, []string{strings.Repeat("a", 256)}); err == nil {
 		t.Fatal("expected error")
 	}
+}
+
+func TestCleanUnixOpenRaces(t *testing.T) {
+	root := t.TempDir()
+	name := "generated"
+	if err := os.Mkdir(filepath.Join(root, name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keep"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fd := openDir(t, root)
+
+	t.Run("directory became a symlink", func(t *testing.T) {
+		prev := openNoFollow
+		openNoFollow = func(int, string) (int, error) { return -1, unix.ELOOP }
+		t.Cleanup(func() { openNoFollow = prev })
+		err := removeNameAt(fd, name, true, name)
+		if err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("removeNameAt: %v", err)
+		}
+		err = mkdirAllAt(fd, nil, []string{name, "child"})
+		if err == nil || !strings.Contains(err.Error(), "symlink") {
+			t.Fatalf("mkdirAllAt: %v", err)
+		}
+		err = removeAllAt(fd, name)
+		if err == nil {
+			t.Fatal("removeAllAt unlinked a directory")
+		}
+		if _, statErr := os.Lstat(filepath.Join(root, name)); statErr != nil {
+			t.Fatalf("generated: %v", statErr)
+		}
+	})
+
+	t.Run("directory disappeared", func(t *testing.T) {
+		prev := openNoFollow
+		openNoFollow = func(int, string) (int, error) { return -1, unix.ENOENT }
+		t.Cleanup(func() { openNoFollow = prev })
+		if err := removeAllAt(fd, name); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("dot entries", func(t *testing.T) {
+		prev := listDir
+		listDir = func(int) ([]string, error) {
+			return []string{".", "..", "keep"}, nil
+		}
+		t.Cleanup(func() { listDir = prev })
+		if err := clearDirFd(fd); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Lstat(filepath.Join(root, "keep")); !os.IsNotExist(err) {
+			t.Fatalf("keep = %v", err)
+		}
+		if _, err := os.Lstat(filepath.Join(root, name)); err != nil {
+			t.Fatalf("generated = %v", err)
+		}
+	})
 }
 
 func TestCleanUnixDirectoryFdEdges(t *testing.T) {

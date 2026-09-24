@@ -136,6 +136,22 @@ func gitShimMain() int {
 		if containsArg(args, "--no-index") {
 			return 0
 		}
+	case "ls-tree-quiet":
+		if containsArg(args, "ls-tree") {
+			return 2
+		}
+	case "verify-empty":
+		if containsArg(args, "--verify") {
+			return 0
+		}
+	case "verify-quiet":
+		if containsArg(args, "--verify") {
+			return 2
+		}
+	case "drop-on-toplevel":
+		if containsArg(args, "--show-toplevel") {
+			_ = os.Remove(os.Args[0])
+		}
 	case "drop-after-proxy":
 		_ = os.Remove(os.Args[0])
 	}
@@ -178,6 +194,8 @@ saw_merge=0
 saw_prefix=0
 saw_toplevel=0
 saw_ls=0
+saw_lstree=0
+saw_verify=0
 for arg in "$@"; do
   case "$arg" in
     --others) saw_others=1 ;;
@@ -187,6 +205,8 @@ for arg in "$@"; do
     --show-prefix) saw_prefix=1 ;;
     --show-toplevel) saw_toplevel=1 ;;
     ls-files) saw_ls=1 ;;
+    ls-tree) saw_lstree=1 ;;
+    --verify) saw_verify=1 ;;
   esac
 done
 case "$mode" in
@@ -213,6 +233,12 @@ case "$mode" in
     ;;
   diff-quiet) [ "$saw_nocolor" -eq 1 ] && exit 129 ;;
   diff-empty) [ "$saw_noindex" -eq 1 ] && exit 0 ;;
+  ls-tree-quiet) [ "$saw_lstree" -eq 1 ] && exit 2 ;;
+  verify-empty) [ "$saw_verify" -eq 1 ] && exit 0 ;;
+  verify-quiet) [ "$saw_verify" -eq 1 ] && exit 2 ;;
+  drop-on-toplevel)
+    if [ "$saw_toplevel" -eq 1 ]; then /bin/rm -f @SCRIPT@; fi
+    ;;
   drop-after-proxy) /bin/rm -f @SCRIPT@ ;;
 esac
 exec "$real" "$@"

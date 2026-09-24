@@ -571,28 +571,32 @@ func git(root string, args ...string) (string, int, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
+	return gitResult(stdout.String(), stderr.String(), err)
+}
+
+func gitResult(stdout, stderr string, err error) (string, int, error) {
 	if err == nil {
-		return stdout.String(), 0, nil
+		return stdout, 0, nil
 	}
 	var exitErr *exec.ExitError
 	if errorsAsExit(err, &exitErr) {
 		code := exitErr.ExitCode()
 		// Exit 1 with a patch is a diff. A CRLF warning on stderr must not join it.
 		if code == 1 {
-			if strings.TrimSpace(stdout.String()) == "" && strings.TrimSpace(stderr.String()) != "" {
-				return stderr.String(), code, nil
+			if strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) != "" {
+				return stderr, code, nil
 			}
-			return stdout.String(), code, nil
+			return stdout, code, nil
 		}
-		if strings.TrimSpace(stderr.String()) != "" {
-			return stderr.String(), code, nil
+		if strings.TrimSpace(stderr) != "" {
+			return stderr, code, nil
 		}
-		return stdout.String(), code, nil
+		return stdout, code, nil
 	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		return stderr.String(), -1, err
+	if strings.TrimSpace(stderr) != "" {
+		return stderr, -1, err
 	}
-	return stdout.String(), -1, err
+	return stdout, -1, err
 }
 
 func isGlob(spec string) bool {

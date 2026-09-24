@@ -51,13 +51,26 @@ func Chdir(t *testing.T, dir string) {
 	})
 }
 
-// WithoutWorkingDirectory drops search permission on the parent so Getwd and Abs fail.
+// WithoutWorkingDirectory makes Getwd, and Abs of a relative path, fail.
+// On macOS a mode-0 parent is not enough: getcwd returns the cached path
+// until the path exceeds PATH_MAX, and only then does Go's ".." walk run.
 func WithoutWorkingDirectory(t *testing.T) {
 	t.Helper()
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
+	if lockParent(t, wd) {
+		return
+	}
+	if lockDeepParent(t, wd) {
+		return
+	}
+	t.Skip("working directory still resolves")
+}
+
+func lockParent(t *testing.T, wd string) bool {
+	t.Helper()
 	parent := t.TempDir()
 	child := filepath.Join(parent, "child")
 	if err := os.Mkdir(child, 0o755); err != nil {
@@ -82,9 +95,69 @@ func WithoutWorkingDirectory(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if _, err := os.Getwd(); err == nil {
-		t.Skip("working directory still resolves")
+	if _, err := os.Getwd(); err != nil {
+		return true
 	}
+	if err := os.Chmod(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(wd); err != nil {
+		t.Fatal(err)
+	}
+	return false
+}
+
+func lockDeepParent(t *testing.T, wd string) bool {
+	t.Helper()
+	base := t.TempDir()
+	if err := os.Chdir(base); err != nil {
+		t.Fatal(err)
+	}
+	comp := strings.Repeat("w", 50)
+	cur := base
+	var locked string
+	for i := 0; i < 40; i++ {
+		if err := os.Mkdir(comp, 0o755); err != nil {
+			break
+		}
+		if err := os.Chdir(comp); err != nil {
+			break
+		}
+		parent := cur
+		cur = filepath.Join(cur, comp)
+		t.Setenv("PWD", filepath.Join(base, "not-the-cwd"))
+		if err := os.Chmod(parent, 0); err != nil {
+			if chdirErr := os.Chdir(wd); chdirErr != nil {
+				t.Fatal(chdirErr)
+			}
+			t.Fatal(err)
+		}
+		if _, err := os.Getwd(); err != nil {
+			locked = parent
+			break
+		}
+		if err := os.Chmod(parent, 0o755); err != nil {
+			if chdirErr := os.Chdir(wd); chdirErr != nil {
+				t.Fatal(chdirErr)
+			}
+			t.Fatal(err)
+		}
+	}
+	if locked == "" {
+		if err := os.Chdir(wd); err != nil {
+			t.Fatal(err)
+		}
+		return false
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(locked, 0o755); err != nil {
+			t.Error(err)
+		}
+		if err := os.Chdir(wd); err != nil {
+			t.Error(err)
+		}
+	})
+	return true
 }
 
 func Git(dir string, args ...string) error {
