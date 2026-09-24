@@ -1,0 +1,131 @@
+name: Action
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  match:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: ./
+        with:
+          config: fixtures/action/genguard.yaml
+
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Change an input
+        run: printf 'other\n' > fixtures/action/name.txt
+
+      - id: check
+        continue-on-error: true
+        uses: ./
+        env:
+          GENGUARD_ANNOTATIONS: "false"
+        with:
+          config: fixtures/action/genguard.yaml
+
+      - name: Expect drift
+        run: |
+          test "$(cat fixtures/action/hello.txt)" = "hello other"
+          test "${{ steps.check.outcome }}" = "failure"
+
+  isolated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Dirty an input
+        run: printf 'changed\n' > fixtures/action/name.txt
+
+      - uses: ./
+        with:
+          config: fixtures/action/genguard.yaml
+          isolated: "true"
+
+      - name: Checkout was not regenerated
+        run: |
+          test "$(cat fixtures/action/name.txt)" = "changed"
+          test "$(cat fixtures/action/hello.txt)" = "hello world"
+
+  since:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: ./
+        with:
+          config: fixtures/action/genguard.yaml
+
+      - id: check
+        continue-on-error: true
+        uses: ./
+        env:
+          GENGUARD_ANNOTATIONS: "false"
+        with:
+          config: fixtures/action/genguard.yaml
+          since: not-a-ref
+
+      - name: Expect a bad ref to fail the check
+        run: |
+          test "${{ steps.check.outcome }}" = "failure"
+          test "$(cat fixtures/action/hello.txt)" = "hello world"
+
+  annotate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install genguard
+        run: sh action.sh install
+
+      - name: Change an input
+        run: printf 'other\n' > fixtures/action/name.txt
+
+      - name: Annotation is emitted and not published
+        run: |
+          set +e
+          genguard check --config fixtures/action/genguard.yaml >stdout.txt 2>stderr.txt
+          code=$?
+          set -e
+          want='::error file=fixtures/action/hello.txt,title=greeting::modified'
+          if [ "$code" != 1 ] || [ -s stdout.txt ] || ! grep -q -F '::stop-commands::' stderr.txt || [ "$(tail -n 1 stderr.txt)" != "$want" ]; then
+            printf 'exit %s\n' "$code"
+            grep -v '^::' stderr.txt || true
+            exit 1
+          fi

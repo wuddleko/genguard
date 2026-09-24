@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/wuddleko/genguard/internal/check"
 	"github.com/wuddleko/genguard/internal/config"
@@ -62,8 +65,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		selected = *configShort
 	}
 	if *all && selected != "" {
-		fmt.Fprint(stderr, "error: --all and --config are mutually exclusive\n")
-		return 2
+		return errorExit(stderr, "", "--all and --config are mutually exclusive")
 	}
 	if *all {
 		return runCheckAll(stdout, stderr, *since, *isolated, *asJSON)
@@ -73,12 +75,10 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	if path == "" {
 		found, err := config.FindConfig("")
 		if err != nil {
-			fmt.Fprintf(stderr, "error: %v\n", err)
-			return 2
+			return errorExit(stderr, "", err.Error())
 		}
 		if found == "" {
-			fmt.Fprint(stderr, "error: no genguard.yaml found (pass --config)\n")
-			return 2
+			return errorExit(stderr, "", "no genguard.yaml found (pass --config)")
 		}
 		path = found
 	}
@@ -89,19 +89,16 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		var err error
 		result, err = check.CheckSinceIsolated(path, *since)
 		if err != nil && len(result.Groups) == 0 {
-			fmt.Fprintf(stderr, "error: %v\n", err)
-			return 2
+			return errorExit(stderr, path, err.Error())
 		}
 	} else {
 		cfg, err := config.LoadConfig(path)
 		if err != nil {
-			fmt.Fprintf(stderr, "error: %v\n", err)
-			return 2
+			return errorExit(stderr, path, err.Error())
 		}
 		result, err = check.CheckSince(cfg, *since)
 		if err != nil {
-			fmt.Fprintf(stderr, "error: %v\n", err)
-			return 2
+			return errorExit(stderr, path, err.Error())
 		}
 		root = cfg.Root()
 	}
@@ -111,12 +108,10 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 func runCheckAll(stdout, stderr io.Writer, since string, isolated, asJSON bool) int {
 	run, err := check.CheckAll(check.CheckAllOptions{Since: since, Isolated: isolated})
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
+		return errorExit(stderr, "", err.Error())
 	}
 	if len(run.Configs) == 0 {
-		fmt.Fprint(stderr, "error: no genguard.yaml or genguard.yml found under repository root\n")
-		return 2
+		return errorExit(stderr, "", "no genguard.yaml or genguard.yml found under repository root")
 	}
 	return finishRun(stdout, stderr, run, "Generated files match the generators.", asJSON)
 }
@@ -137,8 +132,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *isolated {
-		fmt.Fprint(stderr, "error: genguard run writes the checkout; --isolated is not valid\n")
-		return 2
+		return errorExit(stderr, "", "genguard run writes the checkout; --isolated is not valid")
 	}
 
 	selected := *configPath
@@ -146,8 +140,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		selected = *configShort
 	}
 	if *all && selected != "" {
-		fmt.Fprint(stderr, "error: --all and --config are mutually exclusive\n")
-		return 2
+		return errorExit(stderr, "", "--all and --config are mutually exclusive")
 	}
 	if *all {
 		return runRunAll(stdout, stderr, *since, *asJSON)
@@ -156,25 +149,21 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	if path == "" {
 		found, err := config.FindConfig("")
 		if err != nil {
-			fmt.Fprintf(stderr, "error: %v\n", err)
-			return 2
+			return errorExit(stderr, "", err.Error())
 		}
 		if found == "" {
-			fmt.Fprint(stderr, "error: no genguard.yaml found (pass --config)\n")
-			return 2
+			return errorExit(stderr, "", "no genguard.yaml found (pass --config)")
 		}
 		path = found
 	}
 
 	cfg, err := config.LoadConfig(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
+		return errorExit(stderr, path, err.Error())
 	}
 	result, err := check.RunSince(cfg, *since)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
+		return errorExit(stderr, path, err.Error())
 	}
 	return finishConfig(stdout, stderr, result, path, cfg.Root(), "Generated files written.", *asJSON)
 }
@@ -182,12 +171,10 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 func runRunAll(stdout, stderr io.Writer, since string, asJSON bool) int {
 	run, err := check.RunAll(check.CheckAllOptions{Since: since})
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
+		return errorExit(stderr, "", err.Error())
 	}
 	if len(run.Configs) == 0 {
-		fmt.Fprint(stderr, "error: no genguard.yaml or genguard.yml found under repository root\n")
-		return 2
+		return errorExit(stderr, "", "no genguard.yaml or genguard.yml found under repository root")
 	}
 	return finishRun(stdout, stderr, run, "Generated files written.", asJSON)
 }
@@ -196,53 +183,147 @@ func finishConfig(stdout, stderr io.Writer, result check.ConfigResult, path, roo
 	if asJSON {
 		run, err := check.SingleConfigRun(path, result)
 		if err != nil {
-			fmt.Fprintf(stderr, "error: %v\n", err)
-			return 2
+			return errorExit(stderr, path, err.Error())
 		}
-		return writeJSON(stdout, stderr, run)
+		code := writeJSON(stdout, stderr, run)
+		maybeAnnotate(stderr, run)
+		return code
 	}
-	if result.ExitCode() == 0 {
-		fmt.Fprintln(stdout, success)
+	code := result.ExitCode()
+	if code == 0 {
+		var buf strings.Builder
+		fmt.Fprintln(&buf, success)
 		if result.Skipped() > 0 {
 			for _, line := range result.SummaryLines() {
-				fmt.Fprintln(stdout, line)
+				fmt.Fprintln(&buf, line)
 			}
 		}
-		return 0
+		writePlain(stdout, buf.String())
+	} else {
+		withoutWorkflowCommands(stderr, func(w io.Writer) {
+			report, err := check.FormatFailureReport(result, root)
+			fmt.Fprint(w, report)
+			if err != nil {
+				fmt.Fprintf(w, "error: %v\n", err)
+				code = 2
+			}
+		})
 	}
-	report, err := check.FormatFailureReport(result, root)
-	fmt.Fprint(stderr, report)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
+	if annotationsOn() {
+		run, err := check.SingleConfigRun(path, result)
+		if err != nil {
+			writeError(stderr, path, err.Error())
+		} else {
+			maybeAnnotate(stderr, run)
+		}
 	}
-	return result.ExitCode()
+	return code
 }
 
 func finishRun(stdout, stderr io.Writer, run check.RunResult, success string, asJSON bool) int {
+	var code int
 	if asJSON {
-		return writeJSON(stdout, stderr, run)
-	}
-	if run.ExitCode() == 0 {
-		fmt.Fprintln(stdout, success)
+		code = writeJSON(stdout, stderr, run)
+	} else if run.ExitCode() == 0 {
+		var buf strings.Builder
+		fmt.Fprintln(&buf, success)
 		for _, line := range run.SuccessLines() {
-			fmt.Fprintln(stdout, line)
+			fmt.Fprintln(&buf, line)
 		}
-		return 0
+		writePlain(stdout, buf.String())
+	} else {
+		withoutWorkflowCommands(stderr, func(w io.Writer) {
+			report, err := check.FormatRunFailureReport(run)
+			fmt.Fprint(w, report)
+			if err != nil {
+				fmt.Fprintf(w, "error: %v\n", err)
+				code = 2
+			} else {
+				code = run.ExitCode()
+			}
+		})
 	}
-	report, err := check.FormatRunFailureReport(run)
-	fmt.Fprint(stderr, report)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 2
+	maybeAnnotate(stderr, run)
+	return code
+}
+
+func errorExit(stderr io.Writer, file, message string) int {
+	writeError(stderr, file, message)
+	return 2
+}
+
+func writeError(stderr io.Writer, file, message string) {
+	withoutWorkflowCommands(stderr, func(w io.Writer) {
+		fmt.Fprintf(w, "error: %s\n", message)
+	})
+	if annotationsOn() {
+		fmt.Fprint(stderr, check.FormatErrorAnnotation(file, message))
 	}
-	return run.ExitCode()
+}
+
+func maybeAnnotate(stderr io.Writer, run check.RunResult) {
+	if !annotationsOn() {
+		return
+	}
+	if text := check.FormatAnnotations(run); text != "" {
+		fmt.Fprint(stderr, text)
+	}
+}
+
+func annotationsOn() bool {
+	return os.Getenv("GITHUB_ACTIONS") == "true" && os.Getenv("GENGUARD_ANNOTATIONS") != "false"
+}
+
+func writePlain(w io.Writer, text string) {
+	if os.Getenv("GITHUB_ACTIONS") == "true" && lineStartsWorkflowCommand(text) {
+		withoutWorkflowCommands(w, func(buf io.Writer) {
+			fmt.Fprint(buf, text)
+		})
+		return
+	}
+	fmt.Fprint(w, text)
+}
+
+func lineStartsWorkflowCommand(text string) bool {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(strings.TrimLeft(line, " \t"), "::") {
+			return true
+		}
+	}
+	return false
+}
+
+func withoutWorkflowCommands(w io.Writer, write func(io.Writer)) {
+	if os.Getenv("GITHUB_ACTIONS") != "true" {
+		write(w)
+		return
+	}
+	var buf strings.Builder
+	write(&buf)
+	token := workflowCommandToken()
+	fmt.Fprintf(w, "::stop-commands::%s\n", token)
+	text := buf.String()
+	fmt.Fprint(w, text)
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		fmt.Fprint(w, "\n")
+	}
+	fmt.Fprintf(w, "::%s::\n", token)
+}
+
+func workflowCommandToken() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("genguard-%d", os.Getpid())
+	}
+	return hex.EncodeToString(b[:])
 }
 
 func writeJSON(stdout, stderr io.Writer, run check.RunResult) int {
 	text, err := check.FormatJSON(run)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		withoutWorkflowCommands(stderr, func(w io.Writer) {
+			fmt.Fprintf(w, "error: %v\n", err)
+		})
 		return 2
 	}
 	fmt.Fprint(stdout, text)

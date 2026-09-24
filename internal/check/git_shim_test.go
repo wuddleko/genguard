@@ -15,6 +15,7 @@ func TestMain(m *testing.M) {
 	if os.Getenv("GENGUARD_GIT_SHIM") == "1" {
 		os.Exit(gitShimMain())
 	}
+	os.Unsetenv("GITHUB_WORKSPACE")
 	os.Exit(m.Run())
 }
 

@@ -1,0 +1,36 @@
+name: genguard
+description: Fail if generated files don't match their generators
+inputs:
+  all:
+    description: Check every genguard.yaml or genguard.yml under the repository root
+    required: false
+    default: "false"
+  config:
+    description: Path to a genguard.yaml
+    required: false
+    default: ""
+  since:
+    description: Ref for --since. The checkout has to contain that ref (fetch-depth 0, or fetch the base branch).
+    required: false
+    default: ""
+  isolated:
+    description: Check the HEAD copy in a throwaway worktree
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Install genguard
+      shell: bash
+      env:
+        GENGUARD_ACTION_REF: ${{ github.action_ref }}
+      run: sh "$GITHUB_ACTION_PATH/action.sh" install
+
+    - name: Check generated files
+      shell: bash
+      env:
+        GENGUARD_ALL: ${{ inputs.all }}
+        GENGUARD_CONFIG: ${{ inputs.config }}
+        GENGUARD_SINCE: ${{ inputs.since }}
+        GENGUARD_ISOLATED: ${{ inputs.isolated }}
+      run: sh "$GITHUB_ACTION_PATH/action.sh" check

@@ -1,0 +1,7 @@
+groups:
+  - name: greeting
+    command: python3 gen.py
+    inputs:
+      - name.txt
+    outputs:
+      - hello.txt
