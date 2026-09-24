@@ -125,7 +125,7 @@ It refuses `.`, `..`, absolute paths, anything that escapes the config directory
 
 ## `--since`
 
-`genguard check --since origin/main` resolves the merge-base of that ref and `HEAD`. A group with `inputs` runs when the working tree differs from that merge-base, or from `HEAD`, under its inputs, its outputs, or the config file. A committed change on the branch counts, and so does a staged edit, an unstaged edit, or an untracked file that is not gitignored. A hand-edit of a generated file still runs that group. So does a change to the group's command or `clean`, a new untracked config, and a declared output file that is not on disk. Directory outputs and globs are not that last check. A group with no `inputs` still runs.
+`genguard check --since origin/main` reruns a group that declares `inputs` when those inputs, its outputs, or the config file differ between the working tree and the merge-base of that ref and `HEAD`. Uncommitted changes count. A group with no `inputs` still runs.
 
 ```yaml
 groups:
