@@ -70,11 +70,7 @@ func isolateSince(dir, since string) (string, error) {
 		return "", err
 	}
 	if code != 0 {
-		detail := strings.TrimSpace(out)
-		if detail == "" {
-			detail = "git rev-parse failed"
-		}
-		return "", newGenguardError("bad --since ref: %s", detail)
+		return "", newGenguardError("bad --since ref: %s", gitDetail(out, "git rev-parse failed"))
 	}
 	rev := strings.TrimSpace(out)
 	if rev == "" {

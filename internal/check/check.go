@@ -478,11 +478,7 @@ func mergeBase(root, since string) (string, error) {
 		return "", err
 	}
 	if code != 0 {
-		detail := strings.TrimSpace(out)
-		if detail == "" {
-			detail = "git merge-base failed"
-		}
-		return "", newGenguardError("bad --since ref: %s", detail)
+		return "", newGenguardError("bad --since ref: %s", gitDetail(out, "git merge-base failed"))
 	}
 	base := strings.TrimSpace(out)
 	if base == "" {
@@ -542,11 +538,7 @@ func gitDiffText(root string, args ...string) (string, error) {
 		return "", err
 	}
 	if code != 0 && code != 1 {
-		detail := strings.TrimSpace(out)
-		if detail == "" {
-			detail = "git diff failed"
-		}
-		return "", newGenguardError("%s", detail)
+		return "", newGenguardError("%s", gitDetail(out, "git diff failed"))
 	}
 	return out, nil
 }
@@ -557,11 +549,7 @@ func gitNames(root string, args ...string) ([]string, error) {
 		return nil, err
 	}
 	if code != 0 {
-		detail := strings.TrimSpace(out)
-		if detail == "" {
-			detail = "git failed"
-		}
-		return nil, newGenguardError("%s", detail)
+		return nil, newGenguardError("%s", gitDetail(out, "git failed"))
 	}
 	return parseGitNameList(out), nil
 }
@@ -572,11 +560,7 @@ func gitPrefix(root string) (string, error) {
 		return "", err
 	}
 	if code != 0 {
-		detail := strings.TrimSpace(out)
-		if detail == "" {
-			detail = "git rev-parse --show-prefix failed"
-		}
-		return "", newGenguardError("%s", detail)
+		return "", newGenguardError("%s", gitDetail(out, "git rev-parse --show-prefix failed"))
 	}
 	return strings.TrimSpace(out), nil
 }
@@ -605,6 +589,14 @@ func parseGitNameList(out string) []string {
 		}
 	}
 	return names
+}
+
+func gitDetail(out, fallback string) string {
+	detail := strings.TrimSpace(out)
+	if detail == "" {
+		return fallback
+	}
+	return detail
 }
 
 func git(root string, args ...string) (string, int, error) {

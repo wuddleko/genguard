@@ -90,11 +90,7 @@ func findCommittedConfigs(repoRoot string) ([]string, error) {
 		return nil, err
 	}
 	if code != 0 {
-		detail := strings.TrimSpace(out)
-		if detail == "" {
-			detail = "git ls-tree failed"
-		}
-		return nil, newGenguardError("%s", detail)
+		return nil, newGenguardError("%s", gitDetail(out, "git ls-tree failed"))
 	}
 	found := make([]string, 0)
 	for _, name := range parseGitNameList(out) {
