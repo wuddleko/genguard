@@ -7,7 +7,7 @@ genguard re-runs the commands in `genguard.yaml`.
 - `version` — print the version.
 - `-c`, `--config` — config file to use. Otherwise genguard walks up from the current directory for `genguard.yaml` or `genguard.yml`.
 - `--all` — every config under the repository.
-- `--since` — skip a group that declares `inputs` when those inputs, its outputs, and the config are unchanged since the merge-base of that ref and `HEAD`.
+- `--since` — skip a group with `inputs` when those paths, its outputs, and the config still match the latest commit that `HEAD` and the ref share.
 - `--isolated` — check the committed files in a temporary worktree and leave your checkout alone. `check` only.
 - `--json` — print the result as JSON.
 
