@@ -123,13 +123,19 @@ func committedConfig(rel string) bool {
 }
 
 func checkOne(path, base string, damage map[string]pathSnap) ConfigRun {
+	return loadConfigRun(path, func(cfg config.Config) (ConfigResult, error) {
+		return checkConfig(cfg, base, damage)
+	})
+}
+
+func loadConfigRun(path string, run func(config.Config) (ConfigResult, error)) ConfigRun {
 	cfgRun := ConfigRun{Path: path}
 	cfg, err := config.LoadConfig(path)
 	if err != nil {
 		cfgRun.Err = err
 		return cfgRun
 	}
-	result, err := checkConfig(cfg, base, damage)
+	result, err := run(cfg)
 	if err != nil {
 		cfgRun.Err = err
 		return cfgRun

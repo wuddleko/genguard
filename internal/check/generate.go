@@ -27,19 +27,9 @@ func RunAll(opts CheckAllOptions) (RunResult, error) {
 }
 
 func runOne(path, base string) ConfigRun {
-	cfgRun := ConfigRun{Path: path}
-	cfg, err := config.LoadConfig(path)
-	if err != nil {
-		cfgRun.Err = err
-		return cfgRun
-	}
-	result, err := runConfig(cfg, base)
-	if err != nil {
-		cfgRun.Err = err
-		return cfgRun
-	}
-	cfgRun.Result = result
-	return cfgRun
+	return loadConfigRun(path, func(cfg config.Config) (ConfigResult, error) {
+		return runConfig(cfg, base)
+	})
 }
 
 func RunSince(cfg config.Config, since string) (ConfigResult, error) {
