@@ -61,18 +61,19 @@ func checkConfig(cfg config.Config, base string, damage map[string]pathSnap) (Co
 	}
 
 	result := ConfigResult{}
+	configName := loadedConfigName(cfg.Path)
 	for _, group := range cfg.Groups {
-		result.Groups = append(result.Groups, checkGroup(root, group, damage, base))
+		result.Groups = append(result.Groups, checkGroup(root, group, damage, base, configName))
 	}
 	return result, nil
 }
 
-func checkGroup(root string, group config.Group, damage map[string]pathSnap, base string) GroupResult {
+func checkGroup(root string, group config.Group, damage map[string]pathSnap, base, configName string) GroupResult {
 	result := GroupResult{Name: group.Name}
 	defer dropRepairedDamage(damage)
 
 	if base != "" && len(group.Inputs) > 0 {
-		affected, err := groupAffected(root, base, group)
+		affected, err := groupAffected(root, base, configName, group)
 		if err != nil {
 			result.Status = GroupError
 			result.Err = err
@@ -466,16 +467,26 @@ func mergeBase(root, since string) (string, error) {
 	return base, nil
 }
 
-func groupAffected(root, base string, group config.Group) (bool, error) {
+func loadedConfigName(path string) string {
+	name := filepath.Base(path)
+	if name == "." || name == ".." {
+		return ""
+	}
+	return name
+}
+
+func groupAffected(root, base, configName string, group config.Group) (bool, error) {
 	for _, spec := range group.Outputs {
 		if literalOutputAbsent(root, spec) {
 			return true, nil
 		}
 	}
-	specs := make([]string, 0, len(group.Inputs)+len(group.Outputs)+2)
+	specs := make([]string, 0, len(group.Inputs)+len(group.Outputs)+1)
 	specs = append(specs, group.Inputs...)
 	specs = append(specs, group.Outputs...)
-	specs = append(specs, "genguard.yaml", "genguard.yml")
+	if configName != "" {
+		specs = append(specs, configName)
+	}
 	for _, rev := range []string{base, "HEAD"} {
 		names, err := gitDiffNames(root, rev, specs)
 		if err != nil || len(names) > 0 {

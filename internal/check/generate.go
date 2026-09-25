@@ -65,16 +65,17 @@ func runConfig(cfg config.Config, base string) (ConfigResult, error) {
 		return ConfigResult{}, err
 	}
 	result := ConfigResult{}
+	configName := loadedConfigName(cfg.Path)
 	for _, group := range cfg.Groups {
-		result.Groups = append(result.Groups, runGroup(root, group, base))
+		result.Groups = append(result.Groups, runGroup(root, group, base, configName))
 	}
 	return result, nil
 }
 
-func runGroup(root string, group config.Group, base string) GroupResult {
+func runGroup(root string, group config.Group, base, configName string) GroupResult {
 	result := GroupResult{Name: group.Name}
 	if base != "" && len(group.Inputs) > 0 {
-		affected, err := groupAffected(root, base, group)
+		affected, err := groupAffected(root, base, configName, group)
 		if err != nil {
 			result.Status = GroupError
 			result.Err = err

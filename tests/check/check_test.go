@@ -2586,6 +2586,92 @@ func TestSinceRunsWhenConfigCommandChanges(t *testing.T) {
 	}
 }
 
+func TestSinceCustomConfigChangeRuns(t *testing.T) {
+	root, cfg := writeCustomConfigRepo(t)
+	path := cfg.Path
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(body, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	checked, err := check.CheckSince(cfg, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertGroupStatus(t, checked, "gen", check.GroupOK)
+	if !markerExists(root, "ran") {
+		t.Fatal("changed custom.yaml did not run check")
+	}
+	if err := os.Remove(filepath.Join(root, "ran")); err != nil {
+		t.Fatal(err)
+	}
+
+	ran, err := check.RunSince(cfg, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertGroupStatus(t, ran, "gen", check.GroupOK)
+	if !markerExists(root, "ran") {
+		t.Fatal("changed custom.yaml did not run")
+	}
+}
+
+func TestSinceCustomConfigIgnoresUntrackedSibling(t *testing.T) {
+	root, cfg := writeCustomConfigRepo(t)
+	writeSinceFile(t, root, "genguard.yml", "groups: []\n")
+
+	checked, err := check.CheckSince(cfg, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertGroupStatus(t, checked, "gen", check.GroupSkipped)
+	if markerExists(root, "ran") {
+		t.Fatal("untracked genguard.yml ran check")
+	}
+
+	ran, err := check.RunSince(cfg, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertGroupStatus(t, ran, "gen", check.GroupSkipped)
+	if markerExists(root, "ran") {
+		t.Fatal("untracked genguard.yml ran")
+	}
+}
+
+func writeCustomConfigRepo(t *testing.T) (string, config.Config) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	writeSinceFile(t, root, "in.txt", "in\n")
+	writeSinceFile(t, root, "out.txt", "out\n")
+	path, err := testutil.WriteGenguardConfig(root, "", "", "custom.yaml", []testutil.GroupSpec{{
+		Name:    "gen",
+		Command: `python3 -c "open('ran','w').close()"`,
+		Inputs:  []string{"in.txt"},
+		Outputs: []string{"out.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "base"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root, cfg
+}
+
 func TestSinceRunsUntrackedConfig(t *testing.T) {
 	root := writeSinceRepo(t)
 	writeSinceFile(t, root, "fresh/in.txt", "in\n")
