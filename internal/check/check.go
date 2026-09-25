@@ -440,10 +440,7 @@ func driftForGroup(root string, group config.Group) ([]Drift, error) {
 			modified[i] = rel
 		}
 	}
-	untracked, err := gitNames(
-		root,
-		append([]string{"ls-files", "--others", "--exclude-standard", "-z", "--"}, group.Outputs...)...,
-	)
+	untracked, err := gitUntracked(root, group.Outputs)
 	if err != nil {
 		return nil, err
 	}
@@ -513,7 +510,7 @@ func groupAffected(root, base, configName string, group config.Group) (bool, err
 			return len(names) > 0, err
 		}
 	}
-	untracked, err := gitNames(root, append([]string{"ls-files", "--others", "--exclude-standard", "-z", "--"}, specs...)...)
+	untracked, err := gitUntracked(root, specs)
 	return len(untracked) > 0, err
 }
 
@@ -528,6 +525,11 @@ func literalOutputAbsent(root, spec string) bool {
 // --relative hides paths outside this directory, so names stay repo-root paths.
 func gitDiffNames(root, rev string, specs []string) ([]string, error) {
 	args := append([]string{"-c", "diff.relative=false", "diff", "--name-only", "-z", rev, "--"}, specs...)
+	return gitNames(root, args...)
+}
+
+func gitUntracked(root string, specs []string) ([]string, error) {
+	args := append([]string{"ls-files", "--others", "--exclude-standard", "-z", "--"}, specs...)
 	return gitNames(root, args...)
 }
 
