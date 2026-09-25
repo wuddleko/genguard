@@ -29,7 +29,7 @@ func chdir(t *testing.T, dir string) {
 func TestResolveCleanTargetDirectory(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	target, isDir, err := resolveCleanTarget(root, "generated/")
+	target, isDir, err := resolveCleanPath(root, "generated/", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestResolveCleanTargetRefuses(t *testing.T) {
 		tc := tc
 		t.Run(tc.spec, func(t *testing.T) {
 			t.Parallel()
-			_, _, err := resolveCleanTarget(root, tc.spec)
+			_, _, err := resolveCleanPath(root, tc.spec, true)
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -75,7 +75,7 @@ func TestResolveCleanTargetRefusesAbsolute(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	spec := filepath.Join(root, "generated")
-	_, _, err := resolveCleanTarget(root, spec)
+	_, _, err := resolveCleanPath(root, spec, true)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -95,7 +95,7 @@ func TestResolveCleanTargetRefusesSymlink(t *testing.T) {
 	if err := os.Symlink(realDir, link); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := resolveCleanTarget(root, "generated")
+	_, _, err := resolveCleanPath(root, "generated", true)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -118,7 +118,7 @@ func TestResolveCleanTargetRefusesIntermediateSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := resolveCleanTarget(root, "generated/sub/foo.txt")
+	_, _, err := resolveCleanPath(root, "generated/sub/foo.txt", true)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -142,7 +142,7 @@ func TestResolveCleanTargetRefusesNestedSymlinkComponent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := resolveCleanTarget(root, "generated/out/")
+	_, _, err := resolveCleanPath(root, "generated/out/", true)
 	if err == nil {
 		t.Fatal("expected error")
 	}

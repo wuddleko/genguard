@@ -53,7 +53,7 @@ func planCleanSpec(root, spec string) ([]cleanTarget, error) {
 	if isGlob(spec) {
 		return planCleanGlob(root, spec)
 	}
-	target, isDir, err := resolveCleanTarget(root, spec)
+	target, isDir, err := resolveCleanPath(root, spec, true)
 	if err != nil {
 		return nil, err
 	}
@@ -285,10 +285,6 @@ func statPath(path string, follow bool) (os.FileInfo, error) {
 		return nil, err
 	}
 	return info, nil
-}
-
-func resolveCleanTarget(root, spec string) (string, bool, error) {
-	return resolveCleanPath(root, spec, true)
 }
 
 func resolveCleanPath(root, spec string, rejectGlob bool) (string, bool, error) {
