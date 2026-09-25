@@ -30,13 +30,14 @@ GENGUARD_OS and GENGUARD_ARCH override OS and architecture detection.
 EOF
 }
 
+# Status: 0 release tag, 1 other text, 2 release shape with a disallowed character.
 valid_tag() {
   case "$1" in
     v[0-9]*.[0-9]*.[0-9]*|v[0-9]*.[0-9]*.[0-9]*-[A-Za-z0-9.]*) ;;
     *) return 1 ;;
   esac
   case "$1" in
-    *[!A-Za-z0-9.-]*) return 1 ;;
+    *[!A-Za-z0-9.-]*) return 2 ;;
   esac
   return 0
 }
@@ -177,6 +178,11 @@ install_binary() {
   fi
   printf 'installed %s\n' "$dest"
 }
+
+# action.sh sources this file for valid_tag. A downloaded copy may not be named install.sh.
+case "${0##*/}" in
+  action.sh) return 0 ;;
+esac
 
 tag=${GENGUARD_TAG:-$default_tag}
 print_asset=0

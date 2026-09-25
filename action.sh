@@ -4,6 +4,9 @@
 
 set -eu
 
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$script_dir/install.sh"
+
 release_ref() {
   # github.action_ref is empty in a composite run step. action.yml copies it
   # into GENGUARD_ACTION_REF. GITHUB_ACTION_REF is not that value.
@@ -11,18 +14,22 @@ release_ref() {
   case "$ref" in
     refs/tags/*) ref=${ref#refs/tags/} ;;
   esac
-  case "$ref" in
-    v[0-9]*.[0-9]*.[0-9]*|v[0-9]*.[0-9]*.[0-9]*-[A-Za-z0-9.]*) ;;
-    v*)
-      printf 'action.sh: %s is not a release tag (want v1.2.3)\n' "$ref" >&2
-      return 2
-      ;;
-    *) return 1 ;;
-  esac
-  case "$ref" in
-    *[!A-Za-z0-9.-]*) return 1 ;;
-  esac
-  printf '%s\n' "$ref"
+  status=0
+  valid_tag "$ref" || status=$?
+  if [ "$status" -eq 0 ]; then
+    printf '%s\n' "$ref"
+    return 0
+  fi
+  # valid_tag status 1 is text outside the release shape. A v* ref then exits 2.
+  if [ "$status" -eq 1 ]; then
+    case "$ref" in
+      v*)
+        printf 'action.sh: %s is not a release tag (want v1.2.3)\n' "$ref" >&2
+        return 2
+        ;;
+    esac
+  fi
+  return 1
 }
 
 install_from_source() {
