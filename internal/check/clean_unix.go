@@ -34,7 +34,7 @@ func removePinned(root string, parts []string, isDir bool) error {
 				return mkdirAllAt(fd, parts[:i], parts[i:])
 			}
 			if isSymlinkErr(err) {
-				return newGenguardError("clean refuses symlink in output path %q", filepath.Join(parts[:i+1]...))
+				return cleanSymlinkError(filepath.Join(parts[:i+1]...))
 			}
 			return err
 		}
@@ -57,7 +57,7 @@ func removeNameAt(parent int, name string, isDir bool, rel string) error {
 		return err
 	}
 	if isSymlinkMode(uint32(stat.Mode)) {
-		return newGenguardError("clean refuses symlink in output path %q", rel)
+		return cleanSymlinkError(rel)
 	}
 	if !isDir {
 		return ignoreNotExist(unix.Unlinkat(parent, name, 0))
@@ -71,7 +71,7 @@ func removeNameAt(parent int, name string, isDir bool, rel string) error {
 	dirfd, err := openNoFollow(parent, name)
 	if err != nil {
 		if isSymlinkErr(err) {
-			return newGenguardError("clean refuses symlink in output path %q", rel)
+			return cleanSymlinkError(rel)
 		}
 		return err
 	}
@@ -108,14 +108,14 @@ func mkdirAllAt(dirfd int, prefix, rest []string) error {
 		case err != nil:
 			return err
 		case isSymlinkMode(uint32(stat.Mode)):
-			return newGenguardError("clean refuses symlink in output path %q", filepath.Join(seen...))
+			return cleanSymlinkError(filepath.Join(seen...))
 		case !isDirMode(uint32(stat.Mode)):
 			return unix.ENOTDIR
 		}
 		next, err := openNoFollow(fd, part)
 		if err != nil {
 			if isSymlinkErr(err) {
-				return newGenguardError("clean refuses symlink in output path %q", filepath.Join(seen...))
+				return cleanSymlinkError(filepath.Join(seen...))
 			}
 			return err
 		}

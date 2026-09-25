@@ -25,7 +25,7 @@ func removePinned(root string, parts []string, isDir bool) error {
 			return os.MkdirAll(filepath.Join(append([]string{cur}, parts[i:]...)...), 0o755)
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return newGenguardError("clean refuses symlink in output path %q", filepath.Join(parts[:i+1]...))
+			return cleanSymlinkError(filepath.Join(parts[:i+1]...))
 		}
 		if i == len(parts)-1 {
 			return finishCleanTarget(next, info, isDir)

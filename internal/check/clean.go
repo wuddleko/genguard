@@ -373,6 +373,10 @@ func refuseSymlinksInPath(root, target string) error {
 	return refuseSymlinks(root, parts)
 }
 
+func cleanSymlinkError(path string) error {
+	return newGenguardError("clean refuses symlink in output path %q", path)
+}
+
 func refuseSymlinks(root string, parts []string) error {
 	cur := root
 	for i, part := range parts {
@@ -386,7 +390,7 @@ func refuseSymlinks(root string, parts []string) error {
 			return err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			return newGenguardError("clean refuses symlink in output path %q", filepath.Join(parts[:i+1]...))
+			return cleanSymlinkError(filepath.Join(parts[:i+1]...))
 		}
 	}
 	return nil
