@@ -45,49 +45,27 @@ func RunWithIO(args []string, stdout, stderr io.Writer) int {
 }
 
 func runCheck(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("check", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	all := fs.Bool("all", false, "Check every genguard.yaml or genguard.yml under the git repository root")
-	configPath := fs.String("config", "", "Path to genguard.yaml (default: walk parents from cwd)")
-	configShort := fs.String("c", "", "Path to genguard.yaml (default: walk parents from cwd)")
-	since := fs.String("since", "", "Run a group with inputs when its inputs, outputs, or config file differ from HEAD or from the merge-base of this ref, or a declared output file is missing")
-	isolated := fs.Bool("isolated", false, "Check the HEAD copy in a throwaway worktree (do not read or write the current checkout)")
-	asJSON := fs.Bool("json", false, "Print the result as JSON on stdout")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	flags, code, ok := parseCommandFlags(args, stderr, commandUsage{
+		name:     "check",
+		all:      "Check every genguard.yaml or genguard.yml under the git repository root",
+		isolated: "Check the HEAD copy in a throwaway worktree (do not read or write the current checkout)",
+	})
+	if !ok {
+		return code
 	}
-
-	selected := *configPath
-	if selected == "" {
-		selected = *configShort
+	path, useAll, code, ok := resolveConfigPath(stderr, flags)
+	if !ok {
+		return code
 	}
-	if *all && selected != "" {
-		return errorExit(stderr, "", "--all and --config are mutually exclusive")
-	}
-	if *all {
-		return runCheckAll(stdout, stderr, *since, *isolated, *asJSON)
-	}
-
-	path := selected
-	if path == "" {
-		found, err := config.FindConfig("")
-		if err != nil {
-			return errorExit(stderr, "", err.Error())
-		}
-		if found == "" {
-			return errorExit(stderr, "", "no genguard.yaml found (pass --config)")
-		}
-		path = found
+	if useAll {
+		return runCheckAll(stdout, stderr, flags.since, flags.isolated, flags.asJSON)
 	}
 
 	var result check.ConfigResult
 	root := filepath.Dir(path)
-	if *isolated {
+	if flags.isolated {
 		var err error
-		result, err = check.CheckSinceIsolated(path, *since)
+		result, err = check.CheckSinceIsolated(path, flags.since)
 		if err != nil && len(result.Groups) == 0 {
 			return errorExit(stderr, path, err.Error())
 		}
@@ -96,13 +74,13 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errorExit(stderr, path, err.Error())
 		}
-		result, err = check.CheckSince(cfg, *since)
+		result, err = check.CheckSince(cfg, flags.since)
 		if err != nil {
 			return errorExit(stderr, path, err.Error())
 		}
 		root = cfg.Root()
 	}
-	return finishConfig(stdout, stderr, result, path, root, "Generated files match the generators.", *asJSON)
+	return finishConfig(stdout, stderr, result, path, root, "Generated files match the generators.", flags.asJSON)
 }
 
 func runCheckAll(stdout, stderr io.Writer, since string, isolated, asJSON bool) int {
@@ -117,55 +95,97 @@ func runCheckAll(stdout, stderr io.Writer, since string, isolated, asJSON bool) 
 }
 
 func runRun(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	all := fs.Bool("all", false, "Run every genguard.yaml or genguard.yml under the git repository root")
-	configPath := fs.String("config", "", "Path to genguard.yaml (default: walk parents from cwd)")
-	configShort := fs.String("c", "", "Path to genguard.yaml (default: walk parents from cwd)")
-	since := fs.String("since", "", "Run a group with inputs when its inputs, outputs, or config file differ from HEAD or from the merge-base of this ref, or a declared output file is missing")
-	isolated := fs.Bool("isolated", false, "Not valid with run; run writes the checkout")
-	asJSON := fs.Bool("json", false, "Print the result as JSON on stdout")
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	flags, code, ok := parseCommandFlags(args, stderr, commandUsage{
+		name:     "run",
+		all:      "Run every genguard.yaml or genguard.yml under the git repository root",
+		isolated: "Not valid with run; run writes the checkout",
+	})
+	if !ok {
+		return code
 	}
-	if *isolated {
+	if flags.isolated {
 		return errorExit(stderr, "", "genguard run writes the checkout; --isolated is not valid")
 	}
-
-	selected := *configPath
-	if selected == "" {
-		selected = *configShort
+	path, useAll, code, ok := resolveConfigPath(stderr, flags)
+	if !ok {
+		return code
 	}
-	if *all && selected != "" {
-		return errorExit(stderr, "", "--all and --config are mutually exclusive")
-	}
-	if *all {
-		return runRunAll(stdout, stderr, *since, *asJSON)
-	}
-	path := selected
-	if path == "" {
-		found, err := config.FindConfig("")
-		if err != nil {
-			return errorExit(stderr, "", err.Error())
-		}
-		if found == "" {
-			return errorExit(stderr, "", "no genguard.yaml found (pass --config)")
-		}
-		path = found
+	if useAll {
+		return runRunAll(stdout, stderr, flags.since, flags.asJSON)
 	}
 
 	cfg, err := config.LoadConfig(path)
 	if err != nil {
 		return errorExit(stderr, path, err.Error())
 	}
-	result, err := check.RunSince(cfg, *since)
+	result, err := check.RunSince(cfg, flags.since)
 	if err != nil {
 		return errorExit(stderr, path, err.Error())
 	}
-	return finishConfig(stdout, stderr, result, path, cfg.Root(), "Generated files written.", *asJSON)
+	return finishConfig(stdout, stderr, result, path, cfg.Root(), "Generated files written.", flags.asJSON)
+}
+
+type commandFlags struct {
+	all      bool
+	selected string
+	since    string
+	isolated bool
+	asJSON   bool
+}
+
+type commandUsage struct {
+	name     string
+	all      string
+	isolated string
+}
+
+func parseCommandFlags(args []string, stderr io.Writer, usage commandUsage) (commandFlags, int, bool) {
+	fs := flag.NewFlagSet(usage.name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	all := fs.Bool("all", false, usage.all)
+	configPath := fs.String("config", "", "Path to genguard.yaml (default: walk parents from cwd)")
+	configShort := fs.String("c", "", "Path to genguard.yaml (default: walk parents from cwd)")
+	since := fs.String("since", "", "Run a group with inputs when its inputs, outputs, or config file differ from HEAD or from the merge-base of this ref, or a declared output file is missing")
+	isolated := fs.Bool("isolated", false, usage.isolated)
+	asJSON := fs.Bool("json", false, "Print the result as JSON on stdout")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return commandFlags{}, 0, false
+		}
+		return commandFlags{}, 2, false
+	}
+	selected := *configPath
+	if selected == "" {
+		selected = *configShort
+	}
+	return commandFlags{
+		all:      *all,
+		selected: selected,
+		since:    *since,
+		isolated: *isolated,
+		asJSON:   *asJSON,
+	}, 0, true
+}
+
+func resolveConfigPath(stderr io.Writer, flags commandFlags) (path string, useAll bool, code int, ok bool) {
+	if flags.all && flags.selected != "" {
+		return "", false, errorExit(stderr, "", "--all and --config are mutually exclusive"), false
+	}
+	if flags.all {
+		return "", true, 0, true
+	}
+	path = flags.selected
+	if path == "" {
+		found, err := config.FindConfig("")
+		if err != nil {
+			return "", false, errorExit(stderr, "", err.Error()), false
+		}
+		if found == "" {
+			return "", false, errorExit(stderr, "", "no genguard.yaml found (pass --config)"), false
+		}
+		path = found
+	}
+	return path, false, 0, true
 }
 
 func runRunAll(stdout, stderr io.Writer, since string, asJSON bool) int {

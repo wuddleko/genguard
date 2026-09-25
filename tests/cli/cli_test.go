@@ -1804,6 +1804,54 @@ func TestCLIRunShortConfig(t *testing.T) {
 	}
 }
 
+func TestCLICheckShortConfig(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, root)
+
+	stdout, stderr, code := runCLI([]string{"check", "-c", "genguard.yaml"})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files match the generators.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello world\n" {
+		t.Fatalf("output = %q", got)
+	}
+}
+
+func TestCLICheckConfigFlagWinsOverShort(t *testing.T) {
+	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := filepath.Join(root, "bad.yaml")
+	if err := os.WriteFile(bad, []byte("groups:\n  - name: broken\n    command: \"exit 3\"\n    outputs:\n      - generated/hello.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	good := filepath.Join(root, "genguard.yaml")
+
+	for _, args := range [][]string{
+		{"check", "-c", bad, "--config", good},
+		{"check", "--config", good, "-c", bad},
+	} {
+		stdout, stderr, code := runCLI(args)
+		if code != 0 {
+			t.Fatalf("%v: code = %d, want 0; stderr = %q", args, code, stderr)
+		}
+		if stdout != "Generated files match the generators.\n" {
+			t.Fatalf("%v: stdout = %q", args, stdout)
+		}
+	}
+}
+
 func TestCLIRunConfigFlagWinsOverShort(t *testing.T) {
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
 	if err != nil {
