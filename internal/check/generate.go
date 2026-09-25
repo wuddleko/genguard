@@ -54,11 +54,7 @@ func runGroups(cfg config.Config, base string) (ConfigResult, error) {
 	root := cfg.Root()
 	result := ConfigResult{}
 	for _, group := range cfg.Groups {
-		result.Groups = append(result.Groups, runGroup(root, group, base, cfg.Path))
+		result.Groups = append(result.Groups, runPreparedGroup(root, group, base, cfg.Path, nil, nil))
 	}
 	return result, nil
-}
-
-func runGroup(root string, group config.Group, base, configPath string) GroupResult {
-	return runPreparedGroup(root, group, base, configPath, nil, nil)
 }

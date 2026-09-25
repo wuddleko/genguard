@@ -398,7 +398,7 @@ func findProtected(target string) (string, string, error) {
 		return "", "", err
 	}
 	if !info.IsDir() {
-		gitPath, err := gitEntryPath(target)
+		_, gitPath, err := foldedEntry(target, ".git")
 		if err != nil || gitPath != "" {
 			return gitPath, "", err
 		}
@@ -411,7 +411,7 @@ func findProtected(target string) (string, string, error) {
 		if err != nil {
 			return err
 		}
-		foundGit, err := gitEntryPath(path)
+		_, foundGit, err := foldedEntry(path, ".git")
 		if err != nil {
 			return err
 		}
@@ -429,11 +429,6 @@ func findProtected(target string) (string, string, error) {
 		return "", "", err
 	}
 	return gitPath, configPath, nil
-}
-
-func gitEntryPath(path string) (string, error) {
-	_, probed, err := foldedEntry(path, ".git")
-	return probed, err
 }
 
 func configEntryPath(path string) (string, error) {

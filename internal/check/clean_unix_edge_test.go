@@ -67,7 +67,7 @@ func TestCleanUnixPermissionFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 		lockDir(t, root)
-		if _, err := gitEntryPath(gitDir); err == nil || os.IsNotExist(err) {
+		if _, _, err := foldedEntry(gitDir, ".git"); err == nil || os.IsNotExist(err) {
 			t.Fatalf("error = %v", err)
 		}
 	})

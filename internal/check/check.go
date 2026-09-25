@@ -81,7 +81,8 @@ func checkGroup(root string, group config.Group, damage map[string]pathSnap, bas
 
 	var wipe map[string]pathSnap
 	result := runPreparedGroup(root, group, base, configPath, func() {
-		wipe = snapshotClean(root, group)
+		wipe = map[string]pathSnap{}
+		recordCleanDamage(wipe, root, group)
 	}, func(result GroupResult) GroupResult {
 		found, driftErr := driftForGroup(root, group)
 		if driftErr != nil {
@@ -163,12 +164,6 @@ type pathSnap struct {
 	size    int64
 	sum     [32]byte
 	hashed  bool
-}
-
-func snapshotClean(root string, group config.Group) map[string]pathSnap {
-	snap := map[string]pathSnap{}
-	recordCleanDamage(snap, root, group)
-	return snap
 }
 
 func recordCleanDamage(damage map[string]pathSnap, root string, group config.Group) {

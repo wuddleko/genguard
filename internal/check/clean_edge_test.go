@@ -108,7 +108,7 @@ func TestGitEntryPathCaseOnlyName(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(root, ".git")); err == nil {
 		t.Skip("volume folds .GIT and .git to the same file")
 	}
-	got, err := gitEntryPath(filepath.Join(root, ".GIT"))
+	_, got, err := foldedEntry(filepath.Join(root, ".GIT"), ".git")
 	if err != nil {
 		t.Fatal(err)
 	}

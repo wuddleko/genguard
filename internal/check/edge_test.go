@@ -119,7 +119,8 @@ func TestRecordCleanDamageIgnoresDriftError(t *testing.T) {
 	if len(damage) != 0 {
 		t.Fatalf("damage = %+v", damage)
 	}
-	snap := snapshotClean(t.TempDir(), config.Group{Outputs: []string{"missing.txt"}})
+	snap := map[string]pathSnap{}
+	recordCleanDamage(snap, t.TempDir(), config.Group{Outputs: []string{"missing.txt"}})
 	if len(snap) != 0 {
 		t.Fatalf("snap = %+v", snap)
 	}
