@@ -1,8 +1,6 @@
 package check
 
 import (
-	"strings"
-
 	"github.com/wuddleko/genguard/internal/config"
 )
 
@@ -45,25 +43,25 @@ func runOne(path, base string) ConfigRun {
 }
 
 func RunSince(cfg config.Config, since string) (ConfigResult, error) {
-	if strings.TrimSpace(since) == "" {
-		return RunConfig(cfg)
-	}
-	root := cfg.Root()
-	if err := requireGitRepo(root); err != nil {
-		return ConfigResult{}, err
-	}
-	base, err := mergeBase(root, since)
+	base, err := sinceBase(cfg, since)
 	if err != nil {
 		return ConfigResult{}, err
 	}
-	return runConfig(cfg, base)
+	if base == "" {
+		return RunConfig(cfg)
+	}
+	return runGroups(cfg, base)
 }
 
 func runConfig(cfg config.Config, base string) (ConfigResult, error) {
-	root := cfg.Root()
-	if err := requireGitRepo(root); err != nil {
+	if err := requireGitRepo(cfg.Root()); err != nil {
 		return ConfigResult{}, err
 	}
+	return runGroups(cfg, base)
+}
+
+func runGroups(cfg config.Config, base string) (ConfigResult, error) {
+	root := cfg.Root()
 	result := ConfigResult{}
 	for _, group := range cfg.Groups {
 		result.Groups = append(result.Groups, runGroup(root, group, base, cfg.Path))
@@ -72,38 +70,5 @@ func runConfig(cfg config.Config, base string) (ConfigResult, error) {
 }
 
 func runGroup(root string, group config.Group, base, configPath string) GroupResult {
-	result := GroupResult{Name: group.Name}
-	if base != "" && len(group.Inputs) > 0 {
-		affected, err := groupAffected(root, base, loadedConfigName(configPath), group)
-		if err != nil {
-			result.Status = GroupError
-			result.Err = err
-			return result
-		}
-		if !affected {
-			result.Status = GroupSkipped
-			return result
-		}
-	}
-
-	if group.Clean {
-		if err := cleanOutputs(root, configPath, group); err != nil {
-			result.Status = GroupError
-			result.Err = err
-			return result
-		}
-	}
-
-	if err := runCommand(root, group.Command); err != nil {
-		result.Status = GroupError
-		if group.Clean {
-			result.Err = newGenguardError("command failed after cleaning outputs: %s", err.Error())
-		} else {
-			result.Err = err
-		}
-		return result
-	}
-
-	result.Status = GroupOK
-	return result
+	return runPreparedGroup(root, group, base, configPath, nil, nil)
 }

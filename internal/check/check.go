@@ -37,29 +37,38 @@ func CheckConfig(cfg config.Config) (ConfigResult, error) {
 }
 
 func CheckSince(cfg config.Config, since string) (ConfigResult, error) {
-	if strings.TrimSpace(since) == "" {
-		return CheckConfig(cfg)
-	}
-	root := cfg.Root()
-	if err := requireGitRepo(root); err != nil {
-		return ConfigResult{}, err
-	}
-	base, err := mergeBase(root, since)
+	base, err := sinceBase(cfg, since)
 	if err != nil {
 		return ConfigResult{}, err
 	}
-	return checkConfig(cfg, base, map[string]pathSnap{})
+	if base == "" {
+		return CheckConfig(cfg)
+	}
+	return checkGroups(cfg, base, map[string]pathSnap{})
+}
+
+func sinceBase(cfg config.Config, since string) (string, error) {
+	if strings.TrimSpace(since) == "" {
+		return "", nil
+	}
+	if err := requireGitRepo(cfg.Root()); err != nil {
+		return "", err
+	}
+	return mergeBase(cfg.Root(), since)
 }
 
 func checkConfig(cfg config.Config, base string, damage map[string]pathSnap) (ConfigResult, error) {
-	root := cfg.Root()
-	if err := requireGitRepo(root); err != nil {
+	if err := requireGitRepo(cfg.Root()); err != nil {
 		return ConfigResult{}, err
 	}
+	return checkGroups(cfg, base, damage)
+}
+
+func checkGroups(cfg config.Config, base string, damage map[string]pathSnap) (ConfigResult, error) {
 	if damage == nil {
 		damage = map[string]pathSnap{}
 	}
-
+	root := cfg.Root()
 	result := ConfigResult{}
 	for _, group := range cfg.Groups {
 		result.Groups = append(result.Groups, checkGroup(root, group, damage, base, cfg.Path))
@@ -68,39 +77,12 @@ func checkConfig(cfg config.Config, base string, damage map[string]pathSnap) (Co
 }
 
 func checkGroup(root string, group config.Group, damage map[string]pathSnap, base, configPath string) GroupResult {
-	result := GroupResult{Name: group.Name}
 	defer dropRepairedDamage(damage)
 
-	if base != "" && len(group.Inputs) > 0 {
-		affected, err := groupAffected(root, base, loadedConfigName(configPath), group)
-		if err != nil {
-			result.Status = GroupError
-			result.Err = err
-			return result
-		}
-		if !affected {
-			result.Status = GroupSkipped
-			return result
-		}
-	}
-
 	var wipe map[string]pathSnap
-	if group.Clean {
-		if err := cleanOutputs(root, configPath, group); err != nil {
-			result.Status = GroupError
-			result.Err = err
-			return result
-		}
+	result := runPreparedGroup(root, group, base, configPath, func() {
 		wipe = snapshotClean(root, group)
-	}
-
-	if err := runCommand(root, group.Command); err != nil {
-		result.Status = GroupError
-		if group.Clean {
-			result.Err = newGenguardError("command failed after cleaning outputs: %s", err.Error())
-		} else {
-			result.Err = err
-		}
+	}, func(result GroupResult) GroupResult {
 		found, driftErr := driftForGroup(root, group)
 		if driftErr != nil {
 			result.Err = driftErr
@@ -112,6 +94,9 @@ func checkGroup(root string, group config.Group, damage map[string]pathSnap, bas
 		if group.Clean {
 			recordFoundDamage(damage, root, found)
 		}
+		return result
+	})
+	if result.Status != GroupOK {
 		return result
 	}
 
@@ -127,7 +112,47 @@ func checkGroup(root string, group config.Group, damage map[string]pathSnap, bas
 		result.Drifts = found
 		return result
 	}
+	return result
+}
 
+func runPreparedGroup(root string, group config.Group, base, configPath string, afterClean func(), onCommandError func(GroupResult) GroupResult) GroupResult {
+	result := GroupResult{Name: group.Name}
+	if base != "" && len(group.Inputs) > 0 {
+		affected, err := groupAffected(root, base, loadedConfigName(configPath), group)
+		if err != nil {
+			result.Status = GroupError
+			result.Err = err
+			return result
+		}
+		if !affected {
+			result.Status = GroupSkipped
+			return result
+		}
+	}
+
+	if group.Clean {
+		if err := cleanOutputs(root, configPath, group); err != nil {
+			result.Status = GroupError
+			result.Err = err
+			return result
+		}
+		if afterClean != nil {
+			afterClean()
+		}
+	}
+
+	if err := runCommand(root, group.Command); err != nil {
+		result.Status = GroupError
+		if group.Clean {
+			result.Err = newGenguardError("command failed after cleaning outputs: %s", err.Error())
+		} else {
+			result.Err = err
+		}
+		if onCommandError != nil {
+			return onCommandError(result)
+		}
+		return result
+	}
 	result.Status = GroupOK
 	return result
 }
