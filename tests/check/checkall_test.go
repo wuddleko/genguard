@@ -119,7 +119,7 @@ func TestCheckAllInvalidYAMLStillRunsOthers(t *testing.T) {
 		t.Fatalf("web did not run: %+v", webRun)
 	}
 	configs, ok, drift, errorsN := run.Counts()
-	if configs != 2 || ok != 1 || drift != 0 || errorsN != 0 {
+	if configs != 2 || ok != 1 || drift != 0 || errorsN != 1 {
 		t.Fatalf("Counts = %d, %d, %d, %d", configs, ok, drift, errorsN)
 	}
 	if !strings.Contains(strings.Join(run.SummaryLines(), "\n"), "2 configs: 1 ok, 0 drift, 1 error") {

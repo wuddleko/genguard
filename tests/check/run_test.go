@@ -102,7 +102,7 @@ func TestRunResultExitCode(t *testing.T) {
 	}
 }
 
-func TestRunResultCountsSkipsSetupFailures(t *testing.T) {
+func TestRunResultCountsIncludesLoadErrors(t *testing.T) {
 	t.Parallel()
 	run := check.RunResult{Configs: []check.ConfigRun{
 		{Path: "bad.yaml", Err: errors.New("parse failed")},
@@ -113,7 +113,7 @@ func TestRunResultCountsSkipsSetupFailures(t *testing.T) {
 		}}},
 	}}
 	configs, ok, drift, errorsN := run.Counts()
-	if configs != 2 || ok != 1 || drift != 1 || errorsN != 1 {
+	if configs != 2 || ok != 1 || drift != 1 || errorsN != 2 {
 		t.Fatalf("Counts = %d, %d, %d, %d", configs, ok, drift, errorsN)
 	}
 	if run.ExitCode() != 2 {
@@ -150,7 +150,7 @@ func TestRunResultSummaryLines(t *testing.T) {
 		t.Fatalf("SummaryLines =\n%s\nwant\n%s", got, want)
 	}
 	configs, ok, drift, errorsN := run.Counts()
-	if configs != 2 || ok != 0 || drift != 1 || errorsN != 0 {
+	if configs != 2 || ok != 0 || drift != 1 || errorsN != 1 {
 		t.Fatalf("Counts = %d, %d, %d, %d", configs, ok, drift, errorsN)
 	}
 }

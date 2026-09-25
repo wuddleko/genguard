@@ -40,6 +40,7 @@ func (r RunResult) Counts() (configs, ok, drift, errors int) {
 	configs = len(r.Configs)
 	for _, cfg := range r.Configs {
 		if cfg.Err != nil {
+			errors++
 			continue
 		}
 		gOK, gDrift, gErr := cfg.Result.Counts()
