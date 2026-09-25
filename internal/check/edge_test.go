@@ -410,6 +410,7 @@ func TestIsolatedRunKeepsCompletedCheck(t *testing.T) {
 	result := ConfigResult{Groups: []GroupResult{{Name: "api", Status: GroupDrift, Drifts: []Drift{{
 		Group: "api", Path: "out.txt", Kind: "modified",
 	}}}}}
+	result.noteCleanup(removeErr)
 	run := isolatedRun("genguard.yaml", result, removeErr)
 	if run.Err != nil {
 		t.Fatalf("Err = %v, want the drift result", run.Err)
@@ -425,7 +426,9 @@ func TestIsolatedRunKeepsCompletedCheck(t *testing.T) {
 		t.Fatalf("line = %q", line)
 	}
 
-	run = isolatedRun("genguard.yaml", ConfigResult{Groups: []GroupResult{{Name: "api", Status: GroupOK}}}, removeErr)
+	okResult := ConfigResult{Groups: []GroupResult{{Name: "api", Status: GroupOK}}}
+	okResult.noteCleanup(removeErr)
+	run = isolatedRun("genguard.yaml", okResult, removeErr)
 	if run.Err != nil {
 		t.Fatalf("Err = %v", run.Err)
 	}

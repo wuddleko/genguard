@@ -77,9 +77,6 @@ func checkOneIsolated(path, since string) ConfigRun {
 }
 
 func isolatedRun(configPath string, result ConfigResult, err error) ConfigRun {
-	if err != nil && len(result.Groups) > 0 {
-		result.noteCleanup(err)
-	}
 	run := ConfigRun{Path: configPath, Result: result}
 	if err != nil && len(result.Groups) == 0 {
 		run.Err = err

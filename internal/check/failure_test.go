@@ -153,6 +153,9 @@ func TestCheckSinceIsolatedNotesFailedWorktreeRemoval(t *testing.T) {
 	if run.Result.cleanup == nil || !strings.Contains(run.Result.cleanup.Error(), "git worktree remove") {
 		t.Fatalf("cleanup = %v", run.Result.cleanup)
 	}
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", run.ExitCode())
+	}
 	if len(run.Result.Groups) != 1 || run.Result.Groups[0].Status != GroupOK {
 		t.Fatalf("groups = %+v", run.Result.Groups)
 	}
