@@ -1,15 +1,37 @@
 # genguard
 
-genguard re-runs the commands in `genguard.yaml`.
+[![CI](https://github.com/wuddleko/genguard/actions/workflows/ci.yml/badge.svg)](https://github.com/wuddleko/genguard/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/wuddleko/genguard.svg)](https://pkg.go.dev/github.com/wuddleko/genguard)
+[![Release](https://img.shields.io/github/v/release/wuddleko/genguard)](https://github.com/wuddleko/genguard/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-- `check` — run the generators, leave their files in place, and fail if the declared outputs differ from `HEAD`. A file that is only staged still fails until it is committed.
-- `run` — run the generators and leave their files in place. A success exits 0.
-- `version` — print the version.
-- `-c`, `--config` — config file to use. Otherwise genguard walks up from the current directory for `genguard.yaml` or `genguard.yml`.
-- `--all` — every config under the repository.
-- `--since` — skip a group with `inputs` when those paths, its outputs, and the config still match the latest commit that `HEAD` and the ref share.
-- `--isolated` — check the committed files in a temporary worktree and leave your checkout alone. `check` only.
-- `--json` — print the result as JSON.
+> Detect generated-code drift in CI by re-running your existing generators.
+
+genguard is a Git-aware code generation checker. It re-runs the commands in `genguard.yaml` and fails when a fresh run does not match the generated files committed in Git.
+
+Any generator you can start with a command works, including:
+
+- Go, with `go generate`
+- Protobuf, with `buf generate`
+- SQL, with `sqlc generate`
+- OpenAPI client and type generators
+- a Makefile target, or any other command
+
+The generators stay yours. genguard does not install them, and it does not commit the result. `check` leaves the new files in your working tree. `--isolated` runs the same check in a temporary worktree and leaves your checkout alone.
+
+CI runs the same `genguard check`. GitHub Actions snippets are in [docs/ci.md](docs/ci.md).
+
+## Compared with `git diff`
+
+Generating and then running `git diff` can show this mismatch. You still have to remember the output paths, compare to `HEAD` rather than the index (a staged file looks clean otherwise), and remove the old files first so a file the generator stopped writing is not left behind. A second generator means doing that again in a script.
+
+genguard keeps those rules next to the generated files and only looks at the paths you list:
+
+- Compares those outputs to `HEAD`. A file that is only staged still fails until it is committed.
+- Can delete the declared outputs before the command, when `clean` is set.
+- Runs several generator groups, in order, from one file.
+- Skips an unchanged group with `--since`.
+- Can check the committed files in a temporary worktree with `--isolated`.
 
 ```yaml
 clean: true # delete declared outputs before the command, so a file the generator stopped writing is not left behind
@@ -30,6 +52,56 @@ groups:
 ```
 
 Put `genguard.yaml` (or `genguard.yml`) next to the generated files, outside any directory listed in `outputs`. Templates for the usual tools are in [examples/](examples/README.md). Those files are config only. The generator stays yours.
+
+## Quick start
+
+With Go 1.22+:
+
+```bash
+go install github.com/wuddleko/genguard/cmd/genguard@v0.5.0
+genguard check
+```
+
+`$(go env GOPATH)/bin` has to be on your `PATH`. A match prints `Generated files match the generators.` and exits 0. Drift prints a summary, the paths, and a diff, then exits 1. [Install](#install) covers a machine without Go. [Run it](#run-it) lists every exit code.
+
+## Use cases
+
+### Generated Go code
+
+Point `command` at `go generate ./...` and list the directories it writes. The generated files have to be committed. genguard fails when a fresh run would change them. [Template](examples/go-generate.yaml).
+
+### Protobuf
+
+Run `buf generate` and list the generated tree under `outputs`. Add `proto/` under `inputs` when `--since` should skip the group if those files are untouched. [Template](examples/buf.yaml).
+
+### SQL with sqlc
+
+`sqlc generate` checks the generated database package against `HEAD`. [Template](examples/sqlc.yaml).
+
+### OpenAPI
+
+Point your OpenAPI generator at the spec and list the client or types it writes. The template uses `openapi-generator-cli`. [Template](examples/openapi.yaml).
+
+### More than one config
+
+In a monorepo, keep a `genguard.yaml` beside each service. `genguard check --all` runs every config it finds.
+
+## Incremental checks
+
+`genguard check --since origin/main` skips a group that declares `inputs` when those paths, its outputs, and the config still match the latest commit that `HEAD` and that ref share.
+
+A group with no `inputs` still runs. A skipped group does not run its command, and `clean` does not delete its outputs. A pull request that touches one generator can leave the expensive ones alone.
+
+## Commands
+
+- `check` — run the generators, leave their files in place, and fail if the declared outputs differ from `HEAD`. A file that is only staged still fails until it is committed.
+- `run` — run the generators and leave their files in place. A success exits 0.
+- `version` — print the version.
+- `-c`, `--config` — config file to use. Otherwise genguard walks up from the current directory for `genguard.yaml` or `genguard.yml`.
+- `--all` — every config under the repository.
+- `--since` — skip a group with `inputs` when those paths, its outputs, and the config still match the latest commit that `HEAD` and the ref share.
+- `--isolated` — check the committed files in a temporary worktree and leave your checkout alone. `check` only.
+- `--json` — print the result as JSON.
 
 ## Run it
 
