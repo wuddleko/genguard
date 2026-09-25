@@ -61,19 +61,18 @@ func checkConfig(cfg config.Config, base string, damage map[string]pathSnap) (Co
 	}
 
 	result := ConfigResult{}
-	configName := loadedConfigName(cfg.Path)
 	for _, group := range cfg.Groups {
-		result.Groups = append(result.Groups, checkGroup(root, group, damage, base, configName))
+		result.Groups = append(result.Groups, checkGroup(root, group, damage, base, cfg.Path))
 	}
 	return result, nil
 }
 
-func checkGroup(root string, group config.Group, damage map[string]pathSnap, base, configName string) GroupResult {
+func checkGroup(root string, group config.Group, damage map[string]pathSnap, base, configPath string) GroupResult {
 	result := GroupResult{Name: group.Name}
 	defer dropRepairedDamage(damage)
 
 	if base != "" && len(group.Inputs) > 0 {
-		affected, err := groupAffected(root, base, configName, group)
+		affected, err := groupAffected(root, base, loadedConfigName(configPath), group)
 		if err != nil {
 			result.Status = GroupError
 			result.Err = err
@@ -87,7 +86,7 @@ func checkGroup(root string, group config.Group, damage map[string]pathSnap, bas
 
 	var wipe map[string]pathSnap
 	if group.Clean {
-		if err := cleanOutputs(root, group); err != nil {
+		if err := cleanOutputs(root, configPath, group); err != nil {
 			result.Status = GroupError
 			result.Err = err
 			return result

@@ -15,7 +15,7 @@ func TestCleanOutputsRejectsFileAsDirectoryPrefix(t *testing.T) {
 	if err := os.WriteFile(root, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := cleanOutputs(root, config.Group{Outputs: []string{"out.txt"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"out.txt"}})
 	if err == nil || !strings.Contains(err.Error(), "not a directory") {
 		t.Fatalf("error = %v", err)
 	}
@@ -42,7 +42,7 @@ func TestCleanOutputsWrapsRemoveError(t *testing.T) {
 		t.Skip("directory permissions are not enforced")
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"out.txt"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"out.txt"}})
 	if err == nil || !strings.Contains(err.Error(), `clean "out.txt"`) {
 		t.Fatalf("error = %v", err)
 	}
@@ -52,7 +52,7 @@ func TestCleanOutputsWrapsRemoveError(t *testing.T) {
 }
 
 func TestCleanOutputsGlobWithoutRepo(t *testing.T) {
-	err := cleanOutputs(t.TempDir(), config.Group{Outputs: []string{"*.txt"}})
+	err := cleanOutputs(t.TempDir(), "", config.Group{Outputs: []string{"*.txt"}})
 	if err == nil || !strings.Contains(err.Error(), `clean "*.txt"`) {
 		t.Fatalf("error = %v", err)
 	}
@@ -64,7 +64,7 @@ func TestCleanOutputsGlobSecondListFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	installGitShim(t, "others-fail")
-	err := cleanOutputs(root, config.Group{Outputs: []string{"*.txt"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"*.txt"}})
 	if err == nil || !strings.Contains(err.Error(), "others") {
 		t.Fatalf("error = %v", err)
 	}
@@ -80,7 +80,7 @@ func TestCleanOutputsGlobDuplicateNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	installGitShim(t, "dup-names")
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"*.go"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"*.go"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(dup); !os.IsNotExist(err) {

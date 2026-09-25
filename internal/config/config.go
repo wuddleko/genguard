@@ -94,7 +94,15 @@ func LoadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	return parseConfig(path, data)
+	cfg, err := parseConfig(path, data)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Path, err = filepath.Abs(path)
+	if err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
 }
 
 func parseConfig(path string, data []byte) (Config, error) {

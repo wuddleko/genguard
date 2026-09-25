@@ -46,6 +46,58 @@ func TestLoadConfigHappyPath(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRelativePathIsAbsolute(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "repo")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(dir, "custom.yaml")
+	content := "groups:\n  - command: echo hi\n    outputs:\n      - out.txt\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(wd); err != nil {
+			t.Error(err)
+		}
+	})
+
+	cfg, err := config.LoadConfig(filepath.Join("repo", "custom.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(cfg.Path) {
+		t.Fatalf("path = %q", cfg.Path)
+	}
+	if !samePath(t, cfg.Path, configPath) {
+		t.Fatalf("path = %q, want %q", cfg.Path, configPath)
+	}
+	if !samePath(t, cfg.Root(), dir) {
+		t.Fatalf("root = %q, want %q", cfg.Root(), dir)
+	}
+}
+
+func samePath(t *testing.T, got, want string) bool {
+	t.Helper()
+	a, err := os.Stat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.Stat(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return os.SameFile(a, b)
+}
+
 func TestLoadConfigInputs(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

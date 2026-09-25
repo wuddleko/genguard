@@ -10,6 +10,22 @@ import (
 	"github.com/wuddleko/genguard/tests/testutil"
 )
 
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(wd); err != nil {
+			t.Error(err)
+		}
+	})
+}
+
 func TestResolveCleanTargetDirectory(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -156,7 +172,7 @@ func TestCleanOutputsPreservesExternalSymlinkTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"generated/"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/"}}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(secret)
@@ -192,7 +208,7 @@ func TestCleanOutputsIgnoresGitBehindSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"generated/"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(filepath.Join(outsideGit, "HEAD")); err != nil {
@@ -221,7 +237,7 @@ func TestCleanOutputsGitNameUsesFilesystemCase(t *testing.T) {
 	}
 
 	_, foldErr := os.Lstat(filepath.Join(generated, "sub", ".git"))
-	err := cleanOutputs(root, config.Group{Outputs: []string{"generated/"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/"}})
 	if os.IsNotExist(foldErr) {
 		if err != nil {
 			t.Fatal(err)
@@ -255,12 +271,629 @@ func TestCleanOutputsRefusesConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"genguard.yaml"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"genguard.yaml"}})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 	if !strings.Contains(err.Error(), "config file") {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestCleanOutputsRefusesLoadedConfig(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "custom.yaml")
+	if err := os.WriteFile(configPath, []byte("groups: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := cleanOutputs(root, configPath, config.Group{Outputs: []string{"custom.yaml"}})
+	if err == nil || !strings.Contains(err.Error(), "config file") {
+		t.Fatalf("error = %v", err)
+	}
+	if _, statErr := os.Lstat(configPath); statErr != nil {
+		t.Fatalf("config removed: %v", statErr)
+	}
+}
+
+func TestCleanOutputsRefusesLoadedConfigOtherCase(t *testing.T) {
+	root := t.TempDir()
+	loaded := filepath.Join(root, "custom.yaml")
+	other := filepath.Join(root, "Custom.yaml")
+	hello := filepath.Join(root, "generated", "hello.txt")
+	if err := os.MkdirAll(filepath.Dir(hello), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(loaded, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hello, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, foldErr := os.Lstat(other)
+	err := cleanOutputs(root, loaded, config.Group{Outputs: []string{"generated/hello.txt", "Custom.yaml"}})
+	if os.IsNotExist(foldErr) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, statErr := os.Lstat(hello); !os.IsNotExist(statErr) {
+			t.Fatalf("hello.txt = %v", statErr)
+		}
+		if _, statErr := os.Lstat(loaded); statErr != nil {
+			t.Fatalf("config removed: %v", statErr)
+		}
+		return
+	}
+	if foldErr != nil {
+		t.Fatal(foldErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "config file") {
+		t.Fatalf("error = %v", err)
+	}
+	if _, statErr := os.Lstat(hello); statErr != nil {
+		t.Fatalf("hello.txt removed: %v", statErr)
+	}
+	got, readErr := os.ReadFile(loaded)
+	if readErr != nil {
+		t.Fatalf("config removed: %v", readErr)
+	}
+	if string(got) != "keep\n" {
+		t.Fatalf("config = %q", got)
+	}
+}
+
+func TestCleanOutputsGlobRefusesLoadedConfig(t *testing.T) {
+	root := t.TempDir()
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	hello := filepath.Join(root, "generated", "hello.txt")
+	configPath := filepath.Join(root, "custom.yaml")
+	if err := os.MkdirAll(filepath.Dir(hello), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hello, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("groups: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := cleanOutputs(root, configPath, config.Group{Outputs: []string{"generated/hello.txt", "*.yaml"}})
+	if err == nil || !strings.Contains(err.Error(), "config file") {
+		t.Fatalf("error = %v", err)
+	}
+	got, readErr := os.ReadFile(hello)
+	if readErr != nil {
+		t.Fatalf("hello.txt removed: %v", readErr)
+	}
+	if string(got) != "keep\n" {
+		t.Fatalf("hello.txt = %q", got)
+	}
+	if _, statErr := os.Lstat(configPath); statErr != nil {
+		t.Fatalf("config removed: %v", statErr)
+	}
+}
+
+func TestCleanOutputsGlobRefusesLoadedConfigOtherCase(t *testing.T) {
+	root := t.TempDir()
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	hello := filepath.Join(root, "generated", "hello.txt")
+	loaded := filepath.Join(root, "custom.yaml")
+	other := filepath.Join(root, "Custom.yaml")
+	if err := os.MkdirAll(filepath.Dir(hello), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hello, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(loaded, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, foldErr := os.Lstat(other)
+	err := cleanOutputs(root, other, config.Group{Outputs: []string{"generated/hello.txt", "*.yaml"}})
+	if os.IsNotExist(foldErr) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, statErr := os.Lstat(hello); !os.IsNotExist(statErr) {
+			t.Fatalf("hello.txt = %v", statErr)
+		}
+		if _, statErr := os.Lstat(loaded); !os.IsNotExist(statErr) {
+			t.Fatalf("custom.yaml = %v", statErr)
+		}
+		return
+	}
+	if foldErr != nil {
+		t.Fatal(foldErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "config file") {
+		t.Fatalf("error = %v", err)
+	}
+	got, readErr := os.ReadFile(hello)
+	if readErr != nil {
+		t.Fatalf("hello.txt removed: %v", readErr)
+	}
+	if string(got) != "keep\n" {
+		t.Fatalf("hello.txt = %q", got)
+	}
+	got, readErr = os.ReadFile(loaded)
+	if readErr != nil {
+		t.Fatalf("config removed: %v", readErr)
+	}
+	if string(got) != "keep\n" {
+		t.Fatalf("config = %q", got)
+	}
+}
+
+func TestCleanOutputsRefusesLoadedConfigSymlink(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real.yaml")
+	link := filepath.Join(root, "custom.yaml")
+	hello := filepath.Join(root, "generated", "hello.txt")
+	if err := os.MkdirAll(filepath.Dir(hello), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hello, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real.yaml", link); err != nil {
+		t.Fatal(err)
+	}
+
+	err := cleanOutputs(root, link, config.Group{Outputs: []string{"generated/hello.txt", "real.yaml"}})
+	if err == nil || !strings.Contains(err.Error(), "config file") {
+		t.Fatalf("error = %v", err)
+	}
+	got, readErr := os.ReadFile(real)
+	if readErr != nil {
+		t.Fatalf("target removed: %v", readErr)
+	}
+	if string(got) != "keep\n" {
+		t.Fatalf("target = %q", got)
+	}
+	if _, statErr := os.Lstat(link); statErr != nil {
+		t.Fatalf("link removed: %v", statErr)
+	}
+	got, readErr = os.ReadFile(hello)
+	if readErr != nil {
+		t.Fatalf("hello.txt removed: %v", readErr)
+	}
+	if string(got) != "keep\n" {
+		t.Fatalf("hello.txt = %q", got)
+	}
+}
+
+func TestCleanOutputsRefusesLoadedConfigSymlinkInDirectory(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "generated", "sub", "real.yaml")
+	link := filepath.Join(root, "custom.yaml")
+	hello := filepath.Join(root, "generated", "hello.txt")
+	if err := os.MkdirAll(filepath.Dir(real), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hello, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("generated", "sub", "real.yaml"), link); err != nil {
+		t.Fatal(err)
+	}
+
+	err := cleanOutputs(root, link, config.Group{Outputs: []string{"generated/"}})
+	if err == nil || !strings.Contains(err.Error(), "config file") {
+		t.Fatalf("error = %v", err)
+	}
+	got, readErr := os.ReadFile(link)
+	if readErr != nil {
+		t.Fatalf("target removed: %v", readErr)
+	}
+	if string(got) != "keep\n" {
+		t.Fatalf("target = %q", got)
+	}
+	if _, statErr := os.Lstat(hello); statErr != nil {
+		t.Fatalf("hello.txt removed: %v", statErr)
+	}
+}
+
+func TestCleanOutputsRefusesLoadedConfigSymlinkInOtherCaseDirectory(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "generated", "real.yaml")
+	link := filepath.Join(root, "custom.yaml")
+	hello := filepath.Join(root, "generated", "hello.txt")
+	if err := os.MkdirAll(filepath.Dir(real), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hello, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("generated", "real.yaml"), link); err != nil {
+		t.Fatal(err)
+	}
+
+	_, foldErr := os.Lstat(filepath.Join(root, "Generated"))
+	err := cleanOutputs(root, link, config.Group{Outputs: []string{"Generated/"}})
+	if os.IsNotExist(foldErr) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, statErr := os.Lstat(real); statErr != nil {
+			t.Fatalf("target removed: %v", statErr)
+		}
+		if _, statErr := os.Lstat(hello); statErr != nil {
+			t.Fatalf("hello.txt removed: %v", statErr)
+		}
+		return
+	}
+	if foldErr != nil {
+		t.Fatal(foldErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "config file") {
+		t.Fatalf("error = %v", err)
+	}
+	got, readErr := os.ReadFile(link)
+	if readErr != nil {
+		t.Fatalf("target removed: %v", readErr)
+	}
+	if string(got) != "keep\n" {
+		t.Fatalf("target = %q", got)
+	}
+	if _, statErr := os.Lstat(hello); statErr != nil {
+		t.Fatalf("hello.txt removed: %v", statErr)
+	}
+}
+
+func TestCleanOutputsRefusesStandardConfigSymlinkInDirectory(t *testing.T) {
+	for _, name := range []string{"genguard.yaml", "genguard.yml"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			real := filepath.Join(root, "generated", "kept.yaml")
+			link := filepath.Join(root, name)
+			hello := filepath.Join(root, "generated", "hello.txt")
+			if err := os.MkdirAll(filepath.Dir(real), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(real, []byte("keep\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(hello, []byte("keep\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join("generated", "kept.yaml"), link); err != nil {
+				t.Fatal(err)
+			}
+
+			err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/"}})
+			if err == nil || !strings.Contains(err.Error(), "config file") {
+				t.Fatalf("error = %v", err)
+			}
+			got, readErr := os.ReadFile(link)
+			if readErr != nil {
+				t.Fatalf("target removed: %v", readErr)
+			}
+			if string(got) != "keep\n" {
+				t.Fatalf("target = %q", got)
+			}
+			if _, statErr := os.Lstat(hello); statErr != nil {
+				t.Fatalf("hello.txt removed: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestCleanOutputsRemovesDirectoryWhenConfigSymlinkIsOutside(t *testing.T) {
+	root := t.TempDir()
+	kept := filepath.Join(root, "kept", "real.yaml")
+	link := filepath.Join(root, "custom.yaml")
+	hello := filepath.Join(root, "generated", "hello.txt")
+	if err := os.MkdirAll(filepath.Dir(kept), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(hello), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(kept, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hello, []byte("gone\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("kept", "real.yaml"), link); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cleanOutputs(root, link, config.Group{Outputs: []string{"generated/"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(link)
+	if err != nil {
+		t.Fatalf("target removed: %v", err)
+	}
+	if string(got) != "keep\n" {
+		t.Fatalf("target = %q", got)
+	}
+	if _, statErr := os.Lstat(hello); !os.IsNotExist(statErr) {
+		t.Fatalf("hello.txt = %v", statErr)
+	}
+}
+
+func TestCleanOutputsRefusesStandardConfigOtherCase(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "genguard.yaml")
+	if err := os.WriteFile(path, []byte("groups: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, foldErr := os.Lstat(filepath.Join(root, "Genguard.yaml"))
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"Genguard.yaml"}})
+	if os.IsNotExist(foldErr) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, statErr := os.Lstat(path); statErr != nil {
+			t.Fatalf("config removed: %v", statErr)
+		}
+		return
+	}
+	if foldErr != nil {
+		t.Fatal(foldErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "config file") {
+		t.Fatalf("error = %v", err)
+	}
+	if _, statErr := os.Lstat(path); statErr != nil {
+		t.Fatalf("config removed: %v", statErr)
+	}
+}
+
+func TestCleanOutputsStillRefusesStandardConfigNames(t *testing.T) {
+	root := t.TempDir()
+	loaded := filepath.Join(root, "custom.yaml")
+	if err := os.WriteFile(loaded, []byte("groups: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"genguard.yaml", "genguard.yml"} {
+		path := filepath.Join(root, name)
+		if err := os.WriteFile(path, []byte("groups: []\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := cleanOutputs(root, loaded, config.Group{Outputs: []string{name}})
+		if err == nil || !strings.Contains(err.Error(), "config file") {
+			t.Fatalf("%s error = %v", name, err)
+		}
+		if _, statErr := os.Lstat(path); statErr != nil {
+			t.Fatalf("%s removed: %v", name, statErr)
+		}
+	}
+}
+
+func TestCleanOutputsRemovesOtherFilesWhenConfigIsProtected(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "custom.yaml")
+	hello := filepath.Join(root, "generated", "hello.txt")
+	if err := os.MkdirAll(filepath.Dir(hello), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte("groups: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hello, []byte("gone\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cleanOutputs(root, configPath, config.Group{Outputs: []string{"generated/hello.txt"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Lstat(hello); !os.IsNotExist(statErr) {
+		t.Fatalf("hello.txt = %v", statErr)
+	}
+	if _, statErr := os.Lstat(configPath); statErr != nil {
+		t.Fatalf("config removed: %v", statErr)
+	}
+}
+
+func TestCleanOutputsRefusesNestedConfig(t *testing.T) {
+	for _, name := range []string{"genguard.yaml", "genguard.yml"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			loaded := filepath.Join(root, "custom.yaml")
+			nested := filepath.Join(root, "services", "api", name)
+			hello := filepath.Join(root, "services", "hello.txt")
+			if err := os.MkdirAll(filepath.Dir(nested), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(loaded, []byte("keep\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(nested, []byte("keep\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(hello, []byte("keep\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			err := cleanOutputs(root, loaded, config.Group{Outputs: []string{"services/"}})
+			if err == nil || !strings.Contains(err.Error(), "config file") {
+				t.Fatalf("error = %v", err)
+			}
+			if _, statErr := os.Lstat(hello); statErr != nil {
+				t.Fatalf("hello.txt removed: %v", statErr)
+			}
+			got, readErr := os.ReadFile(nested)
+			if readErr != nil || string(got) != "keep\n" {
+				t.Fatalf("nested = %q, %v", got, readErr)
+			}
+
+			err = cleanOutputs(root, loaded, config.Group{Outputs: []string{filepath.Join("services", "api", name)}})
+			if err == nil || !strings.Contains(err.Error(), "config file") {
+				t.Fatalf("file error = %v", err)
+			}
+			if _, statErr := os.Lstat(nested); statErr != nil {
+				t.Fatalf("nested removed: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestCleanOutputsRemovesExtraHardLinkOfConfig(t *testing.T) {
+	root := t.TempDir()
+	loaded := filepath.Join(root, "custom.yaml")
+	extra := filepath.Join(root, "generated", "copy.yaml")
+	backup := filepath.Join(root, "backup.yaml")
+	if err := os.MkdirAll(filepath.Dir(extra), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(loaded, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(loaded, extra); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(loaded, backup); err != nil {
+		t.Fatal(err)
+	}
+
+	err := cleanOutputs(root, loaded, config.Group{Outputs: []string{"custom.yaml"}})
+	if err == nil || !strings.Contains(err.Error(), "config file") {
+		t.Fatalf("error = %v", err)
+	}
+	got, readErr := os.ReadFile(loaded)
+	if readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("config = %q, %v", got, readErr)
+	}
+	if _, statErr := os.Lstat(backup); statErr != nil {
+		t.Fatalf("backup removed: %v", statErr)
+	}
+
+	if err := cleanOutputs(root, loaded, config.Group{Outputs: []string{"generated/copy.yaml"}}); err != nil {
+		t.Fatal(err)
+	}
+	got, readErr = os.ReadFile(loaded)
+	if readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("config after extra link = %q, %v", got, readErr)
+	}
+	if _, statErr := os.Lstat(extra); !os.IsNotExist(statErr) {
+		t.Fatalf("copy.yaml = %v", statErr)
+	}
+}
+
+func TestCleanOutputsRefusesUnresolvedLoadedConfig(t *testing.T) {
+	root := t.TempDir()
+	linkA := filepath.Join(root, "a.yaml")
+	linkB := filepath.Join(root, "b.yaml")
+	hello := filepath.Join(root, "hello.txt")
+	if err := os.Symlink("b.yaml", linkA); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("a.yaml", linkB); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hello, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := cleanOutputs(root, linkA, config.Group{Outputs: []string{"hello.txt"}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	got, readErr := os.ReadFile(hello)
+	if readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("hello.txt = %q, %v", got, readErr)
+	}
+}
+
+func TestCheckAndRunCleanRefuseLoadedConfig(t *testing.T) {
+	for _, relative := range []bool{false, true} {
+		for _, run := range []bool{false, true} {
+			name := "check"
+			if run {
+				name = "run"
+			}
+			if relative {
+				name += "-relative"
+			}
+			t.Run(name, func(t *testing.T) {
+				parent := t.TempDir()
+				root := filepath.Join(parent, "repo")
+				if err := testutil.InitGitRepo(root); err != nil {
+					t.Fatal(err)
+				}
+				path, err := testutil.WriteGenguardConfig(root, "", "", "custom.yaml", []testutil.GroupSpec{{
+					Name:    "gen",
+					Command: `python3 -c "open('ran','w').close()"`,
+					Outputs: []string{"custom.yaml"},
+					Clean:   true,
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				loadPath := path
+				if relative {
+					chdir(t, parent)
+					loadPath = filepath.Join("repo", "custom.yaml")
+				}
+				cfg, err := config.LoadConfig(loadPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !filepath.IsAbs(cfg.Path) {
+					t.Fatalf("config path = %q", cfg.Path)
+				}
+				loadedInfo, err := os.Stat(cfg.Path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantInfo, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !os.SameFile(loadedInfo, wantInfo) {
+					t.Fatalf("config path = %q", cfg.Path)
+				}
+				var result ConfigResult
+				if run {
+					result, err = RunConfig(cfg)
+				} else {
+					result, err = CheckConfig(cfg)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(result.Groups) != 1 || result.Groups[0].Status != GroupError || result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "config file") {
+					t.Fatalf("result = %+v", result.Groups)
+				}
+				if _, statErr := os.Lstat(path); statErr != nil {
+					t.Fatalf("config removed: %v", statErr)
+				}
+				if _, statErr := os.Lstat(filepath.Join(root, "ran")); !os.IsNotExist(statErr) {
+					t.Fatalf("command ran: %v", statErr)
+				}
+			})
+		}
 	}
 }
 
@@ -270,7 +903,7 @@ func TestCleanOutputsRefusesGitDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{".git/"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{".git/"}})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -341,7 +974,7 @@ func TestCleanOutputsRefusesDirectoryReplacedWithSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"generated/"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/"}})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -453,7 +1086,7 @@ func TestCleanOutputsRefusalDeletesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"generated/hello.txt", ".."}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/hello.txt", ".."}})
 	if err == nil || !strings.Contains(err.Error(), `clean refuses ".."`) {
 		t.Fatalf("error = %v", err)
 	}
@@ -501,7 +1134,7 @@ func TestCleanOutputsGlobDeletesMatchesOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"generated/*.txt"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/*.txt"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(hello); !os.IsNotExist(err) {
@@ -554,7 +1187,7 @@ func TestCleanOutputsGlobFromSubdirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(api, config.Group{Outputs: []string{"generated/*.txt"}}); err != nil {
+	if err := cleanOutputs(api, "", config.Group{Outputs: []string{"generated/*.txt"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(hello); !os.IsNotExist(err) {
@@ -599,7 +1232,7 @@ func TestCleanOutputsGlobRefusesConfigWithoutDeleting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"generated/hello.txt", "*.yaml"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/hello.txt", "*.yaml"}})
 	if err == nil || !strings.Contains(err.Error(), "config file") {
 		t.Fatalf("error = %v", err)
 	}
@@ -661,7 +1294,7 @@ func TestCleanOutputsGlobRefusesSymlinkWithoutDeleting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"notes/keep.txt", "generated/*.txt"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"notes/keep.txt", "generated/*.txt"}})
 	if err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("error = %v", err)
 	}
@@ -698,7 +1331,7 @@ func TestCleanOutputsGlobRefusesParentEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"generated/hello.txt", "../*"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/hello.txt", "../*"}})
 	if err == nil || !strings.Contains(err.Error(), `clean refuses "../*"`) {
 		t.Fatalf("error = %v", err)
 	}
@@ -742,7 +1375,7 @@ func TestCleanOutputsGlobSqlcPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"*_queries.sql.go"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"*_queries.sql.go"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(oidc); !os.IsNotExist(err) {
@@ -790,7 +1423,7 @@ func TestCleanOutputsGlobSlashFreeStaysInConfigDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(sqlite, config.Group{Outputs: []string{"*_queries.sql.go"}}); err != nil {
+	if err := cleanOutputs(sqlite, "", config.Group{Outputs: []string{"*_queries.sql.go"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(oidc); !os.IsNotExist(err) {
@@ -837,7 +1470,7 @@ func TestCleanOutputsGlobSlashFreeFromRepoRootMatchesEveryPackage(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"*_queries.sql.go"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"*_queries.sql.go"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{sqlite, other} {
@@ -875,7 +1508,7 @@ func TestCleanOutputsGlobQuestionMarkAndClass(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"generated/a?.txt"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/a?.txt"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{one, word} {
@@ -892,7 +1525,7 @@ func TestCleanOutputsGlobQuestionMarkAndClass(t *testing.T) {
 	if err := os.WriteFile(one, []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"generated/a[0-9].txt"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/a[0-9].txt"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(one); !os.IsNotExist(err) {
@@ -926,7 +1559,7 @@ func TestCleanOutputsGlobStarStar(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"generated/**.txt"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/**.txt"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{top, nested} {
@@ -955,7 +1588,7 @@ func TestCleanOutputsGlobMatchesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"missing/*.txt", "*_queries.sql.go"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"missing/*.txt", "*_queries.sql.go"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(keep); err != nil {
@@ -985,7 +1618,7 @@ func TestCleanOutputsGlobTrimsPattern(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"  generated/*.txt  "}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"  generated/*.txt  "}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(hello); !os.IsNotExist(err) {
@@ -1019,7 +1652,7 @@ func TestCleanOutputsGlobDeletesAlreadyMissingTrackedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"generated/*.txt"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/*.txt"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(hello); !os.IsNotExist(err) {
@@ -1059,7 +1692,7 @@ func TestCleanOutputsGlobNewlineInFilename(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"generated/*.txt"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/*.txt"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(hello); !os.IsNotExist(err) {
@@ -1089,7 +1722,7 @@ func TestCleanOutputsGlobListedTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"generated/*.txt", "generated/*.txt"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/*.txt", "generated/*.txt"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(hello); !os.IsNotExist(err) {
@@ -1116,7 +1749,7 @@ func TestCleanOutputsGlobBeforeRefusalDeletesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"generated/*.txt", ".."}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/*.txt", ".."}})
 	if err == nil || !strings.Contains(err.Error(), `clean refuses ".."`) {
 		t.Fatalf("error = %v", err)
 	}
@@ -1149,7 +1782,7 @@ func TestCleanOutputsLiteralOutputStillDeletesHandWrittenFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"db.go", "*_queries.sql.go"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"db.go", "*_queries.sql.go"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(db); !os.IsNotExist(err) {
@@ -1185,7 +1818,7 @@ func TestCleanOutputsDirectoryStillWipesPackage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := cleanOutputs(root, config.Group{Outputs: []string{"pkg/", "*_queries.sql.go"}}); err != nil {
+	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"pkg/", "*_queries.sql.go"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{db, oidc} {
@@ -1213,7 +1846,7 @@ func TestCleanOutputsGlobRefusesAbsolute(t *testing.T) {
 	}
 	spec := filepath.Join(root, "generated", "*.txt")
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{spec}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{spec}})
 	if err == nil || !strings.Contains(err.Error(), "absolute") {
 		t.Fatalf("error = %v", err)
 	}
@@ -1245,7 +1878,7 @@ func TestCleanOutputsGlobRefusesYMLConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"*.yml"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"*.yml"}})
 	if err == nil || !strings.Contains(err.Error(), "config file") {
 		t.Fatalf("error = %v", err)
 	}
@@ -1288,7 +1921,7 @@ func TestCleanOutputsGlobRefusesSymlinkFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"generated/*.txt"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/*.txt"}})
 	if err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("error = %v", err)
 	}
@@ -1337,7 +1970,7 @@ func TestCleanOutputsGlobRefusesSymlinkPrefixWithNoMatches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"notes/keep.txt", "generated/*.txt"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"notes/keep.txt", "generated/*.txt"}})
 	if err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("error = %v", err)
 	}
@@ -1383,7 +2016,7 @@ func TestCleanOutputsGlobRefusesIntermediateSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"sub/generated/*.txt"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"sub/generated/*.txt"}})
 	if err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("error = %v", err)
 	}
@@ -1422,7 +2055,7 @@ func TestCleanOutputsGlobRefusesEmbeddedRepoWithoutDeletingSiblings(t *testing.T
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"generated/*"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/*"}})
 	if err == nil || !strings.Contains(err.Error(), "glob matched directory") {
 		t.Fatalf("error = %v", err)
 	}
@@ -1470,7 +2103,7 @@ func TestCleanOutputsGlobRefusesFileReplacedByDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := cleanOutputs(root, config.Group{Outputs: []string{"generated/*.txt"}})
+	err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/*.txt"}})
 	if err == nil || !strings.Contains(err.Error(), "glob matched directory") {
 		t.Fatalf("error = %v", err)
 	}

@@ -38,7 +38,7 @@ func TestCleanUnixPermissionFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 		lockDir(t, locked)
-		err := cleanOutputs(root, config.Group{Outputs: []string{"generated/"}})
+		err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/"}})
 		if err == nil || !strings.Contains(err.Error(), `clean "generated/"`) {
 			t.Fatalf("error = %v", err)
 		}
@@ -55,7 +55,7 @@ func TestCleanUnixPermissionFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 		lockDir(t, parent)
-		if _, err := treeContainsGit(child); err == nil || os.IsNotExist(err) {
+		if _, _, err := findProtected(child); err == nil || os.IsNotExist(err) {
 			t.Fatalf("error = %v", err)
 		}
 	})

@@ -9,20 +9,28 @@ import (
 	"github.com/wuddleko/genguard/internal/config"
 )
 
+// configFileNames are the config basenames a clean must not delete.
+// The loaded path is checked as well, including when it uses another name.
+var configFileNames = []string{"genguard.yaml", "genguard.yml"}
+
 type cleanTarget struct {
 	spec   string
 	target string
 	isDir  bool
 }
 
-func cleanOutputs(root string, group config.Group) error {
+func cleanOutputs(root, configPath string, group config.Group) error {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return err
 	}
 	gitDir := filepath.Join(absRoot, ".git")
-	configYAML := filepath.Join(absRoot, "genguard.yaml")
-	configYML := filepath.Join(absRoot, "genguard.yml")
+	rootConfigs := rootConfigPaths(absRoot)
+	configPaths := make([]string, len(rootConfigs), len(rootConfigs)+1)
+	copy(configPaths, rootConfigs)
+	if configPath != "" && !isListedPath(configPath, rootConfigs) {
+		configPaths = append(configPaths, configPath)
+	}
 
 	planned := make([]cleanTarget, 0, len(group.Outputs))
 	for _, spec := range group.Outputs {
@@ -31,7 +39,7 @@ func cleanOutputs(root string, group config.Group) error {
 			return err
 		}
 		for _, item := range items {
-			if err := guardCleanTarget(absRoot, item, gitDir, configYAML, configYML); err != nil {
+			if err := guardCleanTarget(absRoot, item, gitDir, configPaths); err != nil {
 				return err
 			}
 		}
@@ -151,11 +159,11 @@ func globCleanFiles(root, spec string) ([]string, error) {
 	return files, nil
 }
 
-func guardCleanTarget(absRoot string, item cleanTarget, gitDir, configYAML, configYML string) error {
+func guardCleanTarget(absRoot string, item cleanTarget, gitDir string, configPaths []string) error {
 	if wouldRemove(item.target, gitDir) {
 		return newGenguardError("clean refuses %q: mixed tree (would delete .git)", item.spec)
 	}
-	gitPath, err := treeContainsGit(item.target)
+	gitPath, configHit, err := findProtected(item.target)
 	if err != nil {
 		return newGenguardError("clean %q: %s", item.spec, err.Error())
 	}
@@ -166,10 +174,135 @@ func guardCleanTarget(absRoot string, item cleanTarget, gitDir, configYAML, conf
 		}
 		return newGenguardError("clean refuses %q: mixed tree (would delete %s)", item.spec, filepath.ToSlash(rel))
 	}
-	if wouldRemove(item.target, configYAML) || wouldRemove(item.target, configYML) {
+	if configHit != "" {
 		return newGenguardError("clean refuses %q: mixed tree (would delete the config file)", item.spec)
 	}
+	for _, path := range configPaths {
+		removes, err := removesConfig(item.target, path)
+		if err != nil {
+			return newGenguardError("clean %q: %s", item.spec, err.Error())
+		}
+		if removes {
+			return newGenguardError("clean refuses %q: mixed tree (would delete the config file)", item.spec)
+		}
+	}
 	return nil
+}
+
+func rootConfigPaths(absRoot string) []string {
+	paths := make([]string, len(configFileNames))
+	for i, name := range configFileNames {
+		paths[i] = filepath.Join(absRoot, name)
+	}
+	return paths
+}
+
+func isListedPath(path string, paths []string) bool {
+	for _, existing := range paths {
+		if existing == path {
+			return true
+		}
+	}
+	return false
+}
+
+func removesConfig(target, path string) (bool, error) {
+	if wouldRemove(target, path) {
+		return true, nil
+	}
+	same, err := sameExistingFile(target, path)
+	if err != nil || same {
+		return same, err
+	}
+	return directoryContains(target, path)
+}
+
+// directoryContains reports whether target is a directory whose removal would
+// delete path. EvalSymlinks resolves a symlink to a file inside that directory.
+// Ancestor identity follows symlinks. It does not use the hard-link filename
+// rule in sameExistingFile.
+func directoryContains(target, path string) (bool, error) {
+	info, err := statPath(target, false)
+	if err != nil || info == nil {
+		return false, err
+	}
+	if !info.IsDir() {
+		return false, nil
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if wouldRemove(target, resolved) {
+		return true, nil
+	}
+	parent := resolved
+	for {
+		next := filepath.Dir(parent)
+		if next == parent {
+			return false, nil
+		}
+		parent = next
+		same, err := sameStatFile(target, parent)
+		if err != nil || same {
+			return same, err
+		}
+	}
+}
+
+// sameExistingFile reports whether deleting target deletes path.
+// Stat follows symlinks, so another spelling on a case-insensitive volume
+// matches, and so does the target of the path that loaded the config.
+// A second hard link is a different name; removing it leaves path in place.
+func sameExistingFile(target, path string) (bool, error) {
+	targetInfo, err := statPath(target, false)
+	if err != nil || targetInfo == nil {
+		return false, err
+	}
+	pathInfo, err := statPath(path, false)
+	if err != nil || pathInfo == nil {
+		return false, err
+	}
+	if pathInfo.Mode()&os.ModeSymlink != 0 {
+		return sameStatFile(target, path)
+	}
+	if !os.SameFile(targetInfo, pathInfo) {
+		return false, nil
+	}
+	if strings.EqualFold(filepath.Base(target), filepath.Base(path)) {
+		return sameStatFile(filepath.Dir(target), filepath.Dir(path))
+	}
+	return false, nil
+}
+
+func sameStatFile(target, path string) (bool, error) {
+	targetInfo, err := statPath(target, true)
+	if err != nil || targetInfo == nil {
+		return false, err
+	}
+	pathInfo, err := statPath(path, true)
+	if err != nil || pathInfo == nil {
+		return false, err
+	}
+	return os.SameFile(targetInfo, pathInfo), nil
+}
+
+func statPath(path string, follow bool) (os.FileInfo, error) {
+	stat := os.Lstat
+	if follow {
+		stat = os.Stat
+	}
+	info, err := stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return info, nil
 }
 
 func resolveCleanTarget(root, spec string) (string, bool, error) {
@@ -280,51 +413,83 @@ func refuseSymlinksInPath(root, target string) error {
 	return nil
 }
 
-func treeContainsGit(target string) (string, error) {
-	info, err := os.Lstat(target)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
+func findProtected(target string) (string, string, error) {
+	info, err := statPath(target, false)
+	if err != nil || info == nil {
+		return "", "", err
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return gitEntryPath(target)
+	if !info.IsDir() {
+		gitPath, err := gitEntryPath(target)
+		if err != nil || gitPath != "" {
+			return gitPath, "", err
+		}
+		configPath, err := configEntryPath(target)
+		return "", configPath, err
 	}
 
-	var found string
+	var gitPath, configPath string
 	err = filepath.WalkDir(target, func(path string, _ fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		gitPath, err := gitEntryPath(path)
+		foundGit, err := gitEntryPath(path)
 		if err != nil {
 			return err
 		}
-		if gitPath == "" {
+		if foundGit != "" {
+			gitPath = foundGit
+			return fs.SkipAll
+		}
+		if configPath != "" {
 			return nil
 		}
-		found = gitPath
-		return fs.SkipAll
+		configPath, err = configEntryPath(path)
+		return err
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return found, nil
+	return gitPath, configPath, nil
 }
 
 func gitEntryPath(path string) (string, error) {
-	if !strings.EqualFold(filepath.Base(path), ".git") {
+	_, probed, err := foldedEntry(path, ".git")
+	return probed, err
+}
+
+func configEntryPath(path string) (string, error) {
+	base := filepath.Base(path)
+	name := ""
+	for _, candidate := range configFileNames {
+		if strings.EqualFold(base, candidate) {
+			name = candidate
+			break
+		}
+	}
+	if name == "" {
 		return "", nil
 	}
-	probed := filepath.Join(filepath.Dir(path), ".git")
-	if _, err := os.Lstat(probed); err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
+	info, err := statPath(path, false)
+	if err != nil || info == nil {
+		return "", err
+	}
+	probeInfo, probed, err := foldedEntry(path, name)
+	if err != nil || probeInfo == nil || !os.SameFile(info, probeInfo) {
 		return "", err
 	}
 	return probed, nil
+}
+
+func foldedEntry(path, name string) (os.FileInfo, string, error) {
+	if !strings.EqualFold(filepath.Base(path), name) {
+		return nil, "", nil
+	}
+	probed := filepath.Join(filepath.Dir(path), name)
+	info, err := statPath(probed, false)
+	if err != nil || info == nil {
+		return nil, "", err
+	}
+	return info, probed, nil
 }
 
 func wouldRemove(target, path string) bool {
