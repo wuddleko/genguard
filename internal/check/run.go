@@ -3,7 +3,6 @@ package check
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 )
 
 type ConfigRun struct {
@@ -179,8 +178,8 @@ func displayConfigPath(repoRoot, path string) string {
 	if repoRoot == "" || path == "" {
 		return path
 	}
-	rel, err := filepath.Rel(repoRoot, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, ok := relInside(repoRoot, path)
+	if !ok {
 		return path
 	}
 	return rel

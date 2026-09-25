@@ -320,10 +320,7 @@ func resolveCleanPath(root, spec string, rejectGlob bool) (string, bool, error) 
 
 	dirHint := strings.HasSuffix(spec, "/") || strings.HasSuffix(spec, string(filepath.Separator))
 	cleaned := filepath.Clean(spec)
-	if cleaned == "." {
-		return "", false, newGenguardError("clean refuses %q", spec)
-	}
-	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+	if cleaned == "." || relEscapes(cleaned) {
 		return "", false, newGenguardError("clean refuses %q", spec)
 	}
 
@@ -332,8 +329,8 @@ func resolveCleanPath(root, spec string, rejectGlob bool) (string, bool, error) 
 		return "", false, err
 	}
 	target := filepath.Clean(filepath.Join(absRoot, cleaned))
-	rel, err := filepath.Rel(absRoot, target)
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, ok := relInside(absRoot, target)
+	if !ok || rel == "." {
 		return "", false, newGenguardError("clean refuses %q", spec)
 	}
 
@@ -498,11 +495,8 @@ func wouldRemove(target, path string) bool {
 	if err != nil {
 		return false
 	}
-	rel, err := filepath.Rel(absTarget, absPath)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+	_, ok := relInside(absTarget, absPath)
+	return ok
 }
 
 func removeCleanTarget(root, target string, isDir bool) error {

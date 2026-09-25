@@ -197,10 +197,14 @@ func relInsideRepo(root, path string) (string, error) {
 
 func relInside(root, path string) (string, bool) {
 	rel, err := filepath.Rel(root, path)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if err != nil || relEscapes(rel) {
 		return "", false
 	}
 	return rel, true
+}
+
+func relEscapes(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func isolateGitError(op, out string, err error) error {

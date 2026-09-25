@@ -331,8 +331,8 @@ func callerRepoRoot(start, gitRoot string) string {
 	if err != nil {
 		return filepath.Clean(gitRoot)
 	}
-	rel, err := filepath.Rel(resolvedRoot, resolvedStart)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, ok := relInside(resolvedRoot, resolvedStart)
+	if !ok {
 		return filepath.Clean(gitRoot)
 	}
 	if rel == "." {

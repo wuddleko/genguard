@@ -96,8 +96,8 @@ func workspaceFile(repoRoot, file string) string {
 	if err != nil {
 		return file
 	}
-	prefix, err := filepath.Rel(wsAbs, rootAbs)
-	if err != nil || prefix == ".." || strings.HasPrefix(prefix, ".."+string(filepath.Separator)) {
+	prefix, ok := relInside(wsAbs, rootAbs)
+	if !ok {
 		return file
 	}
 	if prefix == "." {
