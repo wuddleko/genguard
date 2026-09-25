@@ -563,6 +563,63 @@ func TestDriftForGroupReportsMissingFileSpec(t *testing.T) {
 	}
 }
 
+func TestDriftForGroupCollapsesEquivalentPaths(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "hello.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drifts, err := check.DriftForGroup(root, config.Group{
+		Name:    "g",
+		Outputs: []string{"./hello.txt"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantModified := check.Drift{Group: "g", Path: "hello.txt", Kind: "modified"}
+	if len(drifts) != 1 || drifts[0] != wantModified {
+		t.Fatalf("modified drifts = %v, want [%+v]", drifts, wantModified)
+	}
+
+	if err := os.Remove(filepath.Join(root, "hello.txt")); err != nil {
+		t.Fatal(err)
+	}
+	wantMissing := check.Drift{Group: "g", Path: "hello.txt", Kind: "missing"}
+	for _, outputs := range [][]string{
+		{"./hello.txt"},
+		{"foo/../hello.txt"},
+		{"./hello.txt", "foo/../hello.txt"},
+		{"hello.txt", "./hello.txt"},
+	} {
+		drifts, err = check.DriftForGroup(root, config.Group{Name: "g", Outputs: outputs})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(drifts) != 1 || drifts[0] != wantMissing {
+			t.Fatalf("outputs %q drifts = %v, want [%+v]", outputs, drifts, wantMissing)
+		}
+	}
+	diff, err := check.DriftDiff(root, drifts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(diff, "diff --git") != 1 {
+		t.Fatalf("diff = %q", diff)
+	}
+}
+
 func TestDriftForGroupHandlesNewlineInFilename(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "repo")
 	if err := testutil.InitGitRepo(root); err != nil {

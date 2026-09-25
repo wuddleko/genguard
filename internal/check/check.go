@@ -380,10 +380,17 @@ func errorsAsExit(err error, target **exec.ExitError) bool {
 	return true
 }
 
+// driftPath is the config-relative spelling used as a drift key.
+// Clean collapses ./hello.txt and foo/../hello.txt onto hello.txt, which is what git reports.
+func driftPath(path string) string {
+	return filepath.ToSlash(filepath.Clean(path))
+}
+
 func driftForGroup(root string, group config.Group) ([]Drift, error) {
 	found := make([]Drift, 0)
 	seen := make(map[string]struct{})
 	record := func(path, kind string) {
+		path = driftPath(path)
 		if _, ok := seen[path]; ok {
 			return
 		}
