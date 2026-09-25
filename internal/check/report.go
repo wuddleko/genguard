@@ -17,17 +17,8 @@ func FormatFailureReport(result ConfigResult, root string) (string, error) {
 	drifts := result.AllDrifts()
 	if len(drifts) > 0 {
 		b.WriteString("\nDrift\n")
-		for _, item := range drifts {
-			fmt.Fprintf(&b, "[%s] %s: %s\n", item.Kind, item.Group, item.Path)
-		}
-		diff, err := resultDriftDiff(result, root, drifts)
-		if err != nil {
+		if err := writeDriftBody(&b, result, root, drifts); err != nil {
 			return b.String(), err
-		}
-		if strings.TrimSpace(diff) != "" {
-			b.WriteString("\n")
-			b.WriteString(diff)
-			b.WriteString("\n")
 		}
 	}
 
@@ -64,17 +55,8 @@ func FormatRunFailureReport(run RunResult) (string, error) {
 		}
 		b.WriteString(displayConfigPath(run.RepoRoot, cfg.Path))
 		b.WriteString("\n")
-		for _, item := range drifts {
-			fmt.Fprintf(&b, "[%s] %s: %s\n", item.Kind, item.Group, item.Path)
-		}
-		diff, err := resultDriftDiff(cfg.Result, filepath.Dir(cfg.Path), drifts)
-		if err != nil {
+		if err := writeDriftBody(&b, cfg.Result, filepath.Dir(cfg.Path), drifts); err != nil {
 			return b.String(), err
-		}
-		if strings.TrimSpace(diff) != "" {
-			b.WriteString("\n")
-			b.WriteString(diff)
-			b.WriteString("\n")
 		}
 	}
 
@@ -84,6 +66,22 @@ func FormatRunFailureReport(run RunResult) (string, error) {
 		b.WriteString("\n")
 	}
 	return b.String(), nil
+}
+
+func writeDriftBody(b *strings.Builder, result ConfigResult, root string, drifts []Drift) error {
+	for _, item := range drifts {
+		fmt.Fprintf(b, "[%s] %s: %s\n", item.Kind, item.Group, item.Path)
+	}
+	diff, err := resultDriftDiff(result, root, drifts)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(diff) != "" {
+		b.WriteString("\n")
+		b.WriteString(diff)
+		b.WriteString("\n")
+	}
+	return nil
 }
 
 func resultDriftDiff(result ConfigResult, root string, drifts []Drift) (string, error) {
