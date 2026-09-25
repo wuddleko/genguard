@@ -107,7 +107,7 @@ func findCommittedConfigs(repoRoot string) ([]string, error) {
 		found = append(found, filepath.Join(repoRoot, filepath.FromSlash(name)))
 	}
 	sort.Strings(found)
-	if err := rejectBothCommitted(found); err != nil {
+	if err := config.RejectBothConfigNames(found); err != nil {
 		return nil, err
 	}
 	return found, nil
@@ -127,19 +127,6 @@ func committedConfig(rel string) bool {
 		}
 	}
 	return true
-}
-
-func rejectBothCommitted(paths []string) error {
-	seen := make(map[string]string, len(paths))
-	for _, configPath := range paths {
-		dir := filepath.Dir(configPath)
-		base := filepath.Base(configPath)
-		if prev, ok := seen[dir]; ok && prev != base {
-			return newGenguardError("%s contains both genguard.yaml and genguard.yml; keep one", dir)
-		}
-		seen[dir] = base
-	}
-	return nil
 }
 
 func checkOne(path, base string, damage map[string]pathSnap) ConfigRun {

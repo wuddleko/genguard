@@ -82,7 +82,7 @@ func bothConfigNamesError(dir string) error {
 	return fmt.Errorf("%s contains both genguard.yaml and genguard.yml; keep one", dir)
 }
 
-func rejectBothConfigNames(paths []string) error {
+func RejectBothConfigNames(paths []string) error {
 	seen := make(map[string]string, len(paths))
 	for _, path := range paths {
 		dir := filepath.Dir(path)

@@ -50,7 +50,7 @@ func FindAll(repoRoot string) ([]string, error) {
 		return nil, err
 	}
 	sort.Strings(found)
-	if err := rejectBothConfigNames(found); err != nil {
+	if err := RejectBothConfigNames(found); err != nil {
 		return nil, err
 	}
 	return found, nil
