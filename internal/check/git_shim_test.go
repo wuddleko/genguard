@@ -40,7 +40,7 @@ func installGitShim(t *testing.T, mode string) {
 
 func installUnixModeShim(t *testing.T, bin string) {
 	t.Helper()
-	script := strings.ReplaceAll(unixGitShim, "@SCRIPT@", shellQuote(filepath.Join(bin, "git")))
+	script := strings.ReplaceAll(unixGitShim(), "@SCRIPT@", shellQuote(filepath.Join(bin, "git")))
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -79,81 +79,116 @@ func containsArg(args []string, want string) bool {
 	return false
 }
 
+// gitShimModes is the mode list for both shims. Unix tests run a shell script
+// generated from it. Windows tests run gitShimMain.
+var gitShimModes = []shimMode{
+	{name: "exit-2-empty", steps: []shimStep{shimExit(2)}},
+	{name: "merge-base-empty", steps: []shimStep{shimExit(0, "merge-base")}},
+	{name: "merge-base-quiet", steps: []shimStep{shimExit(2, "merge-base")}},
+	{name: "show-prefix-abs", steps: []shimStep{{
+		when: shimOn("--show-prefix"), stdout: "/no/such/prefix/\n", stop: true,
+	}}},
+	{name: "show-prefix-fail", steps: []shimStep{{
+		when: shimOn("--show-prefix"), stderr: "fatal: prefix failed\n", code: 128, stop: true,
+	}}},
+	{name: "show-prefix-quiet", steps: []shimStep{shimExit(1, "--show-prefix")}},
+	{name: "show-toplevel-empty", steps: []shimStep{shimExit(0, "--show-toplevel")}},
+	{name: "show-toplevel-fail", steps: []shimStep{{
+		when: shimOn("--show-toplevel"), stderr: "fatal: toplevel\n", code: 128, stop: true,
+	}}},
+	{name: "others-fail", steps: []shimStep{{
+		when: shimOn("--others"), stderr: "fatal: others\n", code: 1, stop: true,
+	}}},
+	{name: "dup-names", steps: []shimStep{
+		{
+			when:   &shimWhen{all: []string{"ls-files"}, none: []string{"--others"}},
+			stdout: "dup.go\x00dup.go\x00",
+			stop:   true,
+		},
+		{when: shimOn("--others"), stop: true},
+	}},
+	{name: "diff-quiet", steps: []shimStep{shimExit(129, "--no-color")}},
+	{name: "diff-empty", steps: []shimStep{shimExit(0, "--no-index")}},
+	{name: "ls-tree-quiet", steps: []shimStep{shimExit(2, "ls-tree")}},
+	{name: "verify-empty", steps: []shimStep{shimExit(0, "--verify")}},
+	{name: "verify-quiet", steps: []shimStep{shimExit(2, "--verify")}},
+	{name: "drop-on-toplevel", steps: []shimStep{{when: shimOn("--show-toplevel"), drop: true}}},
+	{name: "drop-after-proxy", steps: []shimStep{{drop: true}}},
+}
+
+type shimWhen struct {
+	all  []string
+	none []string
+}
+
+func (w *shimWhen) match(args []string) bool {
+	if w == nil {
+		return true
+	}
+	for _, arg := range w.all {
+		if !containsArg(args, arg) {
+			return false
+		}
+	}
+	for _, arg := range w.none {
+		if containsArg(args, arg) {
+			return false
+		}
+	}
+	return true
+}
+
+func shimOn(args ...string) *shimWhen {
+	return &shimWhen{all: args}
+}
+
+type shimStep struct {
+	when   *shimWhen
+	stdout string
+	stderr string
+	code   int
+	stop   bool
+	drop   bool
+}
+
+func shimExit(code int, args ...string) shimStep {
+	step := shimStep{code: code, stop: true}
+	if len(args) > 0 {
+		step.when = shimOn(args...)
+	}
+	return step
+}
+
+type shimMode struct {
+	name  string
+	steps []shimStep
+}
+
 func gitShimMain() int {
 	args := os.Args[1:]
-	switch os.Getenv("GENGUARD_GIT_MODE") {
-	case "exit-2-empty":
-		return 2
-	case "merge-base-empty":
-		if containsArg(args, "merge-base") {
-			return 0
+	mode := os.Getenv("GENGUARD_GIT_MODE")
+	for _, spec := range gitShimModes {
+		if spec.name != mode {
+			continue
 		}
-	case "merge-base-quiet":
-		if containsArg(args, "merge-base") {
-			return 2
+		for _, step := range spec.steps {
+			if !step.when.match(args) {
+				continue
+			}
+			if step.drop {
+				dropShim()
+			}
+			if step.stdout != "" {
+				fmt.Print(step.stdout)
+			}
+			if step.stderr != "" {
+				fmt.Fprint(os.Stderr, step.stderr)
+			}
+			if step.stop {
+				return step.code
+			}
 		}
-	case "show-prefix-abs":
-		if containsArg(args, "--show-prefix") {
-			fmt.Println("/no/such/prefix/")
-			return 0
-		}
-	case "show-prefix-fail":
-		if containsArg(args, "--show-prefix") {
-			fmt.Fprintln(os.Stderr, "fatal: prefix failed")
-			return 128
-		}
-	case "show-prefix-quiet":
-		if containsArg(args, "--show-prefix") {
-			return 1
-		}
-	case "show-toplevel-empty":
-		if containsArg(args, "--show-toplevel") {
-			return 0
-		}
-	case "show-toplevel-fail":
-		if containsArg(args, "--show-toplevel") {
-			fmt.Fprintln(os.Stderr, "fatal: toplevel")
-			return 128
-		}
-	case "others-fail":
-		if containsArg(args, "--others") {
-			fmt.Fprintln(os.Stderr, "fatal: others")
-			return 1
-		}
-	case "dup-names":
-		if containsArg(args, "ls-files") && !containsArg(args, "--others") {
-			fmt.Print("dup.go\x00dup.go\x00")
-			return 0
-		}
-		if containsArg(args, "--others") {
-			return 0
-		}
-	case "diff-quiet":
-		if containsArg(args, "--no-color") {
-			return 129
-		}
-	case "diff-empty":
-		if containsArg(args, "--no-index") {
-			return 0
-		}
-	case "ls-tree-quiet":
-		if containsArg(args, "ls-tree") {
-			return 2
-		}
-	case "verify-empty":
-		if containsArg(args, "--verify") {
-			return 0
-		}
-	case "verify-quiet":
-		if containsArg(args, "--verify") {
-			return 2
-		}
-	case "drop-on-toplevel":
-		if containsArg(args, "--show-toplevel") {
-			dropShim()
-		}
-	case "drop-after-proxy":
-		dropShim()
+		break
 	}
 	return execRealGit(args)
 }
@@ -197,62 +232,124 @@ func execRealGit(args []string) int {
 	return 1
 }
 
-const unixGitShim = `#!/bin/sh
-real=$GENGUARD_REAL_GIT
-mode=$GENGUARD_GIT_MODE
-saw_others=0
-saw_nocolor=0
-saw_noindex=0
-saw_merge=0
-saw_prefix=0
-saw_toplevel=0
-saw_ls=0
-saw_lstree=0
-saw_verify=0
-for arg in "$@"; do
-  case "$arg" in
-    --others) saw_others=1 ;;
-    --no-color) saw_nocolor=1 ;;
-    --no-index) saw_noindex=1 ;;
-    merge-base) saw_merge=1 ;;
-    --show-prefix) saw_prefix=1 ;;
-    --show-toplevel) saw_toplevel=1 ;;
-    ls-files) saw_ls=1 ;;
-    ls-tree) saw_lstree=1 ;;
-    --verify) saw_verify=1 ;;
-  esac
-done
-case "$mode" in
-  exit-2-empty) exit 2 ;;
-  merge-base-empty) [ "$saw_merge" -eq 1 ] && exit 0 ;;
-  merge-base-quiet) [ "$saw_merge" -eq 1 ] && exit 2 ;;
-  show-prefix-abs)
-    if [ "$saw_prefix" -eq 1 ]; then printf '%s\n' '/no/such/prefix/'; exit 0; fi
-    ;;
-  show-prefix-fail)
-    if [ "$saw_prefix" -eq 1 ]; then echo 'fatal: prefix failed' >&2; exit 128; fi
-    ;;
-  show-prefix-quiet) [ "$saw_prefix" -eq 1 ] && exit 1 ;;
-  show-toplevel-empty) [ "$saw_toplevel" -eq 1 ] && exit 0 ;;
-  show-toplevel-fail)
-    if [ "$saw_toplevel" -eq 1 ]; then echo 'fatal: toplevel' >&2; exit 128; fi
-    ;;
-  others-fail)
-    if [ "$saw_others" -eq 1 ]; then echo 'fatal: others' >&2; exit 1; fi
-    ;;
-  dup-names)
-    if [ "$saw_ls" -eq 1 ] && [ "$saw_others" -eq 0 ]; then printf 'dup.go\000dup.go\000'; exit 0; fi
-    if [ "$saw_others" -eq 1 ]; then exit 0; fi
-    ;;
-  diff-quiet) [ "$saw_nocolor" -eq 1 ] && exit 129 ;;
-  diff-empty) [ "$saw_noindex" -eq 1 ] && exit 0 ;;
-  ls-tree-quiet) [ "$saw_lstree" -eq 1 ] && exit 2 ;;
-  verify-empty) [ "$saw_verify" -eq 1 ] && exit 0 ;;
-  verify-quiet) [ "$saw_verify" -eq 1 ] && exit 2 ;;
-  drop-on-toplevel)
-    if [ "$saw_toplevel" -eq 1 ]; then /bin/rm -f @SCRIPT@; fi
-    ;;
-  drop-after-proxy) /bin/rm -f @SCRIPT@ ;;
-esac
-exec "$real" "$@"
-`
+func unixGitShim() string {
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\n")
+	b.WriteString("real=$GENGUARD_REAL_GIT\n")
+	b.WriteString("mode=$GENGUARD_GIT_MODE\n")
+	watched := shimWatchedArgs()
+	for _, arg := range watched {
+		fmt.Fprintf(&b, "%s=0\n", shellVar(arg))
+	}
+	b.WriteString("for arg in \"$@\"; do\n")
+	b.WriteString("  case \"$arg\" in\n")
+	for _, arg := range watched {
+		fmt.Fprintf(&b, "    %s) %s=1 ;;\n", arg, shellVar(arg))
+	}
+	b.WriteString("  esac\ndone\n")
+	b.WriteString("case \"$mode\" in\n")
+	for _, mode := range gitShimModes {
+		fmt.Fprintf(&b, "  %s)\n", mode.name)
+		for _, step := range mode.steps {
+			writeShimStep(&b, step)
+		}
+		b.WriteString("    ;;\n")
+	}
+	b.WriteString("esac\nexec \"$real\" \"$@\"\n")
+	return b.String()
+}
+
+func shimWatchedArgs() []string {
+	seen := map[string]bool{}
+	var args []string
+	add := func(arg string) {
+		if seen[arg] {
+			return
+		}
+		seen[arg] = true
+		args = append(args, arg)
+	}
+	for _, mode := range gitShimModes {
+		for _, step := range mode.steps {
+			if step.when == nil {
+				continue
+			}
+			for _, arg := range step.when.all {
+				add(arg)
+			}
+			for _, arg := range step.when.none {
+				add(arg)
+			}
+		}
+	}
+	return args
+}
+
+func shellVar(arg string) string {
+	name := strings.TrimLeft(arg, "-")
+	name = strings.ReplaceAll(name, "-", "_")
+	return "saw_" + name
+}
+
+func writeShimStep(b *strings.Builder, step shimStep) {
+	cond := shellCond(step.when)
+	indent := "    "
+	if cond != "" {
+		fmt.Fprintf(b, "    if %s; then\n", cond)
+		indent = "      "
+	}
+	if step.stdout != "" {
+		fmt.Fprintf(b, "%s%s\n", indent, shellPrintf(step.stdout, ""))
+	}
+	if step.stderr != "" {
+		fmt.Fprintf(b, "%s%s\n", indent, shellPrintf(step.stderr, ">&2"))
+	}
+	if step.drop {
+		fmt.Fprintf(b, "%s/bin/rm -f @SCRIPT@\n", indent)
+	}
+	if step.stop {
+		fmt.Fprintf(b, "%sexit %d\n", indent, step.code)
+	}
+	if cond != "" {
+		b.WriteString("    fi\n")
+	}
+}
+
+func shellCond(w *shimWhen) string {
+	if w == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(w.all)+len(w.none))
+	for _, arg := range w.all {
+		parts = append(parts, fmt.Sprintf("[ \"$%s\" -eq 1 ]", shellVar(arg)))
+	}
+	for _, arg := range w.none {
+		parts = append(parts, fmt.Sprintf("[ \"$%s\" -eq 0 ]", shellVar(arg)))
+	}
+	return strings.Join(parts, " && ")
+}
+
+func shellPrintf(data, redirect string) string {
+	var b strings.Builder
+	b.WriteString("printf '")
+	for i := 0; i < len(data); i++ {
+		switch data[i] {
+		case '\n':
+			b.WriteString(`\n`)
+		case 0:
+			b.WriteString(`\000`)
+		case '\\':
+			b.WriteString(`\\`)
+		case '\'':
+			b.WriteString(`'\''`)
+		default:
+			b.WriteByte(data[i])
+		}
+	}
+	b.WriteByte('\'')
+	if redirect != "" {
+		b.WriteByte(' ')
+		b.WriteString(redirect)
+	}
+	return b.String()
+}
