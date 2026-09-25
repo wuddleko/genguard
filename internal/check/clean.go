@@ -98,22 +98,7 @@ func refuseGlobPrefix(root, spec string) error {
 		}
 		prefix = append(prefix, part)
 	}
-	cur := root
-	for i, part := range prefix {
-		parent := cur
-		cur = filepath.Join(cur, part)
-		info, err := os.Lstat(cur)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return refuseFileInPath(parent)
-			}
-			return err
-		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return newGenguardError("clean refuses symlink in output path %q", filepath.Join(prefix[:i+1]...))
-		}
-	}
-	return nil
+	return refuseSymlinks(root, prefix)
 }
 
 func validateGlobSpec(spec string) error {
@@ -389,6 +374,10 @@ func refuseSymlinksInPath(root, target string) error {
 	if err != nil {
 		return err
 	}
+	return refuseSymlinks(root, parts)
+}
+
+func refuseSymlinks(root string, parts []string) error {
 	cur := root
 	for i, part := range parts {
 		parent := cur
