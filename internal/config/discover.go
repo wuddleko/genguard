@@ -14,6 +14,11 @@ var skipDirNames = map[string]struct{}{
 	"node_modules": {},
 }
 
+func SkipDir(name string) bool {
+	_, skip := skipDirNames[name]
+	return skip
+}
+
 func FindAll(repoRoot string) ([]string, error) {
 	root, err := resolveStart(repoRoot)
 	if err != nil {
@@ -36,7 +41,7 @@ func FindAll(repoRoot string) ([]string, error) {
 			}
 			return nil
 		}
-		if isConfigName(d.Name()) {
+		if IsConfigName(d.Name()) {
 			found = append(found, path)
 		}
 		return nil
@@ -77,11 +82,10 @@ func shouldSkipDir(path, root, name string) bool {
 	if path == root {
 		return false
 	}
-	_, skip := skipDirNames[name]
-	return skip
+	return SkipDir(name)
 }
 
-func isConfigName(name string) bool {
+func IsConfigName(name string) bool {
 	for _, candidate := range configNames {
 		if name == candidate {
 			return true

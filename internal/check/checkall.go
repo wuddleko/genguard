@@ -114,9 +114,7 @@ func findCommittedConfigs(repoRoot string) ([]string, error) {
 }
 
 func committedConfig(rel string) bool {
-	switch path.Base(rel) {
-	case "genguard.yaml", "genguard.yml":
-	default:
+	if !config.IsConfigName(path.Base(rel)) {
 		return false
 	}
 	dir := path.Dir(rel)
@@ -124,8 +122,7 @@ func committedConfig(rel string) bool {
 		return true
 	}
 	for _, part := range strings.Split(dir, "/") {
-		switch part {
-		case ".git", "vendor", "node_modules":
+		if config.SkipDir(part) {
 			return false
 		}
 	}

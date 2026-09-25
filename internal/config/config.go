@@ -12,6 +12,12 @@ import (
 
 var configNames = []string{"genguard.yaml", "genguard.yml"}
 
+func ConfigNames() []string {
+	names := make([]string, len(configNames))
+	copy(names, configNames)
+	return names
+}
+
 type Group struct {
 	Name    string
 	Command string

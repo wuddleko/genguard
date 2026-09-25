@@ -9,10 +9,6 @@ import (
 	"github.com/wuddleko/genguard/internal/config"
 )
 
-// configFileNames are the config basenames a clean must not delete.
-// The loaded path is checked as well, including when it uses another name.
-var configFileNames = []string{"genguard.yaml", "genguard.yml"}
-
 type cleanTarget struct {
 	spec   string
 	target string
@@ -190,8 +186,9 @@ func guardCleanTarget(absRoot string, item cleanTarget, gitDir string, configPat
 }
 
 func rootConfigPaths(absRoot string) []string {
-	paths := make([]string, len(configFileNames))
-	for i, name := range configFileNames {
+	names := config.ConfigNames()
+	paths := make([]string, len(names))
+	for i, name := range names {
 		paths[i] = filepath.Join(absRoot, name)
 	}
 	return paths
@@ -460,7 +457,7 @@ func gitEntryPath(path string) (string, error) {
 func configEntryPath(path string) (string, error) {
 	base := filepath.Base(path)
 	name := ""
-	for _, candidate := range configFileNames {
+	for _, candidate := range config.ConfigNames() {
 		if strings.EqualFold(base, candidate) {
 			name = candidate
 			break
