@@ -58,7 +58,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 	if useAll {
-		return runCheckAll(stdout, stderr, flags.since, flags.isolated, flags.asJSON)
+		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Isolated: flags.isolated}, flags.asJSON, "Generated files match the generators.", check.CheckAll)
 	}
 
 	var result check.ConfigResult
@@ -83,15 +83,15 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	return finishConfig(stdout, stderr, result, path, root, "Generated files match the generators.", flags.asJSON)
 }
 
-func runCheckAll(stdout, stderr io.Writer, since string, isolated, asJSON bool) int {
-	run, err := check.CheckAll(check.CheckAllOptions{Since: since, Isolated: isolated})
+func runAll(stdout, stderr io.Writer, opts check.CheckAllOptions, asJSON bool, success string, run func(check.CheckAllOptions) (check.RunResult, error)) int {
+	result, err := run(opts)
 	if err != nil {
 		return errorExit(stderr, "", err.Error())
 	}
-	if len(run.Configs) == 0 {
+	if len(result.Configs) == 0 {
 		return errorExit(stderr, "", "no genguard.yaml or genguard.yml found under repository root")
 	}
-	return finishRun(stdout, stderr, run, "Generated files match the generators.", asJSON)
+	return finishRun(stdout, stderr, result, success, asJSON)
 }
 
 func runRun(args []string, stdout, stderr io.Writer) int {
@@ -111,7 +111,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 	if useAll {
-		return runRunAll(stdout, stderr, flags.since, flags.asJSON)
+		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since}, flags.asJSON, "Generated files written.", check.RunAll)
 	}
 
 	cfg, err := config.LoadConfig(path)
@@ -186,17 +186,6 @@ func resolveConfigPath(stderr io.Writer, flags commandFlags) (path string, useAl
 		path = found
 	}
 	return path, false, 0, true
-}
-
-func runRunAll(stdout, stderr io.Writer, since string, asJSON bool) int {
-	run, err := check.RunAll(check.CheckAllOptions{Since: since})
-	if err != nil {
-		return errorExit(stderr, "", err.Error())
-	}
-	if len(run.Configs) == 0 {
-		return errorExit(stderr, "", "no genguard.yaml or genguard.yml found under repository root")
-	}
-	return finishRun(stdout, stderr, run, "Generated files written.", asJSON)
 }
 
 func finishConfig(stdout, stderr io.Writer, result check.ConfigResult, path, root, success string, asJSON bool) int {
