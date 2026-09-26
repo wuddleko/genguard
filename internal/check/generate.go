@@ -64,7 +64,7 @@ func runGroups(cfg config.Config, base string, log commandLog) (ConfigResult, er
 	root := cfg.Root()
 	result := ConfigResult{}
 	for _, group := range cfg.Groups {
-		result.Groups = append(result.Groups, runPreparedGroup(root, group, base, cfg.Path, log, nil, nil))
+		result.Groups = append(result.Groups, runPreparedGroup(root, group, cfg.Tools, base, cfg.Path, log, nil, nil))
 	}
 	return result, nil
 }

@@ -69,16 +69,16 @@ func checkGroups(cfg config.Config, base string, damage map[string]pathSnap, log
 	root := cfg.Root()
 	result := ConfigResult{}
 	for _, group := range cfg.Groups {
-		result.Groups = append(result.Groups, checkGroup(root, group, damage, base, cfg.Path, log))
+		result.Groups = append(result.Groups, checkGroup(root, group, cfg.Tools, damage, base, cfg.Path, log))
 	}
 	return result, nil
 }
 
-func checkGroup(root string, group config.Group, damage map[string]pathSnap, base, configPath string, log commandLog) GroupResult {
+func checkGroup(root string, group config.Group, tools []config.Tool, damage map[string]pathSnap, base, configPath string, log commandLog) GroupResult {
 	defer dropRepairedDamage(damage)
 
 	var wipe map[string]pathSnap
-	result := runPreparedGroup(root, group, base, configPath, log, func() {
+	result := runPreparedGroup(root, group, tools, base, configPath, log, func() {
 		wipe = map[string]pathSnap{}
 		recordCleanDamage(wipe, root, group)
 	}, func(result GroupResult) GroupResult {
@@ -114,7 +114,7 @@ func checkGroup(root string, group config.Group, damage map[string]pathSnap, bas
 	return result
 }
 
-func runPreparedGroup(root string, group config.Group, base, configPath string, log commandLog, afterClean func(), onCommandError func(GroupResult) GroupResult) GroupResult {
+func runPreparedGroup(root string, group config.Group, tools []config.Tool, base, configPath string, log commandLog, afterClean func(), onCommandError func(GroupResult) GroupResult) GroupResult {
 	result := GroupResult{Name: group.Name}
 	if base != "" && len(group.Inputs) > 0 {
 		affected, err := groupAffected(root, base, loadedConfigName(configPath), group)
@@ -130,6 +130,16 @@ func runPreparedGroup(root string, group config.Group, base, configPath string, 
 	}
 
 	defer log.beginGroup(group.Name)()
+
+	if len(group.Tools) > 0 {
+		observed, err := verifyTools(root, tools, group.Tools, log.timeout)
+		result.Tools = observed
+		if err != nil {
+			result.Status = GroupError
+			result.Err = err
+			return result
+		}
+	}
 
 	if group.Clean {
 		if err := clean.Outputs(root, configPath, group); err != nil {

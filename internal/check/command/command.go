@@ -11,10 +11,25 @@ func Run(root, command string, onLine func(string), timeout time.Duration) (stri
 	return run(root, command, onLine, timeout)
 }
 
+// Capture runs command and returns its combined output, including on exit 0.
+// The exit code is 0 on success. A timeout or a failure to start returns a
+// non-nil error and code 0.
+func Capture(root, command string, timeout time.Duration) (string, int, error) {
+	return execute(root, command, nil, timeout)
+}
+
 func run(root, command string, onLine func(string), timeout time.Duration) (string, error) {
+	text, code, err := execute(root, command, onLine, timeout)
+	if err != nil || code != 0 {
+		return text, err
+	}
+	return "", nil
+}
+
+func execute(root, command string, onLine func(string), timeout time.Duration) (string, int, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
-		return "", fmt.Errorf("command is empty")
+		return "", 0, fmt.Errorf("command is empty")
 	}
 
 	name, args := shellInvocation(command)
@@ -52,10 +67,10 @@ func run(root, command string, onLine func(string), timeout time.Duration) (stri
 	}
 	ring.flush()
 	if timedOut {
-		return ring.String(), fmt.Errorf("command timed out after %s", timeout)
+		return ring.String(), 0, fmt.Errorf("command timed out after %s", timeout)
 	}
 	if err == nil {
-		return "", nil
+		return ring.String(), 0, nil
 	}
 
 	exitCode := 1
@@ -65,9 +80,9 @@ func run(root, command string, onLine func(string), timeout time.Duration) (stri
 	}
 	tail := ring.String()
 	if tail == "" {
-		return "", fmt.Errorf("command failed (exit %d): no output", exitCode)
+		return "", exitCode, fmt.Errorf("command failed (exit %d): no output", exitCode)
 	}
-	return tail, fmt.Errorf("command failed (exit %d)", exitCode)
+	return tail, exitCode, fmt.Errorf("command failed (exit %d)", exitCode)
 }
 
 func errorsAsExit(err error, target **exec.ExitError) bool {

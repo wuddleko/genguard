@@ -14,12 +14,19 @@ const (
 	GroupSkipped GroupStatus = "skipped"
 )
 
+type ToolResult struct {
+	Name string
+	Want string
+	Have string
+}
+
 type GroupResult struct {
 	Name        string
 	Status      GroupStatus
 	Drifts      []Drift
 	Err         error
 	CommandTail string
+	Tools       []ToolResult
 }
 
 type ConfigResult struct {
