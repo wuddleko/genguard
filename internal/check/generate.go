@@ -22,8 +22,11 @@ func RunAll(opts CheckAllOptions) (RunResult, error) {
 		RepoRoot: repoRoot,
 		Configs:  make([]ConfigRun, 0, len(paths)),
 	}
+	cache := &toolCache{}
 	for _, configPath := range paths {
-		run.Configs = append(run.Configs, runOne(configPath, base, streamFor(repoRoot, configPath, opts.Log, opts.Quiet)))
+		log := streamFor(repoRoot, configPath, opts.Log, opts.Quiet)
+		log.toolCache = cache
+		run.Configs = append(run.Configs, runOne(configPath, base, log))
 	}
 	return run, nil
 }
@@ -61,6 +64,7 @@ func runConfig(cfg config.Config, base string, log commandLog) (ConfigResult, er
 }
 
 func runGroups(cfg config.Config, base string, log commandLog) (ConfigResult, error) {
+	log = log.withToolCache()
 	root := cfg.Root()
 	result := ConfigResult{}
 	for _, group := range cfg.Groups {

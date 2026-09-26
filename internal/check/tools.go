@@ -1,6 +1,7 @@
 package check
 
 import (
+	"fmt"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -15,7 +16,50 @@ import (
 // component, pre-release, and build.
 var versionPattern = regexp.MustCompile(`v?\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?`)
 
-func verifyTools(root string, declared []config.Tool, names []string, timeout time.Duration) ([]ToolResult, error) {
+// toolKey identifies one probe. root is the working directory Capture uses,
+// so the same command in another config or worktree is a different probe.
+type toolKey struct {
+	root    string
+	command string
+	want    string
+}
+
+type cachedProbe struct {
+	have   string
+	detail string
+}
+
+type toolCache struct {
+	entries map[toolKey]cachedProbe
+}
+
+func (c *toolCache) lookup(root, command, want string) (cachedProbe, bool) {
+	if c == nil || c.entries == nil {
+		return cachedProbe{}, false
+	}
+	hit, ok := c.entries[toolKey{root: root, command: command, want: want}]
+	return hit, ok
+}
+
+func (c *toolCache) remember(root, command, want, have, detail string) {
+	if c == nil {
+		return
+	}
+	if c.entries == nil {
+		c.entries = map[toolKey]cachedProbe{}
+	}
+	c.entries[toolKey{root: root, command: command, want: want}] = cachedProbe{have: have, detail: detail}
+}
+
+func (p cachedProbe) apply(name, want string) (ToolResult, error) {
+	item := ToolResult{Name: name, Want: want, Have: p.have}
+	if p.detail == "" {
+		return item, nil
+	}
+	return item, newGenguardError("%s: %s", name, p.detail)
+}
+
+func verifyTools(root string, declared []config.Tool, names []string, timeout time.Duration, cache *toolCache) ([]ToolResult, error) {
 	byName := make(map[string]config.Tool, len(declared))
 	for _, tool := range declared {
 		byName[tool.Name] = tool
@@ -31,7 +75,7 @@ func verifyTools(root string, declared []config.Tool, names []string, timeout ti
 			}
 			continue
 		}
-		item, err := probeTool(root, tool, timeout)
+		item, err := probeTool(root, tool, timeout, cache)
 		observed = append(observed, item)
 		if err != nil && first == nil {
 			first = err
@@ -40,37 +84,51 @@ func verifyTools(root string, declared []config.Tool, names []string, timeout ti
 	return observed, first
 }
 
-func probeTool(root string, tool config.Tool, timeout time.Duration) (ToolResult, error) {
+func probeTool(root string, tool config.Tool, timeout time.Duration, cache *toolCache) (ToolResult, error) {
 	item := ToolResult{Name: tool.Name, Want: pinVersion(tool.Version)}
 	commandText := strings.TrimSpace(tool.Command)
 	if commandText == "" {
-		if _, err := exec.LookPath(tool.Name); err != nil {
-			return item, newGenguardError("%s: not on PATH", tool.Name)
-		}
 		commandText = tool.Name + " --version"
+	}
+	if hit, ok := cache.lookup(root, commandText, item.Want); ok {
+		return hit.apply(tool.Name, item.Want)
+	}
+	item, detail, err := runProbe(root, tool, commandText, item, timeout)
+	cache.remember(root, commandText, item.Want, item.Have, detail)
+	return item, err
+}
+
+func runProbe(root string, tool config.Tool, commandText string, item ToolResult, timeout time.Duration) (ToolResult, string, error) {
+	fail := func(detail string) (ToolResult, string, error) {
+		return item, detail, newGenguardError("%s: %s", tool.Name, detail)
+	}
+	if strings.TrimSpace(tool.Command) == "" {
+		if _, err := exec.LookPath(tool.Name); err != nil {
+			return fail("not on PATH")
+		}
 	}
 	output, code, err := command.Capture(root, commandText, timeout)
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "command timed out after ") {
-			return item, newGenguardError("%s: %s", tool.Name, err.Error())
+			return fail(err.Error())
 		}
 		if code == 127 {
-			return item, newGenguardError("%s: not on PATH", tool.Name)
+			return fail("not on PATH")
 		}
 		if code > 0 {
-			return item, newGenguardError("%s: version command failed (exit %d)", tool.Name, code)
+			return fail(fmt.Sprintf("version command failed (exit %d)", code))
 		}
-		return item, newGenguardError("%s: version command failed", tool.Name)
+		return fail("version command failed")
 	}
 	have, ok := observedVersion(output)
 	if !ok {
-		return item, newGenguardError("%s: version command returned no version", tool.Name)
+		return fail("version command returned no version")
 	}
 	item.Have = have
 	if item.Want != "" && item.Want != have {
-		return item, newGenguardError("%s: want %s, have %s", tool.Name, item.Want, have)
+		return fail(fmt.Sprintf("want %s, have %s", item.Want, have))
 	}
-	return item, nil
+	return item, "", nil
 }
 
 func pinVersion(version string) string {

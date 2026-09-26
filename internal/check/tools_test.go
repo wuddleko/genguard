@@ -2,8 +2,10 @@ package check
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -417,6 +419,314 @@ func TestObservedVersion(t *testing.T) {
 	if pinVersion("v1.32.0") != "1.32.0" || pinVersion("1.32") != "1.32" || pinVersion("") != "" || pinVersion("verbose") != "verbose" {
 		t.Fatalf("pinVersion = %q %q %q %q", pinVersion("v1.32.0"), pinVersion("1.32"), pinVersion(""), pinVersion("verbose"))
 	}
+}
+
+func TestSameToolProbesOnceAcrossGroups(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "left.txt", "ok\n")
+	writeTracked(t, root, "right.txt", "ok\n")
+	command, probes := countingProbe(t, "1.32.0")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Tools: []config.Tool{{
+			Name:    "buf",
+			Version: "1.32.0",
+			Command: command,
+		}},
+		Groups: []config.Group{
+			{Name: "one", Command: "true", Outputs: []string{"left.txt"}, Tools: []string{"buf"}},
+			{Name: "two", Command: "true", Outputs: []string{"right.txt"}, Tools: []string{"buf"}},
+		},
+	}
+
+	result, err := checkConfig(cfg, "", nil, commandLog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode() != 0 {
+		t.Fatalf("exit = %d, groups = %+v", result.ExitCode(), result.Groups)
+	}
+	want := ToolResult{Name: "buf", Want: "1.32.0", Have: "1.32.0"}
+	for _, group := range result.Groups {
+		if group.Status != GroupOK || len(group.Tools) != 1 || group.Tools[0] != want {
+			t.Fatalf("group = %+v", group)
+		}
+	}
+	if n := probeCount(t, probes); n != 1 {
+		t.Fatalf("probes = %d, want 1", n)
+	}
+}
+
+func TestCachedMismatchDoesNotCleanTheNextGroup(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "a/out.txt", "keep\n")
+	writeTracked(t, root, "b/out.txt", "keep\n")
+	command, probes := countingProbe(t, "1.32.0")
+	group := func(name, dir string) config.Group {
+		return config.Group{
+			Name:    name,
+			Command: fmt.Sprintf(`python3 -c "open('%s','w').close()"`, name+"-ran"),
+			Outputs: []string{dir},
+			Clean:   true,
+			Tools:   []string{"buf"},
+		}
+	}
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Tools: []config.Tool{{
+			Name:    "buf",
+			Version: "9.9.9",
+			Command: command,
+		}},
+		Groups: []config.Group{group("one", "a/"), group("two", "b/")},
+	}
+
+	result, err := checkConfig(cfg, "", nil, commandLog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := probeCount(t, probes); n != 1 {
+		t.Fatalf("probes = %d, want 1", n)
+	}
+	for _, group := range result.Groups {
+		if group.Status != GroupError || group.Err == nil || group.Err.Error() != "buf: want 9.9.9, have 1.32.0" {
+			t.Fatalf("group = %+v", group)
+		}
+	}
+	assertFile(t, filepath.Join(root, "a", "out.txt"), "keep\n")
+	assertFile(t, filepath.Join(root, "b", "out.txt"), "keep\n")
+	assertAbsent(t, filepath.Join(root, "one-ran"))
+	assertAbsent(t, filepath.Join(root, "two-ran"))
+}
+
+func TestDifferentPinsBothProbe(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "left.txt", "ok\n")
+	writeTracked(t, root, "right.txt", "ok\n")
+	command, probes := countingProbe(t, "1.32.0")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Tools: []config.Tool{
+			{Name: "buf", Version: "1.32.0", Command: command},
+			{Name: "sqlc", Version: "1.28.0", Command: command},
+		},
+		Groups: []config.Group{
+			{Name: "one", Command: "true", Outputs: []string{"left.txt"}, Tools: []string{"buf"}},
+			{Name: "two", Command: "true", Outputs: []string{"right.txt"}, Tools: []string{"sqlc"}},
+		},
+	}
+
+	result, err := checkConfig(cfg, "", nil, commandLog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := probeCount(t, probes); n != 2 {
+		t.Fatalf("probes = %d, want 2", n)
+	}
+	if result.Groups[0].Status != GroupOK || result.Groups[0].Tools[0].Have != "1.32.0" {
+		t.Fatalf("buf = %+v", result.Groups[0])
+	}
+	sqlc := result.Groups[1]
+	if sqlc.Status != GroupError || sqlc.Err == nil || sqlc.Err.Error() != "sqlc: want 1.28.0, have 1.32.0" {
+		t.Fatalf("sqlc = %+v", sqlc)
+	}
+}
+
+func TestNormalizedPinSharesOneProbe(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "out.txt", "ok\n")
+	command, probes := countingProbe(t, "1.32.0")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Tools: []config.Tool{
+			{Name: "buf", Version: "v1.32.0", Command: command},
+			{Name: "sqlc", Version: "1.32.0", Command: command},
+		},
+		Groups: []config.Group{{
+			Name:    "protobuf",
+			Command: "true",
+			Outputs: []string{"out.txt"},
+			Tools:   []string{"buf", "sqlc"},
+		}},
+	}
+
+	result, err := checkConfig(cfg, "", nil, commandLog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := result.Groups[0]
+	if group.Status != GroupOK {
+		t.Fatalf("group = %+v", group)
+	}
+	if len(group.Tools) != 2 || group.Tools[0].Name != "buf" || group.Tools[1].Name != "sqlc" {
+		t.Fatalf("tools = %+v", group.Tools)
+	}
+	for _, tool := range group.Tools {
+		if tool.Want != "1.32.0" || tool.Have != "1.32.0" {
+			t.Fatalf("tool = %+v", tool)
+		}
+	}
+	if n := probeCount(t, probes); n != 1 {
+		t.Fatalf("probes = %d, want 1", n)
+	}
+}
+
+func TestCachedMismatchUsesTheNextToolName(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "left.txt", "ok\n")
+	writeTracked(t, root, "right.txt", "ok\n")
+	command, probes := countingProbe(t, "1.32.0")
+	tool := func(name string) config.Tool {
+		return config.Tool{Name: name, Version: "9.9.9", Command: command}
+	}
+	cfg := config.Config{
+		Path:  filepath.Join(root, "genguard.yaml"),
+		Tools: []config.Tool{tool("buf"), tool("sqlc")},
+		Groups: []config.Group{
+			{Name: "one", Command: "true", Outputs: []string{"left.txt"}, Tools: []string{"buf"}},
+			{Name: "two", Command: "true", Outputs: []string{"right.txt"}, Tools: []string{"sqlc"}},
+		},
+	}
+
+	result, err := checkConfig(cfg, "", nil, commandLog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := probeCount(t, probes); n != 1 {
+		t.Fatalf("probes = %d, want 1", n)
+	}
+	for _, group := range result.Groups {
+		if group.Status != GroupError || len(group.Tools) != 1 || group.Tools[0].Have != "1.32.0" {
+			t.Fatalf("group = %+v", group)
+		}
+	}
+	if result.Groups[0].Err == nil || result.Groups[0].Err.Error() != "buf: want 9.9.9, have 1.32.0" {
+		t.Fatalf("buf = %+v", result.Groups[0])
+	}
+	if result.Groups[1].Err == nil || result.Groups[1].Err.Error() != "sqlc: want 9.9.9, have 1.32.0" {
+		t.Fatalf("sqlc = %+v", result.Groups[1])
+	}
+}
+
+func TestCheckAllProbesOncePerDirectory(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		isolated bool
+		run      bool
+	}{
+		{name: "check", isolated: false},
+		{name: "isolated", isolated: true},
+		{name: "run", run: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := gitRepo(t)
+			command, probes := countingProbe(t, "1.32.0")
+			for _, dir := range []string{"api", "web"} {
+				writeTracked(t, root, dir+"/out.txt", "ok\n")
+				body := fmt.Sprintf("tools:\n  - name: buf\n    version: 1.32.0\n    command: %q\ngroups:\n  - name: one\n    command: \"true\"\n    outputs:\n      - out.txt\n    tools: [buf]\n  - name: two\n    command: \"true\"\n    outputs:\n      - out.txt\n    tools: [buf]\n", command)
+				writeTracked(t, root, dir+"/genguard.yaml", body)
+			}
+
+			var (
+				result RunResult
+				err    error
+			)
+			if tc.run {
+				result, err = RunAll(CheckAllOptions{RepoRoot: root})
+			} else {
+				result, err = CheckAll(CheckAllOptions{RepoRoot: root, Isolated: tc.isolated})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.ExitCode() != 0 || len(result.Configs) != 2 {
+				t.Fatalf("exit = %d, configs = %+v", result.ExitCode(), result.Configs)
+			}
+			for _, cfg := range result.Configs {
+				if len(cfg.Result.Groups) != 2 {
+					t.Fatalf("%s groups = %+v", cfg.Path, cfg.Result.Groups)
+				}
+				for _, group := range cfg.Result.Groups {
+					if group.Status != GroupOK || len(group.Tools) != 1 || group.Tools[0].Have != "1.32.0" {
+						t.Fatalf("%s = %+v", cfg.Path, group)
+					}
+				}
+			}
+			if n := probeCount(t, probes); n != 2 {
+				t.Fatalf("probes = %d, want 2", n)
+			}
+		})
+	}
+}
+
+func TestVersionProbeFollowsTheConfigDirectory(t *testing.T) {
+	root := gitRepo(t)
+	command, probes := countingDirProbe(t)
+	for _, dir := range []struct {
+		name    string
+		version string
+	}{
+		{name: "api", version: "1.0.0"},
+		{name: "web", version: "2.0.0"},
+	} {
+		writeTracked(t, root, dir.name+"/out.txt", "ok\n")
+		writeTracked(t, root, dir.name+"/pin.txt", dir.version+"\n")
+		body := fmt.Sprintf("tools:\n  - name: buf\n    version: \"1.0.0\"\n    command: %q\ngroups:\n  - name: protobuf\n    command: \"true\"\n    outputs:\n      - out.txt\n    tools: [buf]\n", command)
+		writeTracked(t, root, dir.name+"/genguard.yaml", body)
+	}
+
+	result, err := CheckAll(CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Configs) != 2 {
+		t.Fatalf("configs = %+v", result.Configs)
+	}
+	api := result.Configs[0].Result.Groups[0]
+	if api.Status != GroupOK || len(api.Tools) != 1 || api.Tools[0].Have != "1.0.0" {
+		t.Fatalf("api = %+v", api)
+	}
+	web := result.Configs[1].Result.Groups[0]
+	if web.Status != GroupError || web.Err == nil || web.Err.Error() != "buf: want 1.0.0, have 2.0.0" {
+		t.Fatalf("web = %+v", web)
+	}
+	if n := probeCount(t, probes); n != 2 {
+		t.Fatalf("probes = %d, want 2", n)
+	}
+}
+
+func countingProbe(t *testing.T, printed string) (command, countPath string) {
+	t.Helper()
+	return writeCountingProbe(t, fmt.Sprintf("print(%s)\n", strconv.Quote(printed)))
+}
+
+func countingDirProbe(t *testing.T) (command, countPath string) {
+	t.Helper()
+	return writeCountingProbe(t, "print(open('pin.txt', encoding='utf-8').read())\n")
+}
+
+func writeCountingProbe(t *testing.T, tail string) (command, countPath string) {
+	t.Helper()
+	dir := t.TempDir()
+	countPath = filepath.Join(dir, "count")
+	script := filepath.Join(dir, "probe.py")
+	body := fmt.Sprintf("open(%s, 'a', encoding='utf-8').write('x\\n')\n%s", strconv.Quote(countPath), tail)
+	if err := os.WriteFile(script, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return "python3 " + script, countPath
+}
+
+func probeCount(t *testing.T, path string) int {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes.Count(data, []byte("\n"))
 }
 
 func assertFile(t *testing.T, path, want string) {

@@ -66,6 +66,7 @@ func checkGroups(cfg config.Config, base string, damage map[string]pathSnap, log
 	if damage == nil {
 		damage = map[string]pathSnap{}
 	}
+	log = log.withToolCache()
 	root := cfg.Root()
 	result := ConfigResult{}
 	for _, group := range cfg.Groups {
@@ -132,7 +133,7 @@ func runPreparedGroup(root string, group config.Group, tools []config.Tool, base
 	defer log.beginGroup(group.Name)()
 
 	if len(group.Tools) > 0 {
-		observed, err := verifyTools(root, tools, group.Tools, log.timeout)
+		observed, err := verifyTools(root, tools, group.Tools, log.timeout, log.toolCache)
 		result.Tools = observed
 		if err != nil {
 			result.Status = GroupError

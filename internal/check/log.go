@@ -19,6 +19,15 @@ type commandLog struct {
 	// quiet keeps lines off the writer. A failure tail is written into the
 	// group instead, and CommandTail is left empty.
 	quiet bool
+	// toolCache is shared by pointer across every group and config in one run.
+	toolCache *toolCache
+}
+
+func (c commandLog) withToolCache() commandLog {
+	if c.toolCache == nil {
+		c.toolCache = &toolCache{}
+	}
+	return c
 }
 
 func (c commandLog) label(name string) string {

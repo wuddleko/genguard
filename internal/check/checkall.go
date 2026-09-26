@@ -28,15 +28,20 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 		RepoRoot: repoRoot,
 		Configs:  make([]ConfigRun, 0, len(paths)),
 	}
+	cache := &toolCache{}
 	if opts.Isolated {
 		for _, configPath := range paths {
-			run.Configs = append(run.Configs, checkOneIsolated(configPath, base, streamFor(repoRoot, configPath, opts.Log, opts.Quiet)))
+			log := streamFor(repoRoot, configPath, opts.Log, opts.Quiet)
+			log.toolCache = cache
+			run.Configs = append(run.Configs, checkOneIsolated(configPath, base, log))
 		}
 		return run, nil
 	}
 	damage := map[string]pathSnap{}
 	for _, configPath := range paths {
-		run.Configs = append(run.Configs, checkOne(configPath, base, damage, streamFor(repoRoot, configPath, opts.Log, opts.Quiet)))
+		log := streamFor(repoRoot, configPath, opts.Log, opts.Quiet)
+		log.toolCache = cache
+		run.Configs = append(run.Configs, checkOne(configPath, base, damage, log))
 	}
 	return run, nil
 }
