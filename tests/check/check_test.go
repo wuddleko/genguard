@@ -516,8 +516,103 @@ func TestCheckFlattensCommandOutput(t *testing.T) {
 		t.Fatalf("err = %v", result.Groups[0].Err)
 	}
 	line := result.Groups[0].SummaryLine()
-	if strings.Contains(line, "\n") || strings.Contains(line, "line1") {
+	if strings.Contains(line, "\n") || strings.Contains(line, "line1") || !strings.Contains(line, "command failed (exit 3)") {
 		t.Fatalf("summary = %q", line)
+	}
+	if result.Groups[0].CommandTail != "line1\nline2\n" {
+		t.Fatalf("tail = %q", result.Groups[0].CommandTail)
+	}
+}
+
+func TestCommandTailStaysEmpty(t *testing.T) {
+	t.Run("pass", func(t *testing.T) {
+		groups := []testutil.GroupSpec{{
+			Name:    "ok",
+			Command: `python3 -c "import sys; sys.stderr.write('printed'+chr(10))"`,
+			Outputs: []string{"generated/hello.txt"},
+		}}
+		root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := mustCheckConfig(t, root)
+		if result.Groups[0].Status != check.GroupOK {
+			t.Fatalf("status = %q", result.Groups[0].Status)
+		}
+		if result.Groups[0].CommandTail != "" {
+			t.Fatalf("tail = %q", result.Groups[0].CommandTail)
+		}
+	})
+
+	t.Run("skip", func(t *testing.T) {
+		groups := []testutil.GroupSpec{{
+			Name:    "quiet",
+			Command: `python3 -c "import sys; sys.stderr.write('ran'+chr(10)); raise SystemExit(3)"`,
+			Inputs:  []string{"queries/"},
+			Outputs: []string{"out.txt"},
+		}}
+		root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+		if err != nil {
+			t.Fatal(err)
+		}
+		commitPath(t, root, "queries/q.sql", "select 1;\n")
+		commitPath(t, root, "out.txt", "out\n")
+		if err := testutil.Git(root, "branch", "base"); err != nil {
+			t.Fatal(err)
+		}
+		result := mustCheckSince(t, root, "base")
+		if result.Groups[0].Status != check.GroupSkipped {
+			t.Fatalf("status = %q", result.Groups[0].Status)
+		}
+		if result.Groups[0].CommandTail != "" {
+			t.Fatalf("tail = %q", result.Groups[0].CommandTail)
+		}
+	})
+
+	t.Run("drift", func(t *testing.T) {
+		groups := []testutil.GroupSpec{{
+			Name:    "greeting",
+			Command: `python3 -c "import sys; sys.stderr.write('printed'+chr(10)); open('generated/hello.txt','w').write('changed\n')"`,
+			Outputs: []string{"generated/hello.txt"},
+		}}
+		root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := mustCheckConfig(t, root)
+		if result.Groups[0].Status != check.GroupDrift {
+			t.Fatalf("status = %q, err = %v", result.Groups[0].Status, result.Groups[0].Err)
+		}
+		if result.Groups[0].CommandTail != "" {
+			t.Fatalf("tail = %q", result.Groups[0].CommandTail)
+		}
+	})
+}
+
+func TestRunStoresCommandTail(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "broken",
+		Command: `python3 -c "import sys; sys.stderr.write('line1'+chr(10)+'line2'+chr(10)); sys.exit(3)"`,
+		Outputs: []string{"generated/hello.txt"},
+		Clean:   true,
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadConfig(filepath.Join(root, "genguard.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := check.RunConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "after cleaning outputs") {
+		t.Fatalf("err = %v", result.Groups[0].Err)
+	}
+	if result.Groups[0].CommandTail != "line1\nline2\n" {
+		t.Fatalf("tail = %q", result.Groups[0].CommandTail)
 	}
 }
 

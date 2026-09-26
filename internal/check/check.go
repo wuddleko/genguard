@@ -142,8 +142,10 @@ func runPreparedGroup(root string, group config.Group, base, configPath string, 
 		}
 	}
 
-	if _, err := runCommand(root, group.Command); err != nil {
+	tail, err := runCommand(root, group.Command)
+	if err != nil {
 		result.Status = GroupError
+		result.CommandTail = tail
 		if group.Clean {
 			result.Err = newGenguardError("command failed after cleaning outputs: %s", err.Error())
 		} else {

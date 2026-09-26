@@ -55,13 +55,18 @@ func TestFormatJSONErrorFlattensAndKeepsDriftPaths(t *testing.T) {
 	run := RunResult{Configs: []ConfigRun{{
 		Path: "genguard.yaml",
 		Result: ConfigResult{Groups: []GroupResult{{
-			Name:   "protobuf",
-			Status: GroupError,
-			Err:    errors.New("command failed (exit 1): line1\nline2"),
-			Drifts: []Drift{{Kind: "modified", Path: "gen/a.go"}},
+			Name:        "protobuf",
+			Status:      GroupError,
+			Err:         errors.New("command failed (exit 1): line1\nline2"),
+			CommandTail: "kept-tail\n",
+			Drifts:      []Drift{{Kind: "modified", Path: "gen/a.go"}},
 		}}},
 	}}}
-	doc := decodeJSON(t, mustFormatJSON(t, run))
+	text := mustFormatJSON(t, run)
+	if strings.Contains(text, "kept-tail") || strings.Contains(text, "commandTail") {
+		t.Fatalf("json = %s", text)
+	}
+	doc := decodeJSON(t, text)
 	if doc.Exit != 2 {
 		t.Fatalf("exit = %d", doc.Exit)
 	}

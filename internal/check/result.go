@@ -15,10 +15,11 @@ const (
 )
 
 type GroupResult struct {
-	Name   string
-	Status GroupStatus
-	Drifts []Drift
-	Err    error
+	Name        string
+	Status      GroupStatus
+	Drifts      []Drift
+	Err         error
+	CommandTail string
 }
 
 type ConfigResult struct {
