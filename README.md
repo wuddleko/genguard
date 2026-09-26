@@ -58,7 +58,7 @@ Put `genguard.yaml` (or `genguard.yml`) next to the generated files, outside any
 With Go 1.22+:
 
 ```bash
-go install github.com/wuddleko/genguard/cmd/genguard@v0.5.1
+go install github.com/wuddleko/genguard/cmd/genguard@v0.6.0
 genguard check
 ```
 
@@ -127,7 +127,7 @@ A command that exits 0 stays quiet, including when the check finds drift. A fail
 With Go 1.22+:
 
 ```bash
-go install github.com/wuddleko/genguard/cmd/genguard@v0.5.1
+go install github.com/wuddleko/genguard/cmd/genguard@v0.6.0
 ```
 
 `$(go env GOPATH)/bin` has to be on your `PATH`. From a checkout of this repository: `make install` or `go install ./cmd/genguard`.
