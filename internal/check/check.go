@@ -460,14 +460,15 @@ func runCommand(root, command string, log io.Writer, header string, timeout time
 	}
 	cmd.Stdout = &ring
 	cmd.Stderr = &ring
-	// A positive timeout puts the shell in its own process group so the
-	// generator, a grandchild, dies with it. The timer starts after Start.
+	// A positive timeout isolates the shell so the generator, a grandchild,
+	// dies with it. The timer starts once that process is running.
 	var err error
 	var timedOut bool
 	if timeout > 0 {
-		setCommandGroup(cmd)
-		err = cmd.Start()
+		var group commandGroup
+		group, err = startCommand(cmd)
 		if err == nil {
+			defer group.release()
 			wait := make(chan error, 1)
 			go func() { wait <- cmd.Wait() }()
 			timer := time.NewTimer(timeout)
@@ -478,7 +479,7 @@ func runCommand(root, command string, log io.Writer, header string, timeout time
 				}
 			case <-timer.C:
 				timedOut = true
-				stopCommand(cmd)
+				group.stop(cmd)
 				err = <-wait
 			}
 		}

@@ -77,3 +77,33 @@ func TestShellInvocationWindowsDefaultCmd(t *testing.T) {
 		t.Fatalf("args = %q", args)
 	}
 }
+
+func TestQuoteForInvocation(t *testing.T) {
+	t.Parallel()
+	miss := func(string) (string, error) {
+		return "", errors.New("not found")
+	}
+	_, cmdArgs := shellInvocationFor("windows", miss, `C:\Windows\system32\cmd.exe`, "")
+	got := quoteForInvocation(cmdArgs, `C:\Users\A B\100% "nap".py`)
+	if got != `"C:\Users\A B\100%% ""nap"".py"` {
+		t.Fatalf("cmd = %q", got)
+	}
+
+	lookSh := func(n string) (string, error) {
+		if n == "sh" {
+			return `C:\Git\bin\sh.exe`, nil
+		}
+		return "", errors.New("not found")
+	}
+	_, shArgs := shellInvocationFor("windows", lookSh, `cmd.exe`, "")
+	got = quoteForInvocation(shArgs, `C:\Users\A B\nap.py`)
+	if got != `'C:\Users\A B\nap.py'` {
+		t.Fatalf("sh = %q", got)
+	}
+
+	_, unixArgs := shellInvocationFor("linux", nil, "", "")
+	got = quoteForInvocation(unixArgs, "it's")
+	if got != `'it'\''s'` {
+		t.Fatalf("unix = %q", got)
+	}
+}

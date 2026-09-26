@@ -71,29 +71,6 @@ func TestRunCommandTimeoutWithNoOutput(t *testing.T) {
 	}
 }
 
-func timeoutScript(pidPath string) string {
-	return "import os, sys, time\n" +
-		"fd = os.open(" + strconv.Quote(pidPath) + ", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)\n" +
-		"os.write(fd, str(os.getpid()).encode())\n" +
-		"os.close(fd)\n" +
-		"sys.stderr.write('line1\\n')\n" +
-		"sys.stderr.flush()\n" +
-		"time.sleep(5)\n"
-}
-
-func pythonCommand(t *testing.T, root, name, body string) string {
-	t.Helper()
-	path := filepath.Join(root, name)
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return "python3 " + shSingle(path)
-}
-
-func shSingle(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
-
 func assertPidGone(t *testing.T, pidPath string) {
 	t.Helper()
 	data, err := os.ReadFile(pidPath)

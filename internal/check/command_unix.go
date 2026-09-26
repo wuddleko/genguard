@@ -9,13 +9,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func setCommandGroup(cmd *exec.Cmd) {
+// commandGroup is the shell's process group.
+type commandGroup struct{}
+
+func startCommand(cmd *exec.Cmd) (commandGroup, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	return commandGroup{}, cmd.Start()
 }
 
-func stopCommand(cmd *exec.Cmd) {
+func (commandGroup) stop(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return
 	}
 	_ = unix.Kill(-cmd.Process.Pid, unix.SIGKILL)
 }
+
+func (commandGroup) release() {}

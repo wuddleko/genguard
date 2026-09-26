@@ -69,7 +69,11 @@ func TestCheckTimeoutWriterDropsTail(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
+	start := time.Now()
 	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, timeout: 200 * time.Millisecond})
+	if time.Since(start) >= time.Second {
+		t.Fatalf("took %s", time.Since(start))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
