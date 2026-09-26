@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/wuddleko/genguard/internal/config"
 )
@@ -157,4 +159,242 @@ func TestWorkflowGroupStaysQuietWithoutActions(t *testing.T) {
 	if result.Groups[0].Status != GroupOK {
 		t.Fatalf("group = %+v", result.Groups[0])
 	}
+}
+
+func TestWorkflowGroupQuietFailureKeepsTailInside(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	root := gitRepo(t)
+	writeTracked(t, root, "out.txt", "ok\n")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Groups: []config.Group{{
+			Name:    "greeting",
+			Command: `python3 -c "import sys; sys.stderr.write('line1'+chr(10)); sys.exit(3)"`,
+			Outputs: []string{"out.txt"},
+		}},
+	}
+	var buf bytes.Buffer
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := result.Groups[0]
+	if group.Status != GroupError || group.Err == nil || group.Err.Error() != "command failed (exit 3)" {
+		t.Fatalf("group = %+v", group)
+	}
+	if group.CommandTail != "" {
+		t.Fatalf("tail = %q", group.CommandTail)
+	}
+	body, after := splitWorkflowGroup(t, buf.String(), "greeting")
+	if after != "" {
+		t.Fatalf("after = %q", after)
+	}
+	_, paused := splitPausedCommandLog(t, strings.TrimSuffix(body, "\n"))
+	if paused != "greeting:\nline1\n" {
+		t.Fatalf("paused = %q", paused)
+	}
+	if strings.Count(buf.String(), "line1") != 1 {
+		t.Fatalf("log = %q", buf.String())
+	}
+}
+
+func TestWorkflowGroupQuietErrorStaysInsidePause(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	root := gitRepo(t)
+	writeTracked(t, root, "out.txt", "ok\n")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Groups: []config.Group{{
+			Name:    "greeting",
+			Command: `python3 -c "import sys; sys.stderr.write('::error file=evil.go::hijacked'+chr(10)); sys.exit(1)"`,
+			Outputs: []string{"out.txt"},
+		}},
+	}
+	var buf bytes.Buffer
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, prefix: "services/api/genguard.yaml: ", quiet: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Groups[0].CommandTail != "" {
+		t.Fatalf("tail = %q", result.Groups[0].CommandTail)
+	}
+	body, after := splitWorkflowGroup(t, buf.String(), "services/api/genguard.yaml: greeting")
+	if after != "" {
+		t.Fatalf("after = %q", after)
+	}
+	_, paused := splitPausedCommandLog(t, strings.TrimSuffix(body, "\n"))
+	if paused != "services/api/genguard.yaml: greeting:\n::error file=evil.go::hijacked\n" {
+		t.Fatalf("paused = %q", paused)
+	}
+}
+
+func TestWorkflowGroupVerboseFailureStreamsOnce(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	root := gitRepo(t)
+	writeTracked(t, root, "out.txt", "ok\n")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Groups: []config.Group{{
+			Name:    "greeting",
+			Command: `python3 -c "import sys; sys.stderr.write('line1'+chr(10)); sys.exit(3)"`,
+			Outputs: []string{"out.txt"},
+		}},
+	}
+	var buf bytes.Buffer
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := result.Groups[0]
+	if group.Status != GroupError || group.Err == nil || group.Err.Error() != "command failed (exit 3)" {
+		t.Fatalf("group = %+v", group)
+	}
+	if group.CommandTail != "" {
+		t.Fatalf("tail = %q", group.CommandTail)
+	}
+	body, after := splitWorkflowGroup(t, buf.String(), "greeting")
+	if after != "" {
+		t.Fatalf("after = %q", after)
+	}
+	_, paused := splitPausedCommandLog(t, strings.TrimSuffix(body, "\n"))
+	if paused != "greeting:\nline1\n" {
+		t.Fatalf("paused = %q", paused)
+	}
+	if strings.Count(buf.String(), "line1") != 1 {
+		t.Fatalf("log = %q", buf.String())
+	}
+}
+
+func TestWorkflowGroupQuietSuccessIsEmpty(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	root := gitRepo(t)
+	writeTracked(t, root, "out.txt", "ok\n")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Groups: []config.Group{{
+			Name:    "greeting",
+			Command: `python3 -c "import sys; sys.stderr.write('line1'+chr(10))"`,
+			Outputs: []string{"out.txt"},
+		}},
+	}
+	var buf bytes.Buffer
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Groups[0].Status != GroupOK || result.Groups[0].CommandTail != "" {
+		t.Fatalf("group = %+v", result.Groups[0])
+	}
+	if buf.String() != "::group::greeting\n::endgroup::\n" {
+		t.Fatalf("log = %q", buf.String())
+	}
+}
+
+func TestWorkflowGroupQuietNoOutputIsEmpty(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	root := gitRepo(t)
+	writeTracked(t, root, "out.txt", "ok\n")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Groups: []config.Group{{
+			Name:    "greeting",
+			Command: "exit 4",
+			Outputs: []string{"out.txt"},
+		}},
+	}
+	var buf bytes.Buffer
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := result.Groups[0]
+	if group.Status != GroupError || group.Err == nil || group.Err.Error() != "command failed (exit 4): no output" {
+		t.Fatalf("group = %+v", group)
+	}
+	if group.CommandTail != "" {
+		t.Fatalf("tail = %q", group.CommandTail)
+	}
+	if buf.String() != "::group::greeting\n::endgroup::\n" {
+		t.Fatalf("log = %q", buf.String())
+	}
+}
+
+func TestWorkflowGroupQuietTimeoutKeepsTailInside(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	root := gitRepo(t)
+	writeTracked(t, root, "out.txt", "ok\n")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Groups: []config.Group{{
+			Name:    "greeting",
+			Command: `python3 -c "import sys,time; sys.stderr.write('line1'+chr(10)); sys.stderr.flush(); time.sleep(5)"`,
+			Outputs: []string{"out.txt"},
+		}},
+	}
+	var buf bytes.Buffer
+	start := time.Now()
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true, timeout: 200 * time.Millisecond})
+	if time.Since(start) >= time.Second {
+		t.Fatalf("took %s", time.Since(start))
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := result.Groups[0]
+	if group.Status != GroupError || group.Err == nil || group.Err.Error() != "command timed out after 200ms" {
+		t.Fatalf("group = %+v", group)
+	}
+	if group.CommandTail != "" {
+		t.Fatalf("tail = %q", group.CommandTail)
+	}
+	body, after := splitWorkflowGroup(t, buf.String(), "greeting")
+	if after != "" {
+		t.Fatalf("after = %q", after)
+	}
+	_, paused := splitPausedCommandLog(t, strings.TrimSuffix(body, "\n"))
+	if paused != "greeting:\nline1\n" {
+		t.Fatalf("paused = %q", paused)
+	}
+}
+
+func TestWorkflowGroupQuietTailStaysWithoutActions(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "out.txt", "ok\n")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Groups: []config.Group{{
+			Name:    "greeting",
+			Command: `python3 -c "import sys; sys.stderr.write('line1'+chr(10)); sys.exit(3)"`,
+			Outputs: []string{"out.txt"},
+		}},
+	}
+	var buf bytes.Buffer
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := result.Groups[0]
+	if group.Status != GroupError || group.Err == nil || group.Err.Error() != "command failed (exit 3)" {
+		t.Fatalf("group = %+v", group)
+	}
+	if group.CommandTail != "line1\n" {
+		t.Fatalf("tail = %q", group.CommandTail)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("log = %q", buf.String())
+	}
+}
+
+func splitWorkflowGroup(t *testing.T, text, title string) (body, after string) {
+	t.Helper()
+	open := "::group::" + title + "\n"
+	if !strings.HasPrefix(text, open) {
+		t.Fatalf("log = %q", text)
+	}
+	var ok bool
+	body, after, ok = strings.Cut(text[len(open):], "::endgroup::\n")
+	if !ok {
+		t.Fatalf("log = %q", text)
+	}
+	return body, after
 }

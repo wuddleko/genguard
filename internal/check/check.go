@@ -132,6 +132,9 @@ type commandLog struct {
 	w       io.Writer
 	prefix  string
 	timeout time.Duration
+	// quiet keeps lines off the writer. A failure tail is written into the
+	// group instead, and CommandTail is left empty.
+	quiet bool
 }
 
 func (c commandLog) label(name string) string {
@@ -158,16 +161,41 @@ func (c commandLog) groupTitle(name string) string {
 	return escapeData(text)
 }
 
+func (c commandLog) groups() bool {
+	return c.w != nil && os.Getenv("GITHUB_ACTIONS") == "true"
+}
+
 // beginGroup opens a workflow group when Actions is logging this command.
 // The returned function closes it. A nil writer leaves both as no-ops.
 func (c commandLog) beginGroup(name string) func() {
-	if c.w == nil || os.Getenv("GITHUB_ACTIONS") != "true" {
+	if !c.groups() {
 		return func() {}
 	}
 	fmt.Fprintf(c.w, "::group::%s\n", c.groupTitle(name))
 	return func() {
 		fmt.Fprintf(c.w, "::endgroup::\n")
 	}
+}
+
+func (c commandLog) writeGroupedTail(name, tail string) {
+	var body strings.Builder
+	body.WriteString(c.label(name))
+	body.WriteByte('\n')
+	body.WriteString(tail)
+	if !strings.HasSuffix(tail, "\n") {
+		body.WriteByte('\n')
+	}
+	text := body.String()
+	token, err := workflowStopToken()
+	if err != nil {
+		fmt.Fprint(c.w, text)
+		fmt.Fprint(c.w, "\n")
+		return
+	}
+	fmt.Fprintf(c.w, "::stop-commands::%s\n", token)
+	fmt.Fprint(c.w, text)
+	fmt.Fprintf(c.w, "::%s::\n", token)
+	fmt.Fprint(c.w, "\n")
 }
 
 func runPreparedGroup(root string, group config.Group, base, configPath string, log commandLog, afterClean func(), onCommandError func(GroupResult) GroupResult) GroupResult {
@@ -198,11 +226,19 @@ func runPreparedGroup(root string, group config.Group, base, configPath string, 
 		}
 	}
 
+	stream := log.w
+	if log.quiet {
+		stream = nil
+	}
 	var header string
-	if log.w != nil {
+	if stream != nil {
 		header = log.label(group.Name)
 	}
-	tail, err := runCommand(root, group.Command, log.w, header, log.timeout)
+	tail, err := runCommand(root, group.Command, stream, header, log.timeout)
+	if log.quiet && log.groups() && tail != "" {
+		log.writeGroupedTail(group.Name, tail)
+		tail = ""
+	}
 	if err != nil {
 		result.Status = GroupError
 		result.CommandTail = tail
