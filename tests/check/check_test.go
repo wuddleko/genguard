@@ -16,6 +16,14 @@ import (
 	"github.com/wuddleko/genguard/tests/testutil"
 )
 
+func TestMain(m *testing.M) {
+	// CI sets these on the test process. Annotation tests opt in with t.Setenv.
+	os.Unsetenv("GITHUB_ACTIONS")
+	os.Unsetenv("GENGUARD_ANNOTATIONS")
+	os.Unsetenv("GITHUB_WORKSPACE")
+	os.Exit(m.Run())
+}
+
 func runCLI(args []string) (stdout, stderr string, code int) {
 	var outBuf, errBuf bytes.Buffer
 	code = cli.RunWithIO(args, &outBuf, &errBuf)
