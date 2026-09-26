@@ -102,6 +102,7 @@ A group with no `inputs` still runs. A skipped group does not run its command, a
 - `--since` — skip a group with `inputs` when those paths, its outputs, and the config still match the latest commit that `HEAD` and the ref share.
 - `--isolated` — check the committed files in a temporary worktree and leave your checkout alone. `check` only.
 - `--json` — print the result as JSON.
+- `--verbose` — stream the generator's stdout and stderr to stderr while the command runs.
 
 ## Run it
 
@@ -116,6 +117,10 @@ A match prints `Generated files match the generators.` and exits 0. Drift prints
 | `0` | `check`: outputs match `HEAD`, including when some groups were skipped. `run`: the commands succeeded |
 | `1` | Drift (`check` only) |
 | `2` | Config, git, or the generator command failed. A command error wins over drift |
+
+A command that exits 0 stays quiet, including when the check finds drift. A failed command prints its last 50 lines on stderr, labeled with the group name, then the Summary. With `--all` the label is the config path, a colon, a space, and the group name (`services/api/genguard.yaml: greeting:`). The summary line names `command failed (exit N)`. When that is the only failure, the final line is `error: command failed (exit N)`. A command that prints nothing uses `command failed (exit N): no output`. `--json` keeps the document on stdout. Those lines stay on stderr, and the group's `error` field is that same sentence.
+
+`--verbose` prints each line as it arrives, with the same label on the first line. It applies to `check` and `run`, including `--all`, `--since`, `--isolated`, and `--json`. The Summary names the exit and leaves the lines where they were printed.
 
 ## Install
 
@@ -149,7 +154,7 @@ After the command, genguard compares `HEAD` to the working tree under `outputs`:
 | `untracked` | A new file that is not gitignored |
 | `missing` | A tracked file under `outputs` is gone, or a listed **file** is absent. A directory or a glob is not, by itself, a missing path |
 
-Generated paths have to be tracked. Gitignored files under `outputs` stay out of the report. A failed command is still diffed, and that group counts as an error (exit 2).
+Generated paths have to be tracked. Gitignored files under `outputs` stay out of the report. A failed command is still diffed, and that group counts as an error (exit 2). Its last 50 lines are printed above the Summary.
 
 `clean: true` removes the declared outputs before the command: a directory is recreated empty, a file is removed, a glob removes the tracked and untracked matches. It refuses `.`, `..`, absolute paths, anything outside the config directory, symlinks, and a delete that would take `.git` or the config file. A failed command does not restore the wipe.
 
