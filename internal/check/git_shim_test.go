@@ -15,6 +15,8 @@ func TestMain(m *testing.M) {
 	if os.Getenv("GENGUARD_GIT_SHIM") == "1" {
 		os.Exit(gitShimMain())
 	}
+	// CI sets GITHUB_ACTIONS on the test process. Pause tests opt in with t.Setenv.
+	os.Unsetenv("GITHUB_ACTIONS")
 	os.Unsetenv("GITHUB_WORKSPACE")
 	os.Exit(m.Run())
 }

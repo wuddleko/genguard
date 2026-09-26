@@ -2,8 +2,11 @@ package check
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -142,7 +145,7 @@ func runPreparedGroup(root string, group config.Group, base, configPath string, 
 		}
 	}
 
-	tail, err := runCommand(root, group.Command)
+	tail, err := runCommand(root, group.Command, nil)
 	if err != nil {
 		result.Status = GroupError
 		result.CommandTail = tail
@@ -255,7 +258,7 @@ func RequireGitRepo(root string) error {
 }
 
 func RunCommand(root, command string) (string, error) {
-	return runCommand(root, command)
+	return runCommand(root, command, nil)
 }
 
 func DriftForGroup(root string, group config.Group) ([]Drift, error) {
@@ -367,7 +370,7 @@ func callerRepoRoot(start, gitRoot string) string {
 	return filepath.Clean(gitRoot)
 }
 
-func runCommand(root, command string) (string, error) {
+func runCommand(root, command string, log io.Writer) (string, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return "", newGenguardError("command is empty")
@@ -377,9 +380,47 @@ func runCommand(root, command string) (string, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = root
 	var ring tailRing
+	// A streamed log on Actions is bracketed with stop-commands. The token is
+	// chosen before the child runs, so a rand failure skips the stream.
+	stream := log != nil
+	var token string
+	var paused bool
+	if stream && os.Getenv("GITHUB_ACTIONS") == "true" {
+		var tokenErr error
+		token, tokenErr = workflowStopToken()
+		if tokenErr != nil {
+			stream = false
+		}
+	}
+	defer func() {
+		if paused {
+			fmt.Fprintf(log, "::%s::\n", token)
+		}
+	}()
+	if stream {
+		var stopFailed bool
+		ring.onLine = func(line string) {
+			if stopFailed {
+				return
+			}
+			if token != "" && !paused {
+				n, werr := fmt.Fprintf(log, "::stop-commands::%s\n", token)
+				if n > 0 {
+					paused = true
+				}
+				if werr != nil {
+					stopFailed = true
+					stream = false
+					return
+				}
+			}
+			fmt.Fprintln(log, line)
+		}
+	}
 	cmd.Stdout = &ring
 	cmd.Stderr = &ring
 	err := cmd.Run()
+	ring.flush()
 	if err == nil {
 		return "", nil
 	}
@@ -393,7 +434,18 @@ func runCommand(root, command string) (string, error) {
 	if tail == "" {
 		return "", newGenguardError("command failed (exit %d): no output", exitCode)
 	}
+	if log != nil && stream {
+		return "", newGenguardError("command failed (exit %d)", exitCode)
+	}
 	return tail, newGenguardError("command failed (exit %d)", exitCode)
+}
+
+func workflowStopToken() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
 }
 
 func errorsAsExit(err error, target **exec.ExitError) bool {
