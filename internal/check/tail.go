@@ -11,9 +11,11 @@ const (
 // A line longer than commandTailLineBytes is cut there. The rest of that
 // line is discarded until the next newline.
 type tailRing struct {
-	lines []string
-	cur   []byte
-	drop  bool
+	lines    []string
+	cur      []byte
+	drop     bool
+	reported bool
+	onLine   func(string)
 }
 
 func (r *tailRing) Write(p []byte) (int, error) {
@@ -36,8 +38,18 @@ func (r *tailRing) Write(p []byte) (int, error) {
 			continue
 		}
 		r.cur = append(r.cur, b)
+		r.reported = false
 	}
 	return len(p), nil
+}
+
+// flush reports an unfinished line once. Later writes can report again. String does not.
+func (r *tailRing) flush() {
+	if r.reported || r.onLine == nil || r.drop || len(r.cur) == 0 {
+		return
+	}
+	r.reported = true
+	r.onLine(trimTrailingCR(r.cur))
 }
 
 func (r *tailRing) String() string {
@@ -70,9 +82,13 @@ func (r *tailRing) push(line string) {
 	if len(r.lines) == commandTailLines {
 		copy(r.lines, r.lines[1:])
 		r.lines[commandTailLines-1] = line
-		return
+	} else {
+		r.lines = append(r.lines, line)
 	}
-	r.lines = append(r.lines, line)
+	if r.onLine != nil && !r.reported {
+		r.onLine(line)
+	}
+	r.reported = false
 }
 
 func trimTrailingCR(b []byte) string {
