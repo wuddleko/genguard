@@ -194,6 +194,7 @@ func finishConfig(stdout, stderr io.Writer, result check.ConfigResult, path, roo
 		if err != nil {
 			return errorExit(stderr, path, err.Error())
 		}
+		writeCommandTail(stderr, check.FormatCommandTails(result))
 		code := writeJSON(stdout, stderr, run)
 		maybeAnnotate(stderr, run)
 		return code
@@ -232,6 +233,7 @@ func finishConfig(stdout, stderr io.Writer, result check.ConfigResult, path, roo
 func finishRun(stdout, stderr io.Writer, run check.RunResult, success string, asJSON bool) int {
 	var code int
 	if asJSON {
+		writeCommandTail(stderr, check.FormatRunCommandTails(run))
 		code = writeJSON(stdout, stderr, run)
 	} else if run.ExitCode() == 0 {
 		var buf strings.Builder
@@ -254,6 +256,15 @@ func finishRun(stdout, stderr io.Writer, run check.RunResult, success string, as
 	}
 	maybeAnnotate(stderr, run)
 	return code
+}
+
+func writeCommandTail(stderr io.Writer, tails string) {
+	if tails == "" {
+		return
+	}
+	withoutWorkflowCommands(stderr, func(w io.Writer) {
+		fmt.Fprint(w, tails)
+	})
 }
 
 func errorExit(stderr io.Writer, file, message string) int {

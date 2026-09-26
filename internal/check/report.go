@@ -8,6 +8,7 @@ import (
 
 func FormatFailureReport(result ConfigResult, root string) (string, error) {
 	var b strings.Builder
+	b.WriteString(FormatCommandTails(result))
 	b.WriteString("Summary\n")
 	for _, line := range result.SummaryLines() {
 		b.WriteString(line)
@@ -32,6 +33,7 @@ func FormatFailureReport(result ConfigResult, root string) (string, error) {
 
 func FormatRunFailureReport(run RunResult) (string, error) {
 	var b strings.Builder
+	b.WriteString(FormatRunCommandTails(run))
 	b.WriteString("Summary\n")
 	for _, line := range run.SummaryLines() {
 		b.WriteString(line)
@@ -66,6 +68,46 @@ func FormatRunFailureReport(run RunResult) (string, error) {
 		b.WriteString("\n")
 	}
 	return b.String(), nil
+}
+
+// FormatCommandTails is the group output printed before Summary for one config.
+func FormatCommandTails(result ConfigResult) string {
+	var b strings.Builder
+	writeCommandTails(&b, result.Groups, func(name string) string {
+		return name + ":"
+	})
+	return b.String()
+}
+
+// FormatRunCommandTails is the group output printed before Summary for --all.
+func FormatRunCommandTails(run RunResult) string {
+	var b strings.Builder
+	for _, cfg := range run.Configs {
+		if cfg.Err != nil {
+			continue
+		}
+		path := displayConfigPath(run.RepoRoot, cfg.Path)
+		writeCommandTails(&b, cfg.Result.Groups, func(name string) string {
+			return path + ": " + name + ":"
+		})
+	}
+	return b.String()
+}
+
+func writeCommandTails(b *strings.Builder, groups []GroupResult, label func(name string) string) {
+	for _, group := range groups {
+		tail := group.CommandTail
+		if tail == "" {
+			continue
+		}
+		b.WriteString(label(group.Name))
+		b.WriteByte('\n')
+		b.WriteString(tail)
+		if !strings.HasSuffix(tail, "\n") {
+			b.WriteByte('\n')
+		}
+		b.WriteByte('\n')
+	}
 }
 
 func writeDriftBody(b *strings.Builder, result ConfigResult, root string, drifts []Drift) error {

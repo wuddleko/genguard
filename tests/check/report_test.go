@@ -77,6 +77,65 @@ func TestFormatFailureReportKeepsSectionsWhenDiffFails(t *testing.T) {
 	}
 }
 
+func TestFormatFailureReportCommandTails(t *testing.T) {
+	result := check.ConfigResult{Groups: []check.GroupResult{
+		{Name: "greeting", Status: check.GroupError, Err: errors.New("command failed (exit 3)"), CommandTail: "line1\nline2\n"},
+		{Name: "quiet", Status: check.GroupError, Err: errors.New("command failed (exit 1): no output")},
+		{Name: "other", Status: check.GroupError, Err: errors.New("command failed (exit 4)"), CommandTail: "boom"},
+	}}
+	report, err := check.FormatFailureReport(result, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "greeting:\n" +
+		"line1\n" +
+		"line2\n" +
+		"\n" +
+		"other:\n" +
+		"boom\n" +
+		"\n" +
+		"Summary\n" +
+		"  greeting: error (command failed (exit 3))\n" +
+		"  quiet: error (command failed (exit 1): no output)\n" +
+		"  other: error (command failed (exit 4))\n" +
+		"3 groups: 0 ok, 0 drift, 3 error\n" +
+		"\n" +
+		"error: 3 groups failed\n"
+	if report != want {
+		t.Fatalf("report = %q\nwant %q", report, want)
+	}
+}
+
+func TestFormatRunFailureReportCommandTails(t *testing.T) {
+	root := t.TempDir()
+	api := filepath.Join(root, "services", "api", "genguard.yaml")
+	web := filepath.Join(root, "services", "web", "genguard.yaml")
+	run := check.RunResult{
+		RepoRoot: root,
+		Configs: []check.ConfigRun{
+			{Path: api, Result: check.ConfigResult{Groups: []check.GroupResult{
+				{Name: "greeting", Status: check.GroupError, Err: errors.New("command failed (exit 3)"), CommandTail: "line1\nline2\n"},
+				{Name: "quiet", Status: check.GroupError, Err: errors.New("command failed (exit 1): no output")},
+			}}},
+			{Path: web, Result: check.ConfigResult{Groups: []check.GroupResult{
+				{Name: "assets", Status: check.GroupError, Err: errors.New("command failed (exit 4)"), CommandTail: "boom\n"},
+			}}},
+		},
+	}
+	report, err := check.FormatRunFailureReport(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := filepath.Join("services", "api", "genguard.yaml") + ": greeting:\nline1\nline2\n\n" +
+		filepath.Join("services", "web", "genguard.yaml") + ": assets:\nboom\n\nSummary\n"
+	if !strings.HasPrefix(report, head) {
+		t.Fatalf("report = %q\nwant prefix %q", report, head)
+	}
+	if strings.Contains(strings.Split(report, "Summary\n")[0], "quiet:") {
+		t.Fatalf("empty tail was printed: %q", report)
+	}
+}
+
 func TestFormatFailureReportErrorsOnly(t *testing.T) {
 	result := check.ConfigResult{Groups: []check.GroupResult{
 		{Name: "broken", Status: check.GroupError, Err: errors.New("command failed (exit 3): no output")},
