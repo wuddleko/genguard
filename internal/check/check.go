@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/wuddleko/genguard/internal/config"
 )
@@ -170,7 +171,7 @@ func runPreparedGroup(root string, group config.Group, base, configPath string, 
 	if log.w != nil {
 		header = log.label(group.Name)
 	}
-	tail, err := runCommand(root, group.Command, log.w, header)
+	tail, err := runCommand(root, group.Command, log.w, header, 0)
 	if err != nil {
 		result.Status = GroupError
 		result.CommandTail = tail
@@ -283,7 +284,7 @@ func RequireGitRepo(root string) error {
 }
 
 func RunCommand(root, command string) (string, error) {
-	return runCommand(root, command, nil, "")
+	return runCommand(root, command, nil, "", 0)
 }
 
 func DriftForGroup(root string, group config.Group) ([]Drift, error) {
@@ -395,7 +396,7 @@ func callerRepoRoot(start, gitRoot string) string {
 	return filepath.Clean(gitRoot)
 }
 
-func runCommand(root, command string, log io.Writer, header string) (string, error) {
+func runCommand(root, command string, log io.Writer, header string, timeout time.Duration) (string, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return "", newGenguardError("command is empty")
@@ -458,8 +459,39 @@ func runCommand(root, command string, log io.Writer, header string) (string, err
 	}
 	cmd.Stdout = &ring
 	cmd.Stderr = &ring
-	err := cmd.Run()
+	// A positive timeout puts the shell in its own process group so the
+	// generator, a grandchild, dies with it. The timer starts after Start.
+	var err error
+	var timedOut bool
+	if timeout > 0 {
+		setCommandGroup(cmd)
+		err = cmd.Start()
+		if err == nil {
+			wait := make(chan error, 1)
+			go func() { wait <- cmd.Wait() }()
+			timer := time.NewTimer(timeout)
+			select {
+			case err = <-wait:
+				if !timer.Stop() {
+					<-timer.C
+				}
+			case <-timer.C:
+				timedOut = true
+				stopCommand(cmd)
+				err = <-wait
+			}
+		}
+	} else {
+		err = cmd.Run()
+	}
 	ring.flush()
+	if timedOut {
+		msg := newGenguardError("command timed out after %s", timeout)
+		if log != nil && stream {
+			return "", msg
+		}
+		return ring.String(), msg
+	}
 	if err == nil {
 		return "", nil
 	}
