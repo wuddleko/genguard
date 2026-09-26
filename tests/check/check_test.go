@@ -307,10 +307,13 @@ func TestRequireGitRepoRaisesOutsideGit(t *testing.T) {
 
 func TestRunCommandEmptyCommand(t *testing.T) {
 	root := t.TempDir()
-	err := check.RunCommand(root, "   ")
+	tail, err := check.RunCommand(root, "   ")
 	var genguardErr *check.GenguardError
 	if !errors.As(err, &genguardErr) {
 		t.Fatalf("err = %v", err)
+	}
+	if tail != "" {
+		t.Fatalf("tail = %q", tail)
 	}
 	if !strings.Contains(err.Error(), "command is empty") {
 		t.Fatalf("err = %v", err)
@@ -319,12 +322,56 @@ func TestRunCommandEmptyCommand(t *testing.T) {
 
 func TestRunCommandFailure(t *testing.T) {
 	root := t.TempDir()
-	err := check.RunCommand(root, "exit 4")
+	tail, err := check.RunCommand(root, "exit 4")
 	var genguardErr *check.GenguardError
 	if !errors.As(err, &genguardErr) {
 		t.Fatalf("err = %v", err)
 	}
-	if !strings.Contains(err.Error(), "command failed (exit 4)") {
+	if tail != "" {
+		t.Fatalf("tail = %q", tail)
+	}
+	if err.Error() != "command failed (exit 4): no output" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRunCommandFailureReturnsTail(t *testing.T) {
+	root := t.TempDir()
+	tail, err := check.RunCommand(root, `python3 -c "import sys; sys.stderr.write('line1'+chr(10)+'line2'+chr(10)); sys.exit(3)"`)
+	var genguardErr *check.GenguardError
+	if !errors.As(err, &genguardErr) {
+		t.Fatalf("err = %v", err)
+	}
+	if err.Error() != "command failed (exit 3)" {
+		t.Fatalf("err = %v", err)
+	}
+	if tail != "line1\nline2\n" {
+		t.Fatalf("tail = %q", tail)
+	}
+}
+
+func TestRunCommandSuccessDropsOutput(t *testing.T) {
+	root := t.TempDir()
+	tail, err := check.RunCommand(root, `python3 -c "import sys; sys.stderr.write('hello'+chr(10))"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tail != "" {
+		t.Fatalf("tail = %q", tail)
+	}
+}
+
+func TestRunCommandStartFailure(t *testing.T) {
+	root := t.TempDir()
+	tail, err := check.RunCommand(filepath.Join(root, "missing"), "true")
+	var genguardErr *check.GenguardError
+	if !errors.As(err, &genguardErr) {
+		t.Fatalf("err = %v", err)
+	}
+	if tail != "" {
+		t.Fatalf("tail = %q", tail)
+	}
+	if err.Error() != "command failed (exit 1): no output" {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -465,11 +512,11 @@ func TestCheckFlattensCommandOutput(t *testing.T) {
 	}
 
 	result := mustCheckConfig(t, root)
-	line := result.Groups[0].SummaryLine()
-	if strings.Contains(line, "\n") {
-		t.Fatalf("summary contains newline: %q", line)
+	if result.Groups[0].Err == nil || result.Groups[0].Err.Error() != "command failed (exit 3)" {
+		t.Fatalf("err = %v", result.Groups[0].Err)
 	}
-	if !strings.Contains(line, "line1 line2") {
+	line := result.Groups[0].SummaryLine()
+	if strings.Contains(line, "\n") || strings.Contains(line, "line1") {
 		t.Fatalf("summary = %q", line)
 	}
 }

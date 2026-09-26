@@ -243,8 +243,8 @@ func TestCLICommandFailureExit2(t *testing.T) {
 			continue
 		}
 		found = true
-		if !strings.Contains(line, "line1 line2") {
-			t.Fatalf("summary line not flattened: %q", line)
+		if strings.Contains(line, "line1") || !strings.Contains(line, "command failed (exit 3)") {
+			t.Fatalf("summary = %q", line)
 		}
 	}
 	if !found {
@@ -677,7 +677,10 @@ func TestCLIAnnotationsPauseAroundCommandLog(t *testing.T) {
 		t.Fatalf("stdout = %q", stdout)
 	}
 	report, after := splitPausedReport(t, stderr)
-	if !strings.Contains(report, "::error file=evil.go,line=1::hijacked\n") || !strings.Contains(report, "::stop-commands::hijack\n") {
+	if strings.Contains(report, "::error file=evil.go") || strings.Contains(report, "::stop-commands::hijack") {
+		t.Fatalf("report = %q", report)
+	}
+	if !strings.Contains(report, "command failed (exit 1)") {
 		t.Fatalf("report = %q", report)
 	}
 	for _, line := range strings.Split(after, "\n") {
@@ -685,7 +688,7 @@ func TestCLIAnnotationsPauseAroundCommandLog(t *testing.T) {
 			t.Fatalf("after = %q", after)
 		}
 	}
-	if !strings.HasPrefix(after, "::error file=genguard.yaml,title=greeting::") {
+	if !strings.HasPrefix(after, "::error file=genguard.yaml,title=greeting::command failed (exit 1)") {
 		t.Fatalf("after = %q", after)
 	}
 }

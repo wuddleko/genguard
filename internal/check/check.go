@@ -142,7 +142,7 @@ func runPreparedGroup(root string, group config.Group, base, configPath string, 
 		}
 	}
 
-	if err := runCommand(root, group.Command); err != nil {
+	if _, err := runCommand(root, group.Command); err != nil {
 		result.Status = GroupError
 		if group.Clean {
 			result.Err = newGenguardError("command failed after cleaning outputs: %s", err.Error())
@@ -252,7 +252,7 @@ func RequireGitRepo(root string) error {
 	return requireGitRepo(root)
 }
 
-func RunCommand(root, command string) error {
+func RunCommand(root, command string) (string, error) {
 	return runCommand(root, command)
 }
 
@@ -365,30 +365,33 @@ func callerRepoRoot(start, gitRoot string) string {
 	return filepath.Clean(gitRoot)
 }
 
-func runCommand(root, command string) error {
+func runCommand(root, command string) (string, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
-		return newGenguardError("command is empty")
+		return "", newGenguardError("command is empty")
 	}
 
 	name, args := shellInvocation(command)
 	cmd := exec.Command(name, args...)
 	cmd.Dir = root
-	output, err := cmd.CombinedOutput()
+	var ring tailRing
+	cmd.Stdout = &ring
+	cmd.Stderr = &ring
+	err := cmd.Run()
 	if err == nil {
-		return nil
+		return "", nil
 	}
 
-	detail := strings.TrimSpace(string(output))
-	if detail == "" {
-		detail = "no output"
-	}
 	exitCode := 1
 	var exitErr *exec.ExitError
 	if errorsAsExit(err, &exitErr) {
 		exitCode = exitErr.ExitCode()
 	}
-	return newGenguardError("command failed (exit %d): %s", exitCode, detail)
+	tail := ring.String()
+	if tail == "" {
+		return "", newGenguardError("command failed (exit %d): no output", exitCode)
+	}
+	return tail, newGenguardError("command failed (exit %d)", exitCode)
 }
 
 func errorsAsExit(err error, target **exec.ExitError) bool {
