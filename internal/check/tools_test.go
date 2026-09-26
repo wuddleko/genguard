@@ -78,7 +78,7 @@ func TestToolMatchCleansAndRuns(t *testing.T) {
 		}},
 		Groups: []config.Group{{
 			Name:    "protobuf",
-			Command: `python3 -c "open('gen/out.txt','w').write('new\n')"`,
+			Command: `python3 -c "open('gen/out.txt','wb').write(b'new\n')"`,
 			Outputs: []string{"gen/"},
 			Clean:   true,
 			Tools:   []string{"buf"},
