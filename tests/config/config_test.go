@@ -44,6 +44,9 @@ func TestLoadConfigHappyPath(t *testing.T) {
 	if group.Inputs != nil {
 		t.Fatalf("inputs = %v, want none", group.Inputs)
 	}
+	if cfg.Tools != nil || group.Tools != nil {
+		t.Fatalf("tools = %v, group tools = %v, want none", cfg.Tools, group.Tools)
+	}
 }
 
 func TestLoadConfigRelativePathIsAbsolute(t *testing.T) {
@@ -303,6 +306,113 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.match, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			configPath := filepath.Join(root, "genguard.yaml")
+			if err := os.WriteFile(configPath, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := config.LoadConfig(configPath)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.match) {
+				t.Fatalf("error = %q, want substring %q", err, tc.match)
+			}
+		})
+	}
+}
+
+func TestLoadConfigTools(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	configPath := filepath.Join(root, "genguard.yaml")
+	content := "" +
+		"tools:\n" +
+		"  - name: buf\n" +
+		"    version: \" 1.32.0 \"\n" +
+		"  - name: \" sqlc \"\n" +
+		"    command: sqlc version\n" +
+		"  - name: protoc\n" +
+		"groups:\n" +
+		"  - name: protobuf\n" +
+		"    command: buf generate\n" +
+		"    outputs:\n" +
+		"      - gen/\n" +
+		"    tools: [\" buf \", sqlc]\n" +
+		"  - name: other\n" +
+		"    command: \"true\"\n" +
+		"    outputs:\n" +
+		"      - out/\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTools := []config.Tool{
+		{Name: "buf", Version: "1.32.0"},
+		{Name: "sqlc", Command: "sqlc version"},
+		{Name: "protoc"},
+	}
+	if len(cfg.Tools) != len(wantTools) {
+		t.Fatalf("tools = %+v", cfg.Tools)
+	}
+	for i, want := range wantTools {
+		if cfg.Tools[i] != want {
+			t.Fatalf("tools[%d] = %+v, want %+v", i, cfg.Tools[i], want)
+		}
+	}
+	if len(cfg.Groups) != 2 {
+		t.Fatalf("groups = %d", len(cfg.Groups))
+	}
+	got := cfg.Groups[0].Tools
+	if len(got) != 2 || got[0] != "buf" || got[1] != "sqlc" {
+		t.Fatalf("group tools = %v", got)
+	}
+	if cfg.Groups[1].Tools != nil {
+		t.Fatalf("unused group tools = %v", cfg.Groups[1].Tools)
+	}
+}
+
+func TestLoadConfigToolErrors(t *testing.T) {
+	t.Parallel()
+	group := "groups:\n  - command: echo\n    outputs:\n      - gen/\n"
+	withBuf := "tools:\n  - name: buf\n    version: 1.32.0\n" + group
+	cases := []struct {
+		name    string
+		content string
+		match   string
+	}{
+		{"empty list", "tools: []\n" + group, "non-empty 'tools' list"},
+		{"null list", "tools:\n" + group, "non-empty 'tools' list"},
+		{"not a list", "tools: buf\n" + group, "'tools' must be a list"},
+		{"not a mapping", "tools: [buf]\n" + group, "tools[0] must be a mapping"},
+		{"missing name", "tools:\n  - version: 1.32.0\n" + group, "tools[0] requires a non-empty 'name' string"},
+		{"blank name", "tools:\n  - name: '  '\n" + group, "tools[0] requires a non-empty 'name' string"},
+		{"name not a string", "tools:\n  - name: 1\n" + group, "tools[0].name must be a string"},
+		{"name has whitespace", "tools:\n  - name: buf gen\n" + group, "tools[0].name must be a single token"},
+		{"duplicate name", "tools:\n  - name: buf\n  - name: \" buf \"\n" + group, `duplicate name "buf"`},
+		{"blank version", "tools:\n  - name: buf\n    version: ''\n" + group, "tools[0] requires a non-empty 'version' string"},
+		{"version not a string", "tools:\n  - name: buf\n    version: 1\n" + group, "tools[0].version must be a string"},
+		{"null version", "tools:\n  - name: buf\n    version:\n" + group, "tools[0].version must be a string"},
+		{"blank command", "tools:\n  - name: buf\n    command: ''\n" + group, "tools[0] requires a non-empty 'command' string"},
+		{"command not a string", "tools:\n  - name: buf\n    command: 1\n" + group, "tools[0].command must be a string"},
+		{"unknown key", "tools:\n  - name: buf\n    bin: buf\n" + group, `unknown key "bin"`},
+		{"empty group list", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: []\n", 1), "groups[0] requires a non-empty 'tools' list"},
+		{"null group list", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools:\n", 1), "groups[0] requires a non-empty 'tools' list"},
+		{"group tools not a list", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: buf\n", 1), "groups[0] 'tools' must be a list"},
+		{"unknown group name", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: [missing]\n", 1), `unknown name "missing"`},
+		{"no declarations", strings.Replace(group, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: [buf]\n", 1), `unknown name "buf"`},
+		{"duplicate group name", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: [buf, buf]\n", 1), `duplicate name "buf"`},
+		{"group tool not a string", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: [1]\n", 1), "groups[0].tools[0] must be a string"},
+		{"blank group tool", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: ['  ']\n", 1), "groups[0].tools[0] requires a non-empty name"},
+		{"group tool has whitespace", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: ['buf gen']\n", 1), "groups[0].tools[0] must be a single token"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
 			configPath := filepath.Join(root, "genguard.yaml")

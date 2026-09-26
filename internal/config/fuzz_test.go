@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"unicode"
 )
 
 func FuzzParseConfig(f *testing.F) {
@@ -16,6 +17,7 @@ func FuzzParseConfig(f *testing.F) {
 	f.Add([]byte("groups:\n  - name: greeting\n    command: echo\n    outputs:\n      - '  '\n"))
 	f.Add([]byte("clean: 1\ngroups:\n  - command: echo\n    outputs:\n      - gen/\n"))
 	f.Add([]byte("clean: true\ngroups:\n  - command: echo\n    outputs:\n      - gen/\n    clean: false\n"))
+	f.Add([]byte("tools:\n  - name: buf\n    version: 1.32.0\n  - name: sqlc\n    command: sqlc version\ngroups:\n  - name: protobuf\n    command: buf generate\n    tools: [buf]\n    outputs:\n      - gen/\n"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// Large inputs spend the fuzz budget in the YAML decoder.
 		if len(data) > 8<<10 {
@@ -30,6 +32,22 @@ func FuzzParseConfig(f *testing.F) {
 		}
 		if len(cfg.Groups) == 0 {
 			t.Fatal("success with no groups")
+		}
+		declared := make(map[string]struct{}, len(cfg.Tools))
+		for i, tool := range cfg.Tools {
+			if tool.Name == "" || strings.ContainsFunc(tool.Name, unicode.IsSpace) {
+				t.Fatalf("tool %d has name %q", i, tool.Name)
+			}
+			if _, ok := declared[tool.Name]; ok {
+				t.Fatalf("tool %d duplicates %q", i, tool.Name)
+			}
+			declared[tool.Name] = struct{}{}
+			if tool.Version != strings.TrimSpace(tool.Version) {
+				t.Fatalf("tool %d has version %q", i, tool.Version)
+			}
+			if tool.Command != "" && strings.TrimSpace(tool.Command) == "" {
+				t.Fatalf("tool %d has a blank command", i)
+			}
 		}
 		for i, group := range cfg.Groups {
 			if group.Name == "" {
@@ -50,6 +68,16 @@ func FuzzParseConfig(f *testing.F) {
 				if strings.TrimSpace(input) == "" {
 					t.Fatalf("group %d has a blank input %q", i, input)
 				}
+			}
+			seen := make(map[string]struct{}, len(group.Tools))
+			for _, name := range group.Tools {
+				if _, ok := declared[name]; !ok {
+					t.Fatalf("group %d tool %q is not declared", i, name)
+				}
+				if _, ok := seen[name]; ok {
+					t.Fatalf("group %d repeats tool %q", i, name)
+				}
+				seen[name] = struct{}{}
 			}
 		}
 	})

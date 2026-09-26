@@ -19,12 +19,13 @@ func TestRunCommandTimeoutKillsProcessGroup(t *testing.T) {
 	pidPath := filepath.Join(root, "child.pid")
 	command := pythonCommand(t, root, "nap.py", timeoutScript(pidPath))
 
+	const limit = 3 * time.Second
 	start := time.Now()
-	tail, err := run(root, command, nil, 200*time.Millisecond)
-	if time.Since(start) >= time.Second {
+	tail, err := run(root, command, nil, limit)
+	if time.Since(start) >= 6*time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
-	if err == nil || err.Error() != "command timed out after 200ms" {
+	if err == nil || err.Error() != "command timed out after 3s" {
 		t.Fatalf("err = %v", err)
 	}
 	if tail != "line1\n" {

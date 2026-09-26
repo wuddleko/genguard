@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,16 +19,24 @@ func ConfigNames() []string {
 	return names
 }
 
+type Tool struct {
+	Name    string
+	Version string
+	Command string
+}
+
 type Group struct {
 	Name    string
 	Command string
 	Outputs []string
 	Inputs  []string
 	Clean   bool
+	Tools   []string
 }
 
 type Config struct {
 	Path   string
+	Tools  []Tool
 	Groups []Group
 }
 
@@ -123,8 +132,17 @@ func parseConfig(path string, data []byte) (Config, error) {
 		return Config{}, fmt.Errorf("%s must be a mapping", path)
 	}
 
-	if err := rejectUnknownKeys(raw, []string{"groups", "clean"}, path); err != nil {
+	if err := rejectUnknownKeys(raw, []string{"groups", "clean", "tools"}, path); err != nil {
 		return Config{}, err
+	}
+
+	tools, err := parseTools(raw, path)
+	if err != nil {
+		return Config{}, err
+	}
+	declared := make(map[string]struct{}, len(tools))
+	for _, tool := range tools {
+		declared[tool.Name] = struct{}{}
 	}
 
 	groupsRaw, ok := raw["groups"].([]any)
@@ -144,7 +162,7 @@ func parseConfig(path string, data []byte) (Config, error) {
 			return Config{}, fmt.Errorf("groups[%d] must be a mapping", index)
 		}
 		loc := fmt.Sprintf("groups[%d]", index)
-		if err := rejectUnknownKeys(groupMap, []string{"name", "command", "outputs", "inputs", "clean"}, loc); err != nil {
+		if err := rejectUnknownKeys(groupMap, []string{"name", "command", "outputs", "inputs", "clean", "tools"}, loc); err != nil {
 			return Config{}, err
 		}
 
@@ -182,16 +200,171 @@ func parseConfig(path string, data []byte) (Config, error) {
 			clean = groupClean.value
 		}
 
+		toolRefs, err := parseGroupTools(groupMap, loc, declared)
+		if err != nil {
+			return Config{}, err
+		}
+
 		groups = append(groups, Group{
 			Name:    name,
 			Command: command,
 			Outputs: outputs,
 			Inputs:  inputs,
 			Clean:   clean,
+			Tools:   toolRefs,
 		})
 	}
 
-	return Config{Path: path, Groups: groups}, nil
+	return Config{Path: path, Tools: tools, Groups: groups}, nil
+}
+
+func parseTools(raw map[string]any, loc string) ([]Tool, error) {
+	value, ok := raw["tools"]
+	if !ok {
+		return nil, nil
+	}
+	entries, err := toolEntries(value, loc)
+	if err != nil {
+		return nil, err
+	}
+	tools := make([]Tool, 0, len(entries))
+	seen := make(map[string]struct{}, len(entries))
+	for i, entry := range entries {
+		item, ok := entry.(map[string]any)
+		entryLoc := fmt.Sprintf("tools[%d]", i)
+		if !ok {
+			return nil, fmt.Errorf("%s must be a mapping", entryLoc)
+		}
+		if err := rejectUnknownKeys(item, []string{"name", "version", "command"}, entryLoc); err != nil {
+			return nil, err
+		}
+		name, err := toolName(item, entryLoc)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := seen[name]; ok {
+			return nil, fmt.Errorf("%s: duplicate name %q", entryLoc, name)
+		}
+		seen[name] = struct{}{}
+		version, err := optionalText(item, "version", entryLoc)
+		if err != nil {
+			return nil, err
+		}
+		command, err := optionalCommand(item, entryLoc)
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, Tool{Name: name, Version: version, Command: command})
+	}
+	return tools, nil
+}
+
+func parseGroupTools(groupMap map[string]any, loc string, declared map[string]struct{}) ([]string, error) {
+	value, ok := groupMap["tools"]
+	if !ok {
+		return nil, nil
+	}
+	entries, err := toolEntries(value, loc)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	seen := make(map[string]struct{}, len(entries))
+	for i, entry := range entries {
+		refLoc := fmt.Sprintf("%s.tools[%d]", loc, i)
+		text, ok := entry.(string)
+		if !ok {
+			return nil, fmt.Errorf("%s must be a string", refLoc)
+		}
+		name, err := refToken(text, refLoc)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := declared[name]; !ok {
+			return nil, fmt.Errorf("%s.tools: unknown name %q", loc, name)
+		}
+		if _, ok := seen[name]; ok {
+			return nil, fmt.Errorf("%s.tools: duplicate name %q", loc, name)
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+func toolEntries(value any, loc string) ([]any, error) {
+	if value == nil {
+		return nil, fmt.Errorf("%s requires a non-empty 'tools' list", loc)
+	}
+	entries, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s 'tools' must be a list", loc)
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("%s requires a non-empty 'tools' list", loc)
+	}
+	return entries, nil
+}
+
+func toolName(m map[string]any, loc string) (string, error) {
+	raw, ok := m["name"]
+	if !ok || raw == nil {
+		return "", fmt.Errorf("%s requires a non-empty 'name' string", loc)
+	}
+	text, ok := raw.(string)
+	if !ok {
+		return "", fmt.Errorf("%s.name must be a string", loc)
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", fmt.Errorf("%s requires a non-empty 'name' string", loc)
+	}
+	if strings.ContainsFunc(text, unicode.IsSpace) {
+		return "", fmt.Errorf("%s.name must be a single token", loc)
+	}
+	return text, nil
+}
+
+func refToken(text, loc string) (string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", fmt.Errorf("%s requires a non-empty name", loc)
+	}
+	if strings.ContainsFunc(text, unicode.IsSpace) {
+		return "", fmt.Errorf("%s must be a single token", loc)
+	}
+	return text, nil
+}
+
+func optionalText(m map[string]any, key, loc string) (string, error) {
+	value, ok := m[key]
+	if !ok {
+		return "", nil
+	}
+	text, ok := value.(string)
+	if !ok || value == nil {
+		return "", fmt.Errorf("%s.%s must be a string", loc, key)
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", fmt.Errorf("%s requires a non-empty '%s' string", loc, key)
+	}
+	return text, nil
+}
+
+func optionalCommand(m map[string]any, loc string) (string, error) {
+	value, ok := m["command"]
+	if !ok {
+		return "", nil
+	}
+	text, ok := value.(string)
+	if !ok || value == nil {
+		return "", fmt.Errorf("%s.command must be a string", loc)
+	}
+	if strings.TrimSpace(text) == "" {
+		return "", fmt.Errorf("%s requires a non-empty 'command' string", loc)
+	}
+	return text, nil
 }
 
 func rejectUnknownKeys(m map[string]any, known []string, loc string) error {

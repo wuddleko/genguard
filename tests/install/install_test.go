@@ -84,14 +84,15 @@ func defaultTag(t *testing.T) string {
 }
 
 func TestPrintAsset(t *testing.T) {
+	version := strings.TrimPrefix(defaultTag(t), "v")
 	cases := []struct {
 		os, arch, tag, want string
 	}{
-		{"linux", "amd64", "", "genguard_0.5.1_linux_amd64.tar.gz"},
-		{"linux", "arm64", "", "genguard_0.5.1_linux_arm64.tar.gz"},
-		{"darwin", "amd64", "", "genguard_0.5.1_darwin_amd64.tar.gz"},
-		{"darwin", "arm64", "", "genguard_0.5.1_darwin_arm64.tar.gz"},
-		{"windows", "amd64", "", "genguard_0.5.1_windows_amd64.zip"},
+		{"linux", "amd64", "", "genguard_" + version + "_linux_amd64.tar.gz"},
+		{"linux", "arm64", "", "genguard_" + version + "_linux_arm64.tar.gz"},
+		{"darwin", "amd64", "", "genguard_" + version + "_darwin_amd64.tar.gz"},
+		{"darwin", "arm64", "", "genguard_" + version + "_darwin_arm64.tar.gz"},
+		{"windows", "amd64", "", "genguard_" + version + "_windows_amd64.zip"},
 		{"linux", "amd64", "v1.2.3", "genguard_1.2.3_linux_amd64.tar.gz"},
 		{"linux", "amd64", "v1.2.3-rc.1", "genguard_1.2.3-rc.1_linux_amd64.tar.gz"},
 	}
