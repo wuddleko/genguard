@@ -946,7 +946,7 @@ func TestCLIVerboseWorkflowLineIsNotAnnotation(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
 	}
-	body, after := splitPausedReport(t, stderr)
+	body, after := splitPausedReport(t, stderrAfterGroupOpen(t, stderr, "greeting"))
 	if !strings.HasPrefix(body, "greeting:\n") {
 		t.Fatalf("body = %q", body)
 	}
@@ -968,7 +968,8 @@ func TestCLIVerboseHostileLabelStaysInsidePause(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
 	}
-	body, after := splitPausedReport(t, stderr)
+	const title = "::error file=evil.go::hijacked ::stop-commands::fixed"
+	body, after := splitPausedReport(t, stderrAfterGroupOpen(t, stderr, title))
 	if !strings.Contains(body, "::error file=evil.go::hijacked\n") || !strings.Contains(body, "::stop-commands::fixed:\n") || !strings.Contains(body, "hello\n") {
 		t.Fatalf("body = %q", body)
 	}
@@ -1109,6 +1110,19 @@ func TestCLIAnnotationsLeavePlainSuccess(t *testing.T) {
 	if !strings.Contains(stdout, "Generated files match the generators.") || !strings.Contains(stdout, "genguard.yaml") {
 		t.Fatalf("stdout = %q", stdout)
 	}
+}
+
+func stderrAfterGroupOpen(t *testing.T, stderr, title string) string {
+	t.Helper()
+	prefix := "::group::" + title + "\n"
+	if !strings.HasPrefix(stderr, prefix) {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	rest := stderr[len(prefix):]
+	if !strings.Contains(rest, "::endgroup::\n") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	return rest
 }
 
 func splitPausedReport(t *testing.T, stderr string) (report, after string) {

@@ -142,6 +142,34 @@ func (c commandLog) label(name string) string {
 	return text
 }
 
+func (c commandLog) groupTitle(name string) string {
+	text := name
+	if c.prefix != "" {
+		text = c.prefix + name
+	}
+	// A raw break encoded as %0A is decoded again inside ##[group].
+	// Fold it to a space, then escapeData so a literal %0A stays text.
+	text = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' {
+			return ' '
+		}
+		return r
+	}, text)
+	return escapeData(text)
+}
+
+// beginGroup opens a workflow group when Actions is logging this command.
+// The returned function closes it. A nil writer leaves both as no-ops.
+func (c commandLog) beginGroup(name string) func() {
+	if c.w == nil || os.Getenv("GITHUB_ACTIONS") != "true" {
+		return func() {}
+	}
+	fmt.Fprintf(c.w, "::group::%s\n", c.groupTitle(name))
+	return func() {
+		fmt.Fprintf(c.w, "::endgroup::\n")
+	}
+}
+
 func runPreparedGroup(root string, group config.Group, base, configPath string, log commandLog, afterClean func(), onCommandError func(GroupResult) GroupResult) GroupResult {
 	result := GroupResult{Name: group.Name}
 	if base != "" && len(group.Inputs) > 0 {
@@ -156,6 +184,8 @@ func runPreparedGroup(root string, group config.Group, base, configPath string, 
 			return result
 		}
 	}
+
+	defer log.beginGroup(group.Name)()
 
 	if group.Clean {
 		if err := cleanOutputs(root, configPath, group); err != nil {
