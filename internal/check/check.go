@@ -460,8 +460,6 @@ func runCommand(root, command string, log io.Writer, header string, timeout time
 	}
 	cmd.Stdout = &ring
 	cmd.Stderr = &ring
-	// A positive timeout isolates the shell so the generator, a grandchild,
-	// dies with it. The timer starts once that process is running.
 	var err error
 	var timedOut bool
 	if timeout > 0 {

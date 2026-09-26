@@ -279,18 +279,16 @@ func TestRunCommandTimeoutStartFailure(t *testing.T) {
 	}
 }
 
-// timeoutScript starts a sleeper and exits. The pid file names the sleeper,
-// which keeps the shell's stderr open after its parent is gone.
 func timeoutScript(pidPath string) string {
 	return "import os, subprocess, sys\n" +
+		"sys.stderr.write('line1\\n')\n" +
+		"sys.stderr.flush()\n" +
 		"child = subprocess.Popen(\n" +
-		"    [sys.executable, '-c', 'import time; time.sleep(5)'],\n" +
+		"    [sys.executable, '-c', 'import time; time.sleep(15)'],\n" +
 		"    stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr, close_fds=False)\n" +
 		"fd = os.open(" + strconv.Quote(pidPath) + ", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)\n" +
 		"os.write(fd, str(child.pid).encode())\n" +
 		"os.close(fd)\n" +
-		"sys.stderr.write('line1\\n')\n" +
-		"sys.stderr.flush()\n" +
 		"os._exit(0)\n"
 }
 
@@ -303,8 +301,6 @@ func pythonCommand(t *testing.T, root, name, body string) string {
 	return "python3 " + quoteForShell(path)
 }
 
-// quoteForShell quotes arg for the shell runCommand will use.
-// sh -c takes single quotes. cmd.exe /C takes double quotes.
 func quoteForShell(arg string) string {
 	_, args := shellInvocation("")
 	return quoteForInvocation(args, arg)

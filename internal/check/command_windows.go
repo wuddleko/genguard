@@ -9,22 +9,13 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// commandGroup is the shell's job.
 type commandGroup struct {
 	job windows.Handle
 }
 
-// ntResumeProcess resumes a process created with CREATE_SUSPENDED.
-// Go closes the primary thread handle before Start returns, so the
-// thread id is not available to ResumeThread.
+// Go closes the thread handle before Start returns.
 var ntResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
 
-// startCommand starts cmd suspended, puts it in a job, then resumes it.
-// Descendants created after the assign stay in the job, including a
-// grandchild whose parent has already exited. Wait stays blocked while
-// that grandchild holds the command's stdout pipe.
-// If the job cannot be assigned, the suspended process is killed and the
-// error is returned.
 func startCommand(cmd *exec.Cmd) (commandGroup, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED}
 	if err := cmd.Start(); err != nil {

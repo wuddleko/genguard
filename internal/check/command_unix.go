@@ -9,7 +9,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// commandGroup is the shell's process group.
 type commandGroup struct{}
 
 func startCommand(cmd *exec.Cmd) (commandGroup, error) {

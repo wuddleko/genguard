@@ -159,7 +159,7 @@ func TestCheckTimeoutStillDiffs(t *testing.T) {
 		Path: filepath.Join(root, "genguard.yaml"),
 		Groups: []config.Group{{
 			Name:    "greeting",
-			Command: `python3 -c "f=open('generated/hello.txt','w'); f.write('new\n'); f.flush(); f.close(); import time; time.sleep(5)"`,
+			Command: `python3 -c "f=open('generated/hello.txt','wb'); f.write(b'new\n'); f.flush(); f.close(); import time; time.sleep(5)"`,
 			Outputs: []string{"generated/hello.txt"},
 		}},
 	}
