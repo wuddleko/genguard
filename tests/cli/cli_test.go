@@ -535,6 +535,9 @@ func TestCLIHelp(t *testing.T) {
 	if !strings.Contains(stderr, "--json") {
 		t.Fatalf("stderr = %q", stderr)
 	}
+	if !strings.Contains(stderr, "--verbose") {
+		t.Fatalf("stderr = %q", stderr)
+	}
 	if !strings.Contains(stderr, "genguard version") {
 		t.Fatalf("stderr = %q", stderr)
 	}
@@ -793,6 +796,200 @@ func TestCLISuccessPrintsNoCommandTail(t *testing.T) {
 	}
 	if stderr != "" || strings.Contains(stdout, "printed") {
 		t.Fatalf("stdout = %s stderr = %q", stdout, stderr)
+	}
+}
+
+func TestCLIVerboseSuccess(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, root, "greeting", `python3 -c "import sys; sys.stderr.write('hello'+chr(10))"`)
+	commitRepo(t, root)
+	configPath := filepath.Join(root, "genguard.yaml")
+
+	stdout, stderr, code := runCLI([]string{"check", "--verbose", "--config", configPath})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files match the generators.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if stderr != "greeting:\nhello\n\n" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+
+	stdout, stderr, code = runCLI([]string{"run", "--verbose", "--config", configPath})
+	if code != 0 {
+		t.Fatalf("run code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stdout != "Generated files written.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if stderr != "greeting:\nhello\n\n" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestCLIVerboseFailurePrintsOnce(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, root, "greeting", `python3 -c "import sys; sys.stderr.write('line1'+chr(10)+'line2'+chr(10)); sys.exit(3)"`)
+	commitRepo(t, root)
+
+	_, stderr, code := runCLI([]string{"check", "--verbose", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	summary := strings.Index(stderr, "Summary\n")
+	if summary < 0 {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if stderr[:summary] != "greeting:\nline1\nline2\n\n" {
+		t.Fatalf("before summary = %q", stderr[:summary])
+	}
+	if strings.Count(stderr, "line1") != 1 {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	for _, line := range strings.Split(stderr[summary:], "\n") {
+		if strings.Contains(line, "greeting: error") && strings.Contains(line, "line1") {
+			t.Fatalf("summary = %q", line)
+		}
+	}
+}
+
+func TestCLIVerboseSkipPrintsNothing(t *testing.T) {
+	groups := []testutil.GroupSpec{{
+		Name:    "quiet",
+		Command: `python3 -c "import sys; sys.stderr.write('ran'+chr(10)); raise SystemExit(3)"`,
+		Inputs:  []string{"queries/"},
+		Outputs: []string{"out.txt"},
+	}}
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "queries"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "queries", "q.sql"), []byte("select 1;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "out.txt"), []byte("out\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "base"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "branch", "base"); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"check", "--verbose", "--since", "base", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stdout, "Generated files match the generators.") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+}
+
+func TestCLIVerboseAllLabelsPath(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, filepath.Join(root, "services", "api"), "greeting", `python3 -c "import sys; sys.stderr.write('line1'+chr(10)+'line2'+chr(10)); sys.exit(3)"`)
+	writeCLIConfig(t, filepath.Join(root, "services", "web"), "assets", "true")
+	commitRepo(t, root)
+	testutil.Chdir(t, root)
+
+	_, stderr, code := runCLI([]string{"check", "--all", "--verbose"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	want := filepath.Join("services", "api", "genguard.yaml") + ": greeting:\nline1\nline2\n\n"
+	if !strings.HasPrefix(stderr, want) {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Count(stderr, "line1") != 1 {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(strings.SplitN(stderr, "Summary\n", 2)[0], "assets:") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestCLIVerboseJSONLeavesStdoutClean(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, root, "greeting", `python3 -c "import sys; sys.stderr.write('line1'+chr(10)+'line2'+chr(10)); sys.exit(3)"`)
+	commitRepo(t, root)
+
+	stdout, stderr, code := runCLI([]string{"check", "--json", "--verbose", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q\nstdout = %s", code, stderr, stdout)
+	}
+	if stderr != "greeting:\nline1\nline2\n\n" {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stdout, "line1") || strings.Contains(stdout, "Summary") {
+		t.Fatalf("stdout = %s", stdout)
+	}
+}
+
+func TestCLIVerboseWorkflowLineIsNotAnnotation(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, root, "greeting", "echo '::error file=evil.go,line=1::hijacked'; echo '::stop-commands::hijack'; exit 1")
+	commitRepo(t, root)
+	t.Setenv("GITHUB_ACTIONS", "true")
+
+	_, stderr, code := runCLI([]string{"check", "--verbose", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	body, after := splitPausedReport(t, stderr)
+	if !strings.HasPrefix(body, "greeting:\n") {
+		t.Fatalf("body = %q", body)
+	}
+	if !strings.Contains(body, "::error file=evil.go,line=1::hijacked\n") || !strings.Contains(body, "::stop-commands::hijack\n") {
+		t.Fatalf("body = %q", body)
+	}
+	if strings.Contains(after, "::error file=evil.go") || strings.Contains(after, "::stop-commands::hijack") {
+		t.Fatalf("after = %q", after)
+	}
+}
+
+func TestCLIVerboseHostileLabelStaysInsidePause(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, root, "::error file=evil.go::hijacked\n::stop-commands::fixed", "echo hello; exit 1")
+	commitRepo(t, root)
+	t.Setenv("GITHUB_ACTIONS", "true")
+
+	_, stderr, code := runCLI([]string{"check", "--verbose", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	body, after := splitPausedReport(t, stderr)
+	if !strings.Contains(body, "::error file=evil.go::hijacked\n") || !strings.Contains(body, "::stop-commands::fixed:\n") || !strings.Contains(body, "hello\n") {
+		t.Fatalf("body = %q", body)
+	}
+	if !strings.Contains(after, "::error file=genguard.yaml,title=") {
+		t.Fatalf("after = %q", after)
+	}
+}
+
+func TestCLIVerboseIsolatedUsesCallerLabel(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, filepath.Join(root, "services", "api"), "greeting", `python3 -c "import sys; sys.stderr.write('line1'+chr(10)); sys.exit(3)"`)
+	commitRepo(t, root)
+	testutil.Chdir(t, root)
+
+	_, stderr, code := runCLI([]string{"check", "--all", "--isolated", "--verbose"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	want := filepath.Join("services", "api", "genguard.yaml") + ": greeting:\nline1\n\n"
+	if !strings.HasPrefix(stderr, want) {
+		t.Fatalf("stderr = %q", stderr)
 	}
 }
 

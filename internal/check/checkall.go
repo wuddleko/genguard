@@ -1,6 +1,7 @@
 package check
 
 import (
+	"io"
 	"path"
 	"path/filepath"
 	"sort"
@@ -14,6 +15,7 @@ type CheckAllOptions struct {
 	Paths    []string
 	Since    string
 	Isolated bool
+	Log      io.Writer
 }
 
 func CheckAll(opts CheckAllOptions) (RunResult, error) {
@@ -27,15 +29,22 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 	}
 	if opts.Isolated {
 		for _, configPath := range paths {
-			run.Configs = append(run.Configs, checkOneIsolated(configPath, base))
+			run.Configs = append(run.Configs, checkOneIsolated(configPath, base, streamFor(repoRoot, configPath, opts.Log)))
 		}
 		return run, nil
 	}
 	damage := map[string]pathSnap{}
 	for _, configPath := range paths {
-		run.Configs = append(run.Configs, checkOne(configPath, base, damage))
+		run.Configs = append(run.Configs, checkOne(configPath, base, damage, streamFor(repoRoot, configPath, opts.Log)))
 	}
 	return run, nil
+}
+
+func streamFor(repoRoot, configPath string, log io.Writer) commandLog {
+	if log == nil {
+		return commandLog{}
+	}
+	return commandLog{w: log, prefix: displayConfigPath(repoRoot, configPath) + ": "}
 }
 
 func discoverConfigs(opts CheckAllOptions) (repoRoot string, paths []string, base string, err error) {
@@ -71,8 +80,8 @@ func discoverConfigs(opts CheckAllOptions) (repoRoot string, paths []string, bas
 	return repoRoot, paths, base, nil
 }
 
-func checkOneIsolated(path, since string) ConfigRun {
-	result, err := CheckSinceIsolated(path, since)
+func checkOneIsolated(path, since string, log commandLog) ConfigRun {
+	result, err := checkSinceIsolated(path, since, log)
 	return isolatedRun(path, result, err)
 }
 
@@ -122,9 +131,9 @@ func committedConfig(rel string) bool {
 	return true
 }
 
-func checkOne(path, base string, damage map[string]pathSnap) ConfigRun {
+func checkOne(path, base string, damage map[string]pathSnap, log commandLog) ConfigRun {
 	return loadConfigRun(path, func(cfg config.Config) (ConfigResult, error) {
-		return checkConfig(cfg, base, damage)
+		return checkConfig(cfg, base, damage, log)
 	})
 }
 

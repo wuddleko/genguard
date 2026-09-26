@@ -3,6 +3,7 @@ package check
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,8 +12,16 @@ import (
 )
 
 func CheckSinceIsolated(path, since string) (ConfigResult, error) {
+	return checkSinceIsolated(path, since, commandLog{})
+}
+
+func CheckSinceIsolatedLog(path, since string, log io.Writer) (ConfigResult, error) {
+	return checkSinceIsolated(path, since, commandLog{w: log})
+}
+
+func checkSinceIsolated(path, since string, log commandLog) (ConfigResult, error) {
 	var result ConfigResult
-	err := withIsolatedCheck(path, since, func(cfg config.Config, r ConfigResult) error {
+	err := withIsolatedCheck(path, since, log, func(cfg config.Config, r ConfigResult) error {
 		if drifts := r.AllDrifts(); len(drifts) > 0 {
 			diff, diffErr := DriftDiff(cfg.Root(), drifts)
 			r.captureDriftDiff(diff, diffErr)
@@ -26,7 +35,7 @@ func CheckSinceIsolated(path, since string) (ConfigResult, error) {
 	return result, err
 }
 
-func withIsolatedCheck(path, since string, fn func(config.Config, ConfigResult) error) error {
+func withIsolatedCheck(path, since string, log commandLog, fn func(config.Config, ConfigResult) error) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err
@@ -48,7 +57,7 @@ func withIsolatedCheck(path, since string, fn func(config.Config, ConfigResult) 
 			}
 			return callerPathError(err, mapped, path)
 		}
-		result, err := CheckSince(cfg, since)
+		result, err := checkSince(cfg, since, log)
 		if err != nil {
 			return err
 		}

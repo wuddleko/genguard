@@ -25,7 +25,7 @@ func TestRunGroupAffectedErrorSkipsCommand(t *testing.T) {
 			Outputs: []string{"out.txt"},
 		}},
 	}
-	result, err := runConfig(cfg, "not-a-real-ref")
+	result, err := runConfig(cfg, "not-a-real-ref", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestIsolateSinceRejectsUnusableRefs(t *testing.T) {
 
 func TestWithIsolatedCheckRejectsRelativePathWithoutCwd(t *testing.T) {
 	testutil.WithoutWorkingDirectory(t)
-	err := withIsolatedCheck("genguard.yaml", "", func(config.Config, ConfigResult) error {
+	err := withIsolatedCheck("genguard.yaml", "", commandLog{}, func(config.Config, ConfigResult) error {
 		t.Fatal("fn ran")
 		return nil
 	})
@@ -146,7 +146,7 @@ func TestCheckSinceIsolatedNotesFailedWorktreeRemoval(t *testing.T) {
 	writeTracked(t, root, "genguard.yaml", "groups:\n  - name: lock\n    command: chmod 555 .\n    outputs:\n      - keep.txt\n")
 	t.Cleanup(func() { releaseWorktrees(t, root) })
 
-	run := checkOneIsolated(filepath.Join(root, "genguard.yaml"), "")
+	run := checkOneIsolated(filepath.Join(root, "genguard.yaml"), "", commandLog{})
 	if run.Err != nil {
 		t.Fatalf("Err = %v", run.Err)
 	}
@@ -236,7 +236,7 @@ func TestFindCommittedConfigsGitFailures(t *testing.T) {
 
 func TestWithIsolatedCheckRejectsBadSince(t *testing.T) {
 	root := gitRepo(t)
-	err := withIsolatedCheck(filepath.Join(root, "genguard.yaml"), "not-a-ref", func(config.Config, ConfigResult) error {
+	err := withIsolatedCheck(filepath.Join(root, "genguard.yaml"), "not-a-ref", commandLog{}, func(config.Config, ConfigResult) error {
 		t.Fatal("fn ran")
 		return nil
 	})
@@ -301,7 +301,7 @@ func TestWithIsolatedCheckMapPathOutsideLexicalRoot(t *testing.T) {
 	if err := os.Symlink(sub, link); err != nil {
 		t.Fatal(err)
 	}
-	err := withIsolatedCheck(filepath.Join(link, "genguard.yaml"), "", func(config.Config, ConfigResult) error {
+	err := withIsolatedCheck(filepath.Join(link, "genguard.yaml"), "", commandLog{}, func(config.Config, ConfigResult) error {
 		t.Fatal("fn ran")
 		return nil
 	})

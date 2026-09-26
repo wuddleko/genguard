@@ -58,14 +58,14 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 	if useAll {
-		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Isolated: flags.isolated}, flags.asJSON, "Generated files match the generators.", check.CheckAll)
+		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Isolated: flags.isolated, Log: verboseLog(stderr, flags.verbose)}, flags.asJSON, "Generated files match the generators.", check.CheckAll)
 	}
 
 	var result check.ConfigResult
 	root := filepath.Dir(path)
 	if flags.isolated {
 		var err error
-		result, err = check.CheckSinceIsolated(path, flags.since)
+		result, err = check.CheckSinceIsolatedLog(path, flags.since, verboseLog(stderr, flags.verbose))
 		if err != nil && len(result.Groups) == 0 {
 			return errorExit(stderr, path, err.Error())
 		}
@@ -74,7 +74,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errorExit(stderr, path, err.Error())
 		}
-		result, err = check.CheckSince(cfg, flags.since)
+		result, err = check.CheckSinceLog(cfg, flags.since, verboseLog(stderr, flags.verbose))
 		if err != nil {
 			return errorExit(stderr, path, err.Error())
 		}
@@ -111,14 +111,14 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 	if useAll {
-		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since}, flags.asJSON, "Generated files written.", check.RunAll)
+		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Log: verboseLog(stderr, flags.verbose)}, flags.asJSON, "Generated files written.", check.RunAll)
 	}
 
 	cfg, err := config.LoadConfig(path)
 	if err != nil {
 		return errorExit(stderr, path, err.Error())
 	}
-	result, err := check.RunSince(cfg, flags.since)
+	result, err := check.RunSinceLog(cfg, flags.since, verboseLog(stderr, flags.verbose))
 	if err != nil {
 		return errorExit(stderr, path, err.Error())
 	}
@@ -131,6 +131,7 @@ type commandFlags struct {
 	since    string
 	isolated bool
 	asJSON   bool
+	verbose  bool
 }
 
 type commandUsage struct {
@@ -148,6 +149,7 @@ func parseCommandFlags(args []string, stderr io.Writer, usage commandUsage) (com
 	since := fs.String("since", "", "Run a group with inputs when its inputs, outputs, or config file differ from HEAD or from the merge-base of this ref, or a declared output file is missing")
 	isolated := fs.Bool("isolated", false, usage.isolated)
 	asJSON := fs.Bool("json", false, "Print the result as JSON on stdout")
+	verbose := fs.Bool("verbose", false, "Stream generator output to stderr")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return commandFlags{}, 0, false
@@ -164,7 +166,15 @@ func parseCommandFlags(args []string, stderr io.Writer, usage commandUsage) (com
 		since:    *since,
 		isolated: *isolated,
 		asJSON:   *asJSON,
+		verbose:  *verbose,
 	}, 0, true
+}
+
+func verboseLog(stderr io.Writer, on bool) io.Writer {
+	if !on {
+		return nil
+	}
+	return stderr
 }
 
 func resolveConfigPath(stderr io.Writer, flags commandFlags) (path string, useAll bool, code int, ok bool) {
@@ -354,10 +364,10 @@ func printUsage(w io.Writer) {
 	fmt.Fprint(w, `genguard — fail CI when committed generated outputs drift from their generators
 
 Usage:
-  genguard check [-c|--config path/to/genguard.yaml] [--since ref] [--isolated] [--json]
-  genguard check --all [--since ref] [--isolated] [--json]
-  genguard run [-c|--config path/to/genguard.yaml] [--since ref] [--json]
-  genguard run --all [--since ref] [--json]
+  genguard check [-c|--config path/to/genguard.yaml] [--since ref] [--isolated] [--json] [--verbose]
+  genguard check --all [--since ref] [--isolated] [--json] [--verbose]
+  genguard run [-c|--config path/to/genguard.yaml] [--since ref] [--json] [--verbose]
+  genguard run --all [--since ref] [--json] [--verbose]
   genguard version
 
 `)

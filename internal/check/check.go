@@ -36,18 +36,26 @@ func newGenguardError(format string, args ...any) error {
 }
 
 func CheckConfig(cfg config.Config) (ConfigResult, error) {
-	return checkConfig(cfg, "", map[string]pathSnap{})
+	return checkConfig(cfg, "", map[string]pathSnap{}, commandLog{})
 }
 
 func CheckSince(cfg config.Config, since string) (ConfigResult, error) {
+	return checkSince(cfg, since, commandLog{})
+}
+
+func CheckSinceLog(cfg config.Config, since string, log io.Writer) (ConfigResult, error) {
+	return checkSince(cfg, since, commandLog{w: log})
+}
+
+func checkSince(cfg config.Config, since string, log commandLog) (ConfigResult, error) {
 	base, err := sinceBase(cfg, since)
 	if err != nil {
 		return ConfigResult{}, err
 	}
 	if base == "" {
-		return CheckConfig(cfg)
+		return checkConfig(cfg, "", map[string]pathSnap{}, log)
 	}
-	return checkGroups(cfg, base, map[string]pathSnap{})
+	return checkGroups(cfg, base, map[string]pathSnap{}, log)
 }
 
 func sinceBase(cfg config.Config, since string) (string, error) {
@@ -60,30 +68,30 @@ func sinceBase(cfg config.Config, since string) (string, error) {
 	return mergeBase(cfg.Root(), since)
 }
 
-func checkConfig(cfg config.Config, base string, damage map[string]pathSnap) (ConfigResult, error) {
+func checkConfig(cfg config.Config, base string, damage map[string]pathSnap, log commandLog) (ConfigResult, error) {
 	if err := requireGitRepo(cfg.Root()); err != nil {
 		return ConfigResult{}, err
 	}
-	return checkGroups(cfg, base, damage)
+	return checkGroups(cfg, base, damage, log)
 }
 
-func checkGroups(cfg config.Config, base string, damage map[string]pathSnap) (ConfigResult, error) {
+func checkGroups(cfg config.Config, base string, damage map[string]pathSnap, log commandLog) (ConfigResult, error) {
 	if damage == nil {
 		damage = map[string]pathSnap{}
 	}
 	root := cfg.Root()
 	result := ConfigResult{}
 	for _, group := range cfg.Groups {
-		result.Groups = append(result.Groups, checkGroup(root, group, damage, base, cfg.Path))
+		result.Groups = append(result.Groups, checkGroup(root, group, damage, base, cfg.Path, log))
 	}
 	return result, nil
 }
 
-func checkGroup(root string, group config.Group, damage map[string]pathSnap, base, configPath string) GroupResult {
+func checkGroup(root string, group config.Group, damage map[string]pathSnap, base, configPath string, log commandLog) GroupResult {
 	defer dropRepairedDamage(damage)
 
 	var wipe map[string]pathSnap
-	result := runPreparedGroup(root, group, base, configPath, func() {
+	result := runPreparedGroup(root, group, base, configPath, log, func() {
 		wipe = map[string]pathSnap{}
 		recordCleanDamage(wipe, root, group)
 	}, func(result GroupResult) GroupResult {
@@ -119,7 +127,20 @@ func checkGroup(root string, group config.Group, damage map[string]pathSnap, bas
 	return result
 }
 
-func runPreparedGroup(root string, group config.Group, base, configPath string, afterClean func(), onCommandError func(GroupResult) GroupResult) GroupResult {
+type commandLog struct {
+	w      io.Writer
+	prefix string
+}
+
+func (c commandLog) label(name string) string {
+	text := name + ":"
+	if c.prefix != "" {
+		text = c.prefix + text
+	}
+	return text
+}
+
+func runPreparedGroup(root string, group config.Group, base, configPath string, log commandLog, afterClean func(), onCommandError func(GroupResult) GroupResult) GroupResult {
 	result := GroupResult{Name: group.Name}
 	if base != "" && len(group.Inputs) > 0 {
 		affected, err := groupAffected(root, base, loadedConfigName(configPath), group)
@@ -145,7 +166,11 @@ func runPreparedGroup(root string, group config.Group, base, configPath string, 
 		}
 	}
 
-	tail, err := runCommand(root, group.Command, nil)
+	var header string
+	if log.w != nil {
+		header = log.label(group.Name)
+	}
+	tail, err := runCommand(root, group.Command, log.w, header)
 	if err != nil {
 		result.Status = GroupError
 		result.CommandTail = tail
@@ -258,7 +283,7 @@ func RequireGitRepo(root string) error {
 }
 
 func RunCommand(root, command string) (string, error) {
-	return runCommand(root, command, nil)
+	return runCommand(root, command, nil, "")
 }
 
 func DriftForGroup(root string, group config.Group) ([]Drift, error) {
@@ -370,7 +395,7 @@ func callerRepoRoot(start, gitRoot string) string {
 	return filepath.Clean(gitRoot)
 }
 
-func runCommand(root, command string, log io.Writer) (string, error) {
+func runCommand(root, command string, log io.Writer, header string) (string, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return "", newGenguardError("command is empty")
@@ -392,9 +417,14 @@ func runCommand(root, command string, log io.Writer) (string, error) {
 			stream = false
 		}
 	}
+	// headerWrote is set from onLine. The blank line follows the resume token.
+	var headerWrote bool
 	defer func() {
 		if paused {
 			fmt.Fprintf(log, "::%s::\n", token)
+		}
+		if headerWrote {
+			io.WriteString(log, "\n")
 		}
 	}()
 	if stream {
@@ -413,6 +443,15 @@ func runCommand(root, command string, log io.Writer) (string, error) {
 					stream = false
 					return
 				}
+			}
+			// The label shares the first streamed line, inside the pause.
+			if header != "" && !headerWrote {
+				if _, werr := fmt.Fprintln(log, header); werr != nil {
+					stopFailed = true
+					stream = false
+					return
+				}
+				headerWrote = true
 			}
 			fmt.Fprintln(log, line)
 		}
