@@ -22,7 +22,7 @@ A skip does not add a code. A matching run is `0`, including when some groups we
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0
-- uses: wuddleko/genguard@v0.5.0
+- uses: wuddleko/genguard@v0.5.1
   with:
     all: true
     since: origin/main
@@ -32,9 +32,9 @@ The action installs the release named by `uses:` and runs `genguard check`. It d
 
 ## GitHub Actions (install from release)
 
-[install.sh](../install.sh) picks the archive for the runner (`linux_amd64` on `ubuntu-latest`, `darwin_arm64` on `macos-latest`), checks `checksums.txt`, and installs `genguard` into a directory already on `PATH`. From a checkout of this repository, `sh install.sh` installs `v0.5.0`.
+[install.sh](../install.sh) picks the archive for the runner (`linux_amd64` on `ubuntu-latest`, `darwin_arm64` on `macos-latest`), checks `checksums.txt`, and installs `genguard` into a directory already on `PATH`. From a checkout of this repository, `sh install.sh` installs `v0.5.1`.
 
-`v0.3.0` and earlier tags do not contain that script. This job downloads the `v0.5.0` archive. Archive names drop the leading `v` (`genguard_0.5.0_linux_amd64.tar.gz`). On Windows the archive is a `.zip` and the binary is `genguard.exe`. Do not point CI at the default branch.
+`v0.3.0` and earlier tags do not contain that script. This job downloads the `v0.5.1` archive. Archive names drop the leading `v` (`genguard_0.5.1_linux_amd64.tar.gz`). On Windows the archive is a `.zip` and the binary is `genguard.exe`. Do not point CI at the default branch.
 
 ```yaml
 name: Generated files
@@ -52,7 +52,7 @@ jobs:
 
       - name: Install genguard
         env:
-          GENGUARD_TAG: v0.5.0
+          GENGUARD_TAG: v0.5.1
         run: |
           version=${GENGUARD_TAG#v}
           asset="genguard_${version}_linux_amd64.tar.gz"
@@ -79,7 +79,7 @@ Fine when the job already uses Go and you want a tagged module version without d
           go-version: "1.22"
 
       - name: Install genguard
-        run: go install github.com/wuddleko/genguard/cmd/genguard@v0.5.0
+        run: go install github.com/wuddleko/genguard/cmd/genguard@v0.5.1
 
       - name: Verify generated files
         run: genguard check
@@ -95,7 +95,7 @@ The image needs `curl`, `awk`, `tar`, and `sha256sum`, plus the generators named
 genguard:
   script:
     - |
-      tag=v0.5.0
+      tag=v0.5.1
       version=${tag#v}
       asset="genguard_${version}_linux_amd64.tar.gz"
       curl -fsSL "https://github.com/wuddleko/genguard/releases/download/${tag}/${asset}" -o "$asset"
@@ -112,7 +112,7 @@ genguard:
 
 ```yaml
       - uses: actions/checkout@v4
-      - run: go install github.com/wuddleko/genguard/cmd/genguard@v0.5.0
+      - run: go install github.com/wuddleko/genguard/cmd/genguard@v0.5.1
       - run: genguard check
 ```
 
@@ -124,7 +124,7 @@ Place `genguard.yaml` or `genguard.yml` at the repository root. Paths in `output
 
 ```yaml
       - uses: actions/checkout@v4
-      - run: go install github.com/wuddleko/genguard/cmd/genguard@v0.5.0
+      - run: go install github.com/wuddleko/genguard/cmd/genguard@v0.5.1
       - run: genguard check --all
 ```
 
@@ -215,8 +215,8 @@ See [examples/README.md](../examples/README.md) for copy-paste `genguard.yaml` t
 Tag a version to trigger GoReleaser:
 
 ```bash
-git tag v0.5.0
-git push origin v0.5.0
+git tag v0.5.1
+git push origin v0.5.1
 ```
 
-The [release workflow](../.github/workflows/release.yml) publishes archives for Linux and macOS (`amd64`, `arm64`) and Windows (`amd64`), plus `checksums.txt`. Bump `default_tag` in [install.sh](../install.sh), and the install pins in the README and this file, to the tag you are cutting. That commit has to contain `install.sh` before a raw URL for the tag will serve the script. Write a downloaded `install.sh` to a new file (`script=$(mktemp)`) before running it. Each archive includes the binary, `LICENSE`, `README.md`, `SECURITY.md`, `docs/ci.md`, `genguard.example.yaml`, and `examples/`. Archive filenames use the tag without the `v` (`genguard_0.5.0_linux_amd64.tar.gz`). On Windows the binary is `genguard.exe`; group commands use `sh`/`bash` when present, otherwise `%COMSPEC% /C` (typically `cmd.exe`).
+The [release workflow](../.github/workflows/release.yml) publishes archives for Linux and macOS (`amd64`, `arm64`) and Windows (`amd64`), plus `checksums.txt`. Bump `default_tag` in [install.sh](../install.sh), and the install pins in the README and this file, to the tag you are cutting. That commit has to contain `install.sh` before a raw URL for the tag will serve the script. Write a downloaded `install.sh` to a new file (`script=$(mktemp)`) before running it. Each archive includes the binary, `LICENSE`, `README.md`, `SECURITY.md`, `docs/ci.md`, `genguard.example.yaml`, and `examples/`. Archive filenames use the tag without the `v` (`genguard_0.5.1_linux_amd64.tar.gz`). On Windows the binary is `genguard.exe`; group commands use `sh`/`bash` when present, otherwise `%COMSPEC% /C` (typically `cmd.exe`).

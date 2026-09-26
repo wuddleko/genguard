@@ -58,7 +58,7 @@ Put `genguard.yaml` (or `genguard.yml`) next to the generated files, outside any
 With Go 1.22+:
 
 ```bash
-go install github.com/wuddleko/genguard/cmd/genguard@v0.5.0
+go install github.com/wuddleko/genguard/cmd/genguard@v0.5.1
 genguard check
 ```
 
@@ -122,7 +122,7 @@ A match prints `Generated files match the generators.` and exits 0. Drift prints
 With Go 1.22+:
 
 ```bash
-go install github.com/wuddleko/genguard/cmd/genguard@v0.5.0
+go install github.com/wuddleko/genguard/cmd/genguard@v0.5.1
 ```
 
 `$(go env GOPATH)/bin` has to be on your `PATH`. From a checkout of this repository: `make install` or `go install ./cmd/genguard`.
