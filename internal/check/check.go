@@ -44,8 +44,8 @@ func CheckSince(cfg config.Config, since string) (ConfigResult, error) {
 	return checkSince(cfg, since, commandLog{})
 }
 
-func CheckSinceLog(cfg config.Config, since string, log io.Writer) (ConfigResult, error) {
-	return checkSince(cfg, since, commandLog{w: log})
+func CheckSinceLog(cfg config.Config, since string, log io.Writer, quiet bool) (ConfigResult, error) {
+	return checkSince(cfg, since, commandLog{w: log, quiet: quiet})
 }
 
 func checkSince(cfg config.Config, since string, log commandLog) (ConfigResult, error) {

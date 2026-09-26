@@ -15,8 +15,8 @@ func CheckSinceIsolated(path, since string) (ConfigResult, error) {
 	return checkSinceIsolated(path, since, commandLog{})
 }
 
-func CheckSinceIsolatedLog(path, since string, log io.Writer) (ConfigResult, error) {
-	return checkSinceIsolated(path, since, commandLog{w: log})
+func CheckSinceIsolatedLog(path, since string, log io.Writer, quiet bool) (ConfigResult, error) {
+	return checkSinceIsolated(path, since, commandLog{w: log, quiet: quiet})
 }
 
 func checkSinceIsolated(path, since string, log commandLog) (ConfigResult, error) {

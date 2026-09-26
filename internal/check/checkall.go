@@ -16,6 +16,7 @@ type CheckAllOptions struct {
 	Since    string
 	Isolated bool
 	Log      io.Writer
+	Quiet    bool
 }
 
 func CheckAll(opts CheckAllOptions) (RunResult, error) {
@@ -29,22 +30,22 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 	}
 	if opts.Isolated {
 		for _, configPath := range paths {
-			run.Configs = append(run.Configs, checkOneIsolated(configPath, base, streamFor(repoRoot, configPath, opts.Log)))
+			run.Configs = append(run.Configs, checkOneIsolated(configPath, base, streamFor(repoRoot, configPath, opts.Log, opts.Quiet)))
 		}
 		return run, nil
 	}
 	damage := map[string]pathSnap{}
 	for _, configPath := range paths {
-		run.Configs = append(run.Configs, checkOne(configPath, base, damage, streamFor(repoRoot, configPath, opts.Log)))
+		run.Configs = append(run.Configs, checkOne(configPath, base, damage, streamFor(repoRoot, configPath, opts.Log, opts.Quiet)))
 	}
 	return run, nil
 }
 
-func streamFor(repoRoot, configPath string, log io.Writer) commandLog {
+func streamFor(repoRoot, configPath string, log io.Writer, quiet bool) commandLog {
 	if log == nil {
 		return commandLog{}
 	}
-	return commandLog{w: log, prefix: displayConfigPath(repoRoot, configPath) + ": "}
+	return commandLog{w: log, prefix: displayConfigPath(repoRoot, configPath) + ": ", quiet: quiet}
 }
 
 func discoverConfigs(opts CheckAllOptions) (repoRoot string, paths []string, base string, err error) {

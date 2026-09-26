@@ -634,7 +634,11 @@ func TestCLIAnnotationsOnDrift(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("code = %d, want 1; stderr = %q", code, stderr)
 	}
-	report, after := splitPausedReport(t, stderr)
+	const group = "::group::greeting\n::endgroup::\n"
+	if !strings.HasPrefix(stderr, group) {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	report, after := splitPausedReport(t, stderr[len(group):])
 	if !strings.Contains(report, "Summary") || !strings.Contains(report, "diff --git") {
 		t.Fatalf("report = %q", report)
 	}
@@ -653,10 +657,10 @@ func TestCLIAnnotationsOnDrift(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("json code = %d, want 1; stderr = %q", code, stderr)
 	}
-	if strings.Contains(stdout, "::error") || strings.Contains(stdout, "diff --git") || strings.Contains(stdout, "stop-commands") {
+	if strings.Contains(stdout, "::error") || strings.Contains(stdout, "diff --git") || strings.Contains(stdout, "stop-commands") || strings.Contains(stdout, "::group::") {
 		t.Fatalf("stdout = %s", stdout)
 	}
-	if stderr != annotation {
+	if stderr != group+annotation {
 		t.Fatalf("stderr = %q", stderr)
 	}
 
@@ -668,7 +672,7 @@ func TestCLIAnnotationsOnDrift(t *testing.T) {
 	if stdout != "" || strings.Contains(stderr, "::error") || !strings.Contains(stderr, "Summary") {
 		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
 	}
-	if !strings.HasPrefix(stderr, "::stop-commands::") {
+	if !strings.HasPrefix(stderr, group) || !strings.Contains(stderr, "::stop-commands::") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 }
@@ -686,25 +690,25 @@ func TestCLIAnnotationsPauseAroundCommandLog(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q", stdout)
 	}
-	report, after := splitPausedReport(t, stderr)
-	summary := strings.Index(report, "Summary\n")
-	if summary < 0 {
-		t.Fatalf("report = %q", report)
+	body, after := splitPausedReport(t, stderrAfterGroupOpen(t, stderr, "greeting"))
+	if strings.Contains(body, "Summary") {
+		t.Fatalf("body = %q", body)
 	}
-	head := report[:summary]
-	if !strings.Contains(head, "::error file=evil.go,line=1::hijacked\n") || !strings.Contains(head, "::stop-commands::hijack\n") {
-		t.Fatalf("report = %q", report)
+	if !strings.Contains(body, "::error file=evil.go,line=1::hijacked\n") || !strings.Contains(body, "::stop-commands::hijack\n") {
+		t.Fatalf("body = %q", body)
 	}
-	if !strings.Contains(report, "command failed (exit 1)") {
-		t.Fatalf("report = %q", report)
-	}
-	for _, line := range strings.Split(after, "\n") {
-		if strings.HasPrefix(line, "::error file=evil.go") || strings.HasPrefix(line, "::stop-commands::") {
-			t.Fatalf("after = %q", after)
-		}
-	}
-	if !strings.HasPrefix(after, "::error file=genguard.yaml,title=greeting::command failed (exit 1)") {
+	if !strings.HasPrefix(after, "\n::endgroup::\n") {
 		t.Fatalf("after = %q", after)
+	}
+	report, annotation := splitPausedReport(t, strings.TrimPrefix(after, "\n::endgroup::\n"))
+	if !strings.Contains(report, "Summary\n") || !strings.Contains(report, "command failed (exit 1)") {
+		t.Fatalf("report = %q", report)
+	}
+	if strings.Contains(report, "::error file=evil.go") || strings.Contains(report, "hijacked") {
+		t.Fatalf("report = %q", report)
+	}
+	if !strings.HasPrefix(annotation, "::error file=genguard.yaml,title=greeting::command failed (exit 1)") {
+		t.Fatalf("annotation = %q", annotation)
 	}
 }
 
@@ -759,19 +763,15 @@ func TestCLICheckJSONPausesCommandTail(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("code = %d, want 2; stderr = %q\nstdout = %s", code, stderr, stdout)
 	}
-	if strings.Contains(stdout, "::error") || strings.Contains(stdout, "hijacked") {
+	if strings.Contains(stdout, "::error") || strings.Contains(stdout, "hijacked") || strings.Contains(stdout, "::group::") {
 		t.Fatalf("stdout = %s", stdout)
 	}
-	report, after := splitPausedReport(t, stderr)
-	if !strings.Contains(report, "::error file=evil.go,line=1::hijacked\n") || !strings.Contains(report, "::stop-commands::hijack\n") {
-		t.Fatalf("report = %q", report)
+	body, after := splitPausedReport(t, stderrAfterGroupOpen(t, stderr, "greeting"))
+	if !strings.Contains(body, "::error file=evil.go,line=1::hijacked\n") || !strings.Contains(body, "::stop-commands::hijack\n") {
+		t.Fatalf("body = %q", body)
 	}
-	for _, line := range strings.Split(after, "\n") {
-		if strings.HasPrefix(line, "::error file=evil.go") || strings.HasPrefix(line, "::stop-commands::") {
-			t.Fatalf("after = %q", after)
-		}
-	}
-	if !strings.HasPrefix(after, "::error file=genguard.yaml,title=greeting::command failed (exit 1)") {
+	const annotation = "::error file=genguard.yaml,title=greeting::command failed (exit 1)\n"
+	if after != "\n::endgroup::\n"+annotation {
 		t.Fatalf("after = %q", after)
 	}
 }
@@ -1104,11 +1104,207 @@ func TestCLIAnnotationsLeavePlainSuccess(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d, want 0; stdout = %q stderr = %q", code, stdout, stderr)
 	}
-	if stderr != "" || strings.Contains(stdout, "::") {
+	if stderr != "::group::genguard.yaml: plain\n::endgroup::\n" || strings.Contains(stdout, "::") {
 		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
 	}
 	if !strings.Contains(stdout, "Generated files match the generators.") || !strings.Contains(stdout, "genguard.yaml") {
 		t.Fatalf("stdout = %q", stdout)
+	}
+}
+
+func TestCLIActionsGroupsRanAndSkips(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	root := initCLIRepo(t)
+	if err := os.MkdirAll(filepath.Join(root, "queries"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"queries/q.sql", "left.txt", "mid.txt", "right.txt"} {
+		if err := os.WriteFile(filepath.Join(root, rel), []byte("ok\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := testutil.WriteGenguardConfig(root, "", "", "", []testutil.GroupSpec{
+		{Name: "greeting", Command: "true", Outputs: []string{"left.txt"}},
+		{
+			Name:    "quiet",
+			Command: `python3 -c "import sys; sys.stderr.write('printed-line'+chr(10))"`,
+			Inputs:  []string{"queries/"},
+			Outputs: []string{"mid.txt"},
+		},
+		{Name: "other", Command: "true", Outputs: []string{"right.txt"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	commitRepo(t, root)
+	if err := testutil.Git(root, "branch", "base"); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"check", "--since", "base", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("code = %d, want 0; stderr = %q", code, stderr)
+	}
+	const pairs = "::group::greeting\n::endgroup::\n::group::other\n::endgroup::\n"
+	if stderr != pairs {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if strings.Contains(stderr, "printed-line") || strings.Contains(stderr, "::group::quiet") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stdout, "Generated files match the generators.") || !strings.Contains(stdout, "quiet: skipped") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+
+	stdout, stderr, code = runCLI([]string{"run", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 0 {
+		t.Fatalf("run code = %d, want 0; stderr = %q", code, stderr)
+	}
+	const ran = "::group::greeting\n::endgroup::\n::group::quiet\n::endgroup::\n::group::other\n::endgroup::\n"
+	if stderr != ran || strings.Contains(stderr, "printed-line") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if stdout != "Generated files written.\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+}
+
+func TestCLIActionsQuietTailOnce(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	root := initCLIRepo(t)
+	writeCLIConfig(t, root, "greeting", `python3 -c "import sys; sys.stderr.write('line1'+chr(10)); sys.exit(3)"`)
+	commitRepo(t, root)
+	configPath := filepath.Join(root, "genguard.yaml")
+
+	_, stderr, code := runCLI([]string{"check", "--config", configPath})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	body, after := splitPausedReport(t, stderrAfterGroupOpen(t, stderr, "greeting"))
+	if body != "greeting:\nline1\n" {
+		t.Fatalf("body = %q", body)
+	}
+	if strings.Count(stderr, "line1") != 1 {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.HasPrefix(after, "\n::endgroup::\n") {
+		t.Fatalf("after = %q", after)
+	}
+	report, annotation := splitPausedReport(t, strings.TrimPrefix(after, "\n::endgroup::\n"))
+	if !strings.Contains(report, "Summary\n") || strings.Contains(report, "line1") {
+		t.Fatalf("report = %q", report)
+	}
+	if !strings.Contains(report, "greeting: error (command failed (exit 3))") {
+		t.Fatalf("report = %q", report)
+	}
+	if !strings.HasPrefix(annotation, "::error file=genguard.yaml,title=greeting::command failed (exit 3)") {
+		t.Fatalf("annotation = %q", annotation)
+	}
+
+	t.Setenv("GENGUARD_ANNOTATIONS", "false")
+	_, stderr, code = runCLI([]string{"check", "--config", configPath})
+	if code != 2 {
+		t.Fatalf("opt-out code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if !strings.HasPrefix(stderr, "::group::greeting\n") || strings.Contains(stderr, "::error ") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(stderr, "Summary\n") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestCLIActionsVerbosePrintsOnce(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	root := initCLIRepo(t)
+	writeCLIConfig(t, root, "greeting", `python3 -c "import sys; sys.stderr.write('line1'+chr(10)); sys.exit(3)"`)
+	commitRepo(t, root)
+
+	_, stderr, code := runCLI([]string{"check", "--verbose", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	body, after := splitPausedReport(t, stderrAfterGroupOpen(t, stderr, "greeting"))
+	if body != "greeting:\nline1\n" {
+		t.Fatalf("body = %q", body)
+	}
+	if strings.Count(stderr, "line1") != 1 {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(after, "::endgroup::\n") || !strings.Contains(after, "Summary\n") {
+		t.Fatalf("after = %q", after)
+	}
+	summary := strings.Index(after, "Summary\n")
+	if strings.Contains(after[summary:], "line1") {
+		t.Fatalf("after = %q", after)
+	}
+}
+
+func TestCLIActionsJSONLeavesStdoutClean(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	root := initCLIRepo(t)
+	writeCLIConfig(t, root, "greeting", `python3 -c "import sys; sys.stderr.write('line1'+chr(10)); sys.exit(3)"`)
+	commitRepo(t, root)
+
+	stdout, stderr, code := runCLI([]string{"check", "--json", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q\nstdout = %s", code, stderr, stdout)
+	}
+	if strings.Contains(stdout, "line1") || strings.Contains(stdout, "::group::") {
+		t.Fatalf("stdout = %s", stdout)
+	}
+	body, after := splitPausedReport(t, stderrAfterGroupOpen(t, stderr, "greeting"))
+	if body != "greeting:\nline1\n" {
+		t.Fatalf("body = %q", body)
+	}
+	if strings.Count(stderr, "line1") != 1 {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.HasPrefix(after, "\n::endgroup::\n::error file=genguard.yaml,title=greeting::command failed (exit 3)") {
+		t.Fatalf("after = %q", after)
+	}
+	doc := decodeCLIJSON(t, stdout)
+	if doc.Configs[0].Groups[0].Error != "command failed (exit 3)" {
+		t.Fatalf("doc = %+v", doc)
+	}
+}
+
+func TestCLIActionsAllUsesCallerPath(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "true")
+	root := initCLIRepo(t)
+	writeCLIConfig(t, filepath.Join(root, "services", "api"), "greeting", `python3 -c "import sys; sys.stderr.write('line1'+chr(10)); sys.exit(3)"`)
+	writeCLIConfig(t, filepath.Join(root, "services", "web"), "assets", "true")
+	commitRepo(t, root)
+	testutil.Chdir(t, root)
+
+	_, stderr, code := runCLI([]string{"check", "--all"})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	api := filepath.Join("services", "api", "genguard.yaml") + ": greeting"
+	web := filepath.Join("services", "web", "genguard.yaml") + ": assets"
+	if !strings.HasPrefix(stderr, "::group::"+api+"\n") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	body, after := splitPausedReport(t, stderrAfterGroupOpen(t, stderr, api))
+	if body != api+":\nline1\n" {
+		t.Fatalf("body = %q", body)
+	}
+	if strings.Count(stderr, "line1") != 1 {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	if !strings.Contains(after, "::endgroup::\n::group::"+web+"\n::endgroup::\n") {
+		t.Fatalf("after = %q", after)
+	}
+	if !strings.Contains(after, "Summary\n") || !strings.Contains(after, "  assets: OK") {
+		t.Fatalf("after = %q", after)
+	}
+
+	_, stderr, code = runCLI([]string{"check", "--all", "--isolated"})
+	if code != 2 {
+		t.Fatalf("isolated code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if !strings.HasPrefix(stderr, "::group::"+api+"\n") || strings.Contains(stderr, "genguard-") {
+		t.Fatalf("stderr = %q", stderr)
 	}
 }
 

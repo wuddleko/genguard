@@ -57,15 +57,16 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return code
 	}
+	log, quiet := commandWriter(stderr, flags.verbose)
 	if useAll {
-		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Isolated: flags.isolated, Log: verboseLog(stderr, flags.verbose)}, flags.asJSON, "Generated files match the generators.", check.CheckAll)
+		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Isolated: flags.isolated, Log: log, Quiet: quiet}, flags.asJSON, "Generated files match the generators.", check.CheckAll)
 	}
 
 	var result check.ConfigResult
 	root := filepath.Dir(path)
 	if flags.isolated {
 		var err error
-		result, err = check.CheckSinceIsolatedLog(path, flags.since, verboseLog(stderr, flags.verbose))
+		result, err = check.CheckSinceIsolatedLog(path, flags.since, log, quiet)
 		if err != nil && len(result.Groups) == 0 {
 			return errorExit(stderr, path, err.Error())
 		}
@@ -74,7 +75,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errorExit(stderr, path, err.Error())
 		}
-		result, err = check.CheckSinceLog(cfg, flags.since, verboseLog(stderr, flags.verbose))
+		result, err = check.CheckSinceLog(cfg, flags.since, log, quiet)
 		if err != nil {
 			return errorExit(stderr, path, err.Error())
 		}
@@ -110,15 +111,16 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return code
 	}
+	log, quiet := commandWriter(stderr, flags.verbose)
 	if useAll {
-		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Log: verboseLog(stderr, flags.verbose)}, flags.asJSON, "Generated files written.", check.RunAll)
+		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Log: log, Quiet: quiet}, flags.asJSON, "Generated files written.", check.RunAll)
 	}
 
 	cfg, err := config.LoadConfig(path)
 	if err != nil {
 		return errorExit(stderr, path, err.Error())
 	}
-	result, err := check.RunSinceLog(cfg, flags.since, verboseLog(stderr, flags.verbose))
+	result, err := check.RunSinceLog(cfg, flags.since, log, quiet)
 	if err != nil {
 		return errorExit(stderr, path, err.Error())
 	}
@@ -170,11 +172,13 @@ func parseCommandFlags(args []string, stderr io.Writer, usage commandUsage) (com
 	}, 0, true
 }
 
-func verboseLog(stderr io.Writer, on bool) io.Writer {
-	if !on {
-		return nil
+// commandWriter is stderr when lines are streamed or Actions is grouping.
+// The bool is quiet: Actions still opens groups, and only --verbose copies lines.
+func commandWriter(stderr io.Writer, verbose bool) (io.Writer, bool) {
+	if !verbose && os.Getenv("GITHUB_ACTIONS") != "true" {
+		return nil, false
 	}
-	return stderr
+	return stderr, !verbose
 }
 
 func resolveConfigPath(stderr io.Writer, flags commandFlags) (path string, useAll bool, code int, ok bool) {

@@ -23,7 +23,7 @@ func RunAll(opts CheckAllOptions) (RunResult, error) {
 		Configs:  make([]ConfigRun, 0, len(paths)),
 	}
 	for _, configPath := range paths {
-		run.Configs = append(run.Configs, runOne(configPath, base, streamFor(repoRoot, configPath, opts.Log)))
+		run.Configs = append(run.Configs, runOne(configPath, base, streamFor(repoRoot, configPath, opts.Log, opts.Quiet)))
 	}
 	return run, nil
 }
@@ -38,8 +38,8 @@ func RunSince(cfg config.Config, since string) (ConfigResult, error) {
 	return runSince(cfg, since, commandLog{})
 }
 
-func RunSinceLog(cfg config.Config, since string, log io.Writer) (ConfigResult, error) {
-	return runSince(cfg, since, commandLog{w: log})
+func RunSinceLog(cfg config.Config, since string, log io.Writer, quiet bool) (ConfigResult, error) {
+	return runSince(cfg, since, commandLog{w: log, quiet: quiet})
 }
 
 func runSince(cfg config.Config, since string, log commandLog) (ConfigResult, error) {
