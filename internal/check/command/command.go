@@ -1,30 +1,28 @@
-package check
+package command
 
 import (
-	"io"
+	"fmt"
 	"os/exec"
 	"strings"
 	"time"
 )
 
-func RunCommand(root, command string) (string, error) {
-	return runCommand(root, command, nil, "", 0)
+func Run(root, command string, onLine func(string), timeout time.Duration) (string, error) {
+	return run(root, command, onLine, timeout)
 }
 
-func runCommand(root, command string, log io.Writer, header string, timeout time.Duration) (string, error) {
+func run(root, command string, onLine func(string), timeout time.Duration) (string, error) {
 	command = strings.TrimSpace(command)
 	if command == "" {
-		return "", newGenguardError("command is empty")
+		return "", fmt.Errorf("command is empty")
 	}
 
 	name, args := shellInvocation(command)
 	cmd := exec.Command(name, args...)
 	cmd.Dir = root
 	var ring tailRing
-	stream := newCommandStream(log, header)
-	defer stream.finish()
-	if stream.active {
-		ring.onLine = stream.onLine
+	if onLine != nil {
+		ring.onLine = onLine
 	}
 	cmd.Stdout = &ring
 	cmd.Stderr = &ring
@@ -54,11 +52,7 @@ func runCommand(root, command string, log io.Writer, header string, timeout time
 	}
 	ring.flush()
 	if timedOut {
-		msg := newGenguardError("command timed out after %s", timeout)
-		if stream.streamed() {
-			return "", msg
-		}
-		return ring.String(), msg
+		return ring.String(), fmt.Errorf("command timed out after %s", timeout)
 	}
 	if err == nil {
 		return "", nil
@@ -71,10 +65,16 @@ func runCommand(root, command string, log io.Writer, header string, timeout time
 	}
 	tail := ring.String()
 	if tail == "" {
-		return "", newGenguardError("command failed (exit %d): no output", exitCode)
+		return "", fmt.Errorf("command failed (exit %d): no output", exitCode)
 	}
-	if stream.streamed() {
-		return "", newGenguardError("command failed (exit %d)", exitCode)
+	return tail, fmt.Errorf("command failed (exit %d)", exitCode)
+}
+
+func errorsAsExit(err error, target **exec.ExitError) bool {
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		return false
 	}
-	return tail, newGenguardError("command failed (exit %d)", exitCode)
+	*target = exitErr
+	return true
 }

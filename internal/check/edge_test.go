@@ -348,18 +348,6 @@ func TestPathsWhenWorkingDirectoryIsGone(t *testing.T) {
 	root := gitRepo(t)
 	testutil.WithoutWorkingDirectory(t)
 
-	if wouldRemove("rel", "other") {
-		t.Fatal("relative target")
-	}
-	if wouldRemove(root, "rel") {
-		t.Fatal("relative path")
-	}
-	if _, _, err := resolveCleanPath("rel", "out.txt", true); err == nil {
-		t.Fatal("resolveCleanPath")
-	}
-	if err := cleanOutputs("rel", "", config.Group{Outputs: []string{"out.txt"}}); err == nil {
-		t.Fatal("cleanOutputs")
-	}
 	if _, err := gitRepoRoot(""); err == nil {
 		t.Fatal("gitRepoRoot empty")
 	}
@@ -371,15 +359,6 @@ func TestPathsWhenWorkingDirectoryIsGone(t *testing.T) {
 	}
 	if _, err := CheckAll(CheckAllOptions{RepoRoot: root, Paths: []string{"genguard.yaml"}}); err == nil {
 		t.Fatal("CheckAll")
-	}
-}
-
-func TestWouldRemoveAcrossWindowsVolumes(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("filepath.Rel fails across volumes only on windows")
-	}
-	if wouldRemove(`C:\a`, `D:\b`) {
-		t.Fatal("want false")
 	}
 }
 

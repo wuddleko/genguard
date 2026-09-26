@@ -1,6 +1,6 @@
 //go:build unix
 
-package check
+package clean
 
 import (
 	"errors"

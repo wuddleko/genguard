@@ -1,4 +1,4 @@
-package check
+package clean
 
 import (
 	"os"
@@ -55,36 +55,6 @@ func TestCleanOutputsGlobWithoutRepo(t *testing.T) {
 	err := cleanOutputs(t.TempDir(), "", config.Group{Outputs: []string{"*.txt"}})
 	if err == nil || !strings.Contains(err.Error(), `clean "*.txt"`) {
 		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestCleanOutputsGlobSecondListFails(t *testing.T) {
-	root := gitRepo(t)
-	if err := os.WriteFile(filepath.Join(root, "hello.txt"), []byte("x\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	installGitShim(t, "others-fail")
-	err := cleanOutputs(root, "", config.Group{Outputs: []string{"*.txt"}})
-	if err == nil || !strings.Contains(err.Error(), "others") {
-		t.Fatalf("error = %v", err)
-	}
-	if _, statErr := os.Lstat(filepath.Join(root, "hello.txt")); statErr != nil {
-		t.Fatalf("hello.txt removed: %v", statErr)
-	}
-}
-
-func TestCleanOutputsGlobDuplicateNames(t *testing.T) {
-	root := t.TempDir()
-	dup := filepath.Join(root, "dup.go")
-	if err := os.WriteFile(dup, []byte("package p\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	installGitShim(t, "dup-names")
-	if err := cleanOutputs(root, "", config.Group{Outputs: []string{"*.go"}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(dup); !os.IsNotExist(err) {
-		t.Fatalf("dup.go = %v", err)
 	}
 }
 

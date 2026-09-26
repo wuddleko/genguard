@@ -1,4 +1,4 @@
-package check
+package command
 
 import (
 	"errors"

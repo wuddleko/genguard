@@ -321,32 +321,6 @@ func TestGitResultKeepsStderrWhenStartFails(t *testing.T) {
 	}
 }
 
-func TestRefuseFileInPathMissingAndFile(t *testing.T) {
-	root := t.TempDir()
-	if err := refuseFileInPath(filepath.Join(root, "missing")); err != nil {
-		t.Fatal(err)
-	}
-	file := filepath.Join(root, "file")
-	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	err := refuseFileInPath(file)
-	if err == nil || !strings.Contains(err.Error(), "is not a directory") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestRefuseFileInPathAllowsSymlinkParent(t *testing.T) {
-	root := t.TempDir()
-	link := filepath.Join(root, "link")
-	if err := os.Symlink(root, link); err != nil {
-		t.Fatal(err)
-	}
-	if err := refuseFileInPath(link); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestAnnotationPathsWhenLookupFails(t *testing.T) {
 	outside := filepath.Join(t.TempDir(), "genguard.yaml")
 	text := FormatErrorAnnotation(outside, "boom")

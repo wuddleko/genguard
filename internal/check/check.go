@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/wuddleko/genguard/internal/check/clean"
 	"github.com/wuddleko/genguard/internal/config"
 )
 
@@ -131,9 +132,9 @@ func runPreparedGroup(root string, group config.Group, base, configPath string, 
 	defer log.beginGroup(group.Name)()
 
 	if group.Clean {
-		if err := cleanOutputs(root, configPath, group); err != nil {
+		if err := clean.Outputs(root, configPath, group); err != nil {
 			result.Status = GroupError
-			result.Err = err
+			result.Err = newGenguardError("%s", err.Error())
 			return result
 		}
 		if afterClean != nil {

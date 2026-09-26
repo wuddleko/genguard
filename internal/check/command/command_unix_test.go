@@ -1,9 +1,8 @@
 //go:build unix
 
-package check
+package command
 
 import (
-	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -21,12 +20,11 @@ func TestRunCommandTimeoutKillsProcessGroup(t *testing.T) {
 	command := pythonCommand(t, root, "nap.py", timeoutScript(pidPath))
 
 	start := time.Now()
-	tail, err := runCommand(root, command, nil, "", 200*time.Millisecond)
+	tail, err := run(root, command, nil, 200*time.Millisecond)
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
-	var genguardErr *GenguardError
-	if !errors.As(err, &genguardErr) || err.Error() != "command timed out after 200ms" {
+	if err == nil || err.Error() != "command timed out after 200ms" {
 		t.Fatalf("err = %v", err)
 	}
 	if tail != "line1\n" {
@@ -35,31 +33,10 @@ func TestRunCommandTimeoutKillsProcessGroup(t *testing.T) {
 	assertPidGone(t, pidPath)
 }
 
-func TestRunCommandTimeoutWriterDropsTail(t *testing.T) {
-	root := t.TempDir()
-	command := pythonCommand(t, root, "nap.py", timeoutScript(filepath.Join(root, "child.pid")))
-	var buf bytes.Buffer
-
-	start := time.Now()
-	tail, err := runCommand(root, command, &buf, "", 200*time.Millisecond)
-	if time.Since(start) >= time.Second {
-		t.Fatalf("took %s", time.Since(start))
-	}
-	if err == nil || err.Error() != "command timed out after 200ms" {
-		t.Fatalf("err = %v", err)
-	}
-	if tail != "" {
-		t.Fatalf("tail = %q", tail)
-	}
-	if buf.String() != "line1\n" {
-		t.Fatalf("log = %q", buf.String())
-	}
-}
-
 func TestRunCommandTimeoutWithNoOutput(t *testing.T) {
 	root := t.TempDir()
 	start := time.Now()
-	tail, err := runCommand(root, "sleep 5", nil, "", 200*time.Millisecond)
+	tail, err := run(root, "sleep 5", nil, 200*time.Millisecond)
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}

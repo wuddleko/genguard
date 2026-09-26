@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/wuddleko/genguard/internal/check/command"
 )
 
 type commandLog struct {
@@ -155,4 +157,25 @@ func (s *commandStream) finish() {
 
 func (s *commandStream) streamed() bool {
 	return s.w != nil && s.active
+}
+
+func RunCommand(root, commandText string) (string, error) {
+	return runCommand(root, commandText, nil, "", 0)
+}
+
+func runCommand(root, commandText string, log io.Writer, header string, timeout time.Duration) (string, error) {
+	stream := newCommandStream(log, header)
+	defer stream.finish()
+	var onLine func(string)
+	if stream.active {
+		onLine = stream.onLine
+	}
+	tail, err := command.Run(root, commandText, onLine, timeout)
+	if err != nil && stream.streamed() {
+		tail = ""
+	}
+	if err != nil {
+		return tail, newGenguardError("%s", err.Error())
+	}
+	return tail, nil
 }

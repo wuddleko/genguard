@@ -1,6 +1,7 @@
-package check
+package clean
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -8,6 +9,12 @@ import (
 
 	"github.com/wuddleko/genguard/internal/config"
 )
+
+const globChars = "*?[]"
+
+func Outputs(root, configPath string, group config.Group) error {
+	return cleanOutputs(root, configPath, group)
+}
 
 type cleanTarget struct {
 	spec   string
@@ -43,7 +50,7 @@ func cleanOutputs(root, configPath string, group config.Group) error {
 	}
 	for _, item := range planned {
 		if err := removeCleanTarget(absRoot, item.target, item.isDir); err != nil {
-			return newGenguardError("clean %q: %s", item.spec, err.Error())
+			return fmt.Errorf("clean %q: %s", item.spec, err.Error())
 		}
 	}
 	return nil
@@ -70,7 +77,7 @@ func planCleanGlob(root, spec string) ([]cleanTarget, error) {
 	}
 	names, err := globCleanFiles(root, spec)
 	if err != nil {
-		return nil, newGenguardError("clean %q: %s", spec, err.Error())
+		return nil, fmt.Errorf("clean %q: %s", spec, err.Error())
 	}
 	items := make([]cleanTarget, 0, len(names))
 	for _, name := range names {
@@ -80,7 +87,7 @@ func planCleanGlob(root, spec string) ([]cleanTarget, error) {
 			return nil, err
 		}
 		if isDir {
-			return nil, newGenguardError("clean refuses %q: glob matched directory %q", spec, rel)
+			return nil, fmt.Errorf("clean refuses %q: glob matched directory %q", spec, rel)
 		}
 		items = append(items, cleanTarget{spec: spec, target: target, isDir: false})
 	}
@@ -103,14 +110,14 @@ func refuseGlobPrefix(root, spec string) error {
 
 func validateGlobSpec(spec string) error {
 	if spec == "" {
-		return newGenguardError("clean refuses an empty output path")
+		return fmt.Errorf("clean refuses an empty output path")
 	}
 	if filepath.IsAbs(spec) {
-		return newGenguardError("clean refuses absolute output %q", spec)
+		return fmt.Errorf("clean refuses absolute output %q", spec)
 	}
 	for _, part := range strings.Split(filepath.ToSlash(spec), "/") {
 		if part == ".." {
-			return newGenguardError("clean refuses %q", spec)
+			return fmt.Errorf("clean refuses %q", spec)
 		}
 	}
 	return nil
@@ -142,29 +149,29 @@ func globCleanFiles(root, spec string) ([]string, error) {
 
 func guardCleanTarget(absRoot string, item cleanTarget, gitDir string, configPaths []string) error {
 	if wouldRemove(item.target, gitDir) {
-		return newGenguardError("clean refuses %q: mixed tree (would delete .git)", item.spec)
+		return fmt.Errorf("clean refuses %q: mixed tree (would delete .git)", item.spec)
 	}
 	gitPath, configHit, err := findProtected(item.target)
 	if err != nil {
-		return newGenguardError("clean %q: %s", item.spec, err.Error())
+		return fmt.Errorf("clean %q: %s", item.spec, err.Error())
 	}
 	if gitPath != "" {
 		rel, relErr := filepath.Rel(absRoot, gitPath)
 		if relErr != nil {
 			rel = gitPath
 		}
-		return newGenguardError("clean refuses %q: mixed tree (would delete %s)", item.spec, filepath.ToSlash(rel))
+		return fmt.Errorf("clean refuses %q: mixed tree (would delete %s)", item.spec, filepath.ToSlash(rel))
 	}
 	if configHit != "" {
-		return newGenguardError("clean refuses %q: mixed tree (would delete the config file)", item.spec)
+		return fmt.Errorf("clean refuses %q: mixed tree (would delete the config file)", item.spec)
 	}
 	for _, path := range configPaths {
 		removes, err := removesConfig(item.target, path)
 		if err != nil {
-			return newGenguardError("clean %q: %s", item.spec, err.Error())
+			return fmt.Errorf("clean %q: %s", item.spec, err.Error())
 		}
 		if removes {
-			return newGenguardError("clean refuses %q: mixed tree (would delete the config file)", item.spec)
+			return fmt.Errorf("clean refuses %q: mixed tree (would delete the config file)", item.spec)
 		}
 	}
 	return nil
@@ -290,19 +297,19 @@ func statPath(path string, follow bool) (os.FileInfo, error) {
 func resolveCleanPath(root, spec string, rejectGlob bool) (string, bool, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
-		return "", false, newGenguardError("clean refuses an empty output path")
+		return "", false, fmt.Errorf("clean refuses an empty output path")
 	}
 	if rejectGlob && isGlob(spec) {
-		return "", false, newGenguardError("clean refuses glob output %q", spec)
+		return "", false, fmt.Errorf("clean refuses glob output %q", spec)
 	}
 	if filepath.IsAbs(spec) {
-		return "", false, newGenguardError("clean refuses absolute output %q", spec)
+		return "", false, fmt.Errorf("clean refuses absolute output %q", spec)
 	}
 
 	dirHint := strings.HasSuffix(spec, "/") || strings.HasSuffix(spec, string(filepath.Separator))
 	cleaned := filepath.Clean(spec)
 	if cleaned == "." || relEscapes(cleaned) {
-		return "", false, newGenguardError("clean refuses %q", spec)
+		return "", false, fmt.Errorf("clean refuses %q", spec)
 	}
 
 	absRoot, err := filepath.Abs(root)
@@ -312,7 +319,7 @@ func resolveCleanPath(root, spec string, rejectGlob bool) (string, bool, error) 
 	target := filepath.Clean(filepath.Join(absRoot, cleaned))
 	rel, ok := relInside(absRoot, target)
 	if !ok || rel == "." {
-		return "", false, newGenguardError("clean refuses %q", spec)
+		return "", false, fmt.Errorf("clean refuses %q", spec)
 	}
 
 	if err := refuseSymlinksInPath(absRoot, target); err != nil {
@@ -323,7 +330,7 @@ func resolveCleanPath(root, spec string, rejectGlob bool) (string, bool, error) 
 	info, err := os.Lstat(target)
 	if err == nil {
 		if info.Mode()&os.ModeSymlink != 0 {
-			return "", false, newGenguardError("clean refuses symlink output %q", spec)
+			return "", false, fmt.Errorf("clean refuses symlink output %q", spec)
 		}
 		if info.IsDir() {
 			isDir = true
@@ -339,7 +346,7 @@ func pathComponents(rel string) ([]string, error) {
 			continue
 		}
 		if part == ".." {
-			return nil, newGenguardError("clean refuses %q", rel)
+			return nil, fmt.Errorf("clean refuses %q", rel)
 		}
 		parts = append(parts, part)
 	}
@@ -358,7 +365,7 @@ func refuseFileInPath(parent string) error {
 	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return nil
 	}
-	return newGenguardError("%s is not a directory", parent)
+	return fmt.Errorf("%s is not a directory", parent)
 }
 
 func refuseSymlinksInPath(root, target string) error {
@@ -374,7 +381,7 @@ func refuseSymlinksInPath(root, target string) error {
 }
 
 func cleanSymlinkError(path string) error {
-	return newGenguardError("clean refuses symlink in output path %q", path)
+	return fmt.Errorf("clean refuses symlink in output path %q", path)
 }
 
 func refuseSymlinks(root string, parts []string) error {
@@ -493,7 +500,23 @@ func removeCleanTarget(root, target string, isDir bool) error {
 		return err
 	}
 	if len(parts) == 0 {
-		return newGenguardError("clean refuses %q", rel)
+		return fmt.Errorf("clean refuses %q", rel)
 	}
 	return removePinned(root, parts, isDir)
+}
+
+func relInside(root, path string) (string, bool) {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || relEscapes(rel) {
+		return "", false
+	}
+	return rel, true
+}
+
+func relEscapes(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func isGlob(spec string) bool {
+	return strings.ContainsAny(spec, globChars)
 }

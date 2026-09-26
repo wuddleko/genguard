@@ -1,6 +1,6 @@
 //go:build windows
 
-package check
+package command
 
 import (
 	"errors"
@@ -21,12 +21,11 @@ func TestRunCommandTimeoutKillsProcessGroup(t *testing.T) {
 
 	const limit = 3 * time.Second
 	start := time.Now()
-	tail, err := runCommand(root, command, nil, "", limit)
+	tail, err := run(root, command, nil, limit)
 	if time.Since(start) >= 6*time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
-	var genguardErr *GenguardError
-	if !errors.As(err, &genguardErr) || err.Error() != "command timed out after 3s" {
+	if err == nil || err.Error() != "command timed out after 3s" {
 		t.Fatalf("err = %v", err)
 	}
 	if tail != "line1\n" {
