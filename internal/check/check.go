@@ -129,8 +129,9 @@ func checkGroup(root string, group config.Group, damage map[string]pathSnap, bas
 }
 
 type commandLog struct {
-	w      io.Writer
-	prefix string
+	w       io.Writer
+	prefix  string
+	timeout time.Duration
 }
 
 func (c commandLog) label(name string) string {
@@ -171,7 +172,7 @@ func runPreparedGroup(root string, group config.Group, base, configPath string, 
 	if log.w != nil {
 		header = log.label(group.Name)
 	}
-	tail, err := runCommand(root, group.Command, log.w, header, 0)
+	tail, err := runCommand(root, group.Command, log.w, header, log.timeout)
 	if err != nil {
 		result.Status = GroupError
 		result.CommandTail = tail
