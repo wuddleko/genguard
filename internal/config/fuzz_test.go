@@ -17,6 +17,7 @@ func FuzzParseConfig(f *testing.F) {
 	f.Add([]byte("groups:\n  - name: greeting\n    command: echo\n    outputs:\n      - '  '\n"))
 	f.Add([]byte("clean: 1\ngroups:\n  - command: echo\n    outputs:\n      - gen/\n"))
 	f.Add([]byte("clean: true\ngroups:\n  - command: echo\n    outputs:\n      - gen/\n    clean: false\n"))
+	f.Add([]byte("timeout: 200ms\ngroups:\n  - command: echo\n    outputs:\n      - gen/\n    timeout: 1s\n"))
 	f.Add([]byte("tools:\n  - name: buf\n    version: 1.32.0\n  - name: sqlc\n    command: sqlc version\ngroups:\n  - name: protobuf\n    command: buf generate\n    tools: [buf]\n    outputs:\n      - gen/\n"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// Large inputs spend the fuzz budget in the YAML decoder.
@@ -60,6 +61,9 @@ func FuzzParseConfig(f *testing.F) {
 			names[group.Name] = i
 			if strings.TrimSpace(group.Command) == "" {
 				t.Fatalf("group %d has an empty command", i)
+			}
+			if group.Timeout < 0 {
+				t.Fatalf("group %d has timeout %s", i, group.Timeout)
 			}
 			if len(group.Outputs) == 0 {
 				t.Fatalf("group %d has no outputs", i)

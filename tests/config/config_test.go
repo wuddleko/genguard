@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wuddleko/genguard/internal/config"
 	"github.com/wuddleko/genguard/tests/testutil"
@@ -383,6 +384,103 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.match, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			configPath := filepath.Join(root, "genguard.yaml")
+			if err := os.WriteFile(configPath, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := config.LoadConfig(configPath)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.match) {
+				t.Fatalf("error = %q, want substring %q", err, tc.match)
+			}
+		})
+	}
+}
+
+func TestLoadConfigTimeout(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	configPath := filepath.Join(root, "genguard.yaml")
+	content := "" +
+		"timeout: 200ms\n" +
+		"groups:\n" +
+		"  - command: \"true\"\n" +
+		"    outputs:\n" +
+		"      - a.txt\n" +
+		"  - command: \"true\"\n" +
+		"    timeout: 2s\n" +
+		"    outputs:\n" +
+		"      - b.txt\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Groups[0].Timeout != 200*time.Millisecond {
+		t.Fatalf("group 0 timeout = %s", cfg.Groups[0].Timeout)
+	}
+	if cfg.Groups[1].Timeout != 2*time.Second {
+		t.Fatalf("group 1 timeout = %s", cfg.Groups[1].Timeout)
+	}
+}
+
+func TestLoadConfigTimeoutRejectsBadValues(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		content string
+		match   string
+	}{
+		{
+			"zero",
+			"timeout: 0s\ngroups:\n  - command: \"true\"\n    outputs:\n      - a.txt\n",
+			"timeout must be a duration greater than zero",
+		},
+		{
+			"negative",
+			"timeout: -1s\ngroups:\n  - command: \"true\"\n    outputs:\n      - a.txt\n",
+			"timeout must be a duration greater than zero",
+		},
+		{
+			"number",
+			"timeout: 1\ngroups:\n  - command: \"true\"\n    outputs:\n      - a.txt\n",
+			"timeout must be a duration string",
+		},
+		{
+			"group zero",
+			"groups:\n  - command: \"true\"\n    timeout: 0s\n    outputs:\n      - a.txt\n",
+			"groups[0].timeout must be a duration greater than zero",
+		},
+		{
+			"group negative",
+			"groups:\n  - command: \"true\"\n    timeout: -5ms\n    outputs:\n      - a.txt\n",
+			"groups[0].timeout must be a duration greater than zero",
+		},
+		{
+			"group bool",
+			"groups:\n  - command: \"true\"\n    timeout: true\n    outputs:\n      - a.txt\n",
+			"groups[0].timeout must be a duration string",
+		},
+		{
+			"bad string",
+			"timeout: nope\ngroups:\n  - command: \"true\"\n    outputs:\n      - a.txt\n",
+			"timeout must be a Go duration",
+		},
+		{
+			"group bad string",
+			"groups:\n  - command: \"true\"\n    timeout: 1min\n    outputs:\n      - a.txt\n",
+			"groups[0].timeout must be a Go duration",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
 			configPath := filepath.Join(root, "genguard.yaml")

@@ -19,10 +19,12 @@ var versionPattern = regexp.MustCompile(`v?\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)
 
 // toolKey identifies one probe. root is the working directory Capture uses,
 // so the same command in another config or worktree is a different probe.
+// timeout is that group's deadline, so a different limit is a different probe.
 type toolKey struct {
 	root    string
 	command string
 	want    string
+	timeout time.Duration
 }
 
 type cachedProbe struct {
@@ -34,22 +36,22 @@ type toolCache struct {
 	entries map[toolKey]cachedProbe
 }
 
-func (c *toolCache) lookup(root, command, want string) (cachedProbe, bool) {
+func (c *toolCache) lookup(root, command, want string, timeout time.Duration) (cachedProbe, bool) {
 	if c == nil || c.entries == nil {
 		return cachedProbe{}, false
 	}
-	hit, ok := c.entries[toolKey{root: root, command: command, want: want}]
+	hit, ok := c.entries[toolKey{root: root, command: command, want: want, timeout: timeout}]
 	return hit, ok
 }
 
-func (c *toolCache) remember(root, command, want, have, detail string) {
+func (c *toolCache) remember(root, command, want string, timeout time.Duration, have, detail string) {
 	if c == nil {
 		return
 	}
 	if c.entries == nil {
 		c.entries = map[toolKey]cachedProbe{}
 	}
-	c.entries[toolKey{root: root, command: command, want: want}] = cachedProbe{have: have, detail: detail}
+	c.entries[toolKey{root: root, command: command, want: want, timeout: timeout}] = cachedProbe{have: have, detail: detail}
 }
 
 func (p cachedProbe) apply(name, want string) (ToolResult, error) {
@@ -91,11 +93,11 @@ func probeTool(root string, tool config.Tool, timeout time.Duration, cache *tool
 	if commandText == "" {
 		commandText = tool.Name + " --version"
 	}
-	if hit, ok := cache.lookup(root, commandText, item.Want); ok {
+	if hit, ok := cache.lookup(root, commandText, item.Want, timeout); ok {
 		return hit.apply(tool.Name, item.Want)
 	}
 	item, detail, err := runProbe(root, tool, commandText, item, timeout)
-	cache.remember(root, commandText, item.Want, item.Have, detail)
+	cache.remember(root, commandText, item.Want, timeout, item.Have, detail)
 	return item, err
 }
 

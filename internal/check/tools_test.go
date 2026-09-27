@@ -431,6 +431,110 @@ func TestObservedVersion(t *testing.T) {
 	}
 }
 
+func TestDifferentTimeoutsProbeSeparately(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "left.txt", "ok\n")
+	writeTracked(t, root, "right.txt", "ok\n")
+	command, probes := writeCountingProbe(t, "import time\ntime.sleep(0.5)\nprint('1.32.0')\n")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Tools: []config.Tool{{
+			Name:    "buf",
+			Version: "1.32.0",
+			Command: command,
+		}},
+		Groups: []config.Group{
+			{
+				Name:    "short",
+				Command: `python3 -c "open('short-ran','w').close()"`,
+				Outputs: []string{"left.txt"},
+				Tools:   []string{"buf"},
+				Timeout: 200 * time.Millisecond,
+			},
+			{
+				Name:    "long",
+				Command: "true",
+				Outputs: []string{"right.txt"},
+				Tools:   []string{"buf"},
+				Timeout: 2 * time.Second,
+			},
+		},
+	}
+
+	start := time.Now()
+	result, err := checkConfig(cfg, "", nil, commandLog{})
+	if time.Since(start) >= 3*time.Second {
+		t.Fatalf("took %s", time.Since(start))
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := probeCount(t, probes); n != 2 {
+		t.Fatalf("probes = %d, want 2", n)
+	}
+	short := result.Groups[0]
+	if short.Status != GroupError || short.Err == nil || short.Err.Error() != "buf: command timed out after 200ms" {
+		t.Fatalf("short = %+v", short)
+	}
+	assertAbsent(t, filepath.Join(root, "short-ran"))
+	long := result.Groups[1]
+	if long.Status != GroupOK || long.Err != nil || len(long.Tools) != 1 || long.Tools[0].Have != "1.32.0" {
+		t.Fatalf("long = %+v", long)
+	}
+}
+
+func TestShorterTimeoutDoesNotReuseALongerProbe(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "left.txt", "ok\n")
+	writeTracked(t, root, "right.txt", "ok\n")
+	command, probes := writeCountingProbe(t, "import time\ntime.sleep(0.5)\nprint('1.32.0')\n")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Tools: []config.Tool{{
+			Name:    "buf",
+			Version: "1.32.0",
+			Command: command,
+		}},
+		Groups: []config.Group{
+			{
+				Name:    "long",
+				Command: "true",
+				Outputs: []string{"left.txt"},
+				Tools:   []string{"buf"},
+				Timeout: 2 * time.Second,
+			},
+			{
+				Name:    "short",
+				Command: `python3 -c "open('short-ran','w').close()"`,
+				Outputs: []string{"right.txt"},
+				Tools:   []string{"buf"},
+				Timeout: 200 * time.Millisecond,
+			},
+		},
+	}
+
+	start := time.Now()
+	result, err := checkConfig(cfg, "", nil, commandLog{})
+	if time.Since(start) >= 3*time.Second {
+		t.Fatalf("took %s", time.Since(start))
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := probeCount(t, probes); n != 2 {
+		t.Fatalf("probes = %d, want 2", n)
+	}
+	long := result.Groups[0]
+	if long.Status != GroupOK || long.Err != nil || len(long.Tools) != 1 || long.Tools[0].Have != "1.32.0" {
+		t.Fatalf("long = %+v", long)
+	}
+	short := result.Groups[1]
+	if short.Status != GroupError || short.Err == nil || short.Err.Error() != "buf: command timed out after 200ms" {
+		t.Fatalf("short = %+v", short)
+	}
+	assertAbsent(t, filepath.Join(root, "short-ran"))
+}
+
 func TestSameToolProbesOnceAcrossGroups(t *testing.T) {
 	root := gitRepo(t)
 	writeTracked(t, root, "left.txt", "ok\n")

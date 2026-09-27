@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"gopkg.in/yaml.v3"
@@ -32,6 +33,7 @@ type Group struct {
 	Inputs  []string
 	Clean   bool
 	Tools   []string
+	Timeout time.Duration
 }
 
 type Config struct {
@@ -197,7 +199,7 @@ func parseConfig(path string, data []byte) (Config, error) {
 		return Config{}, fmt.Errorf("%s must be a mapping", path)
 	}
 
-	if err := rejectUnknownKeys(raw, []string{"groups", "clean", "tools"}, path); err != nil {
+	if err := rejectUnknownKeys(raw, []string{"groups", "clean", "tools", "timeout"}, path); err != nil {
 		return Config{}, err
 	}
 
@@ -219,6 +221,10 @@ func parseConfig(path string, data []byte) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	defaultTimeout, err := optionalDuration(raw, "timeout", "timeout")
+	if err != nil {
+		return Config{}, err
+	}
 
 	groups := make([]Group, 0, len(groupsRaw))
 	for index, item := range groupsRaw {
@@ -227,7 +233,7 @@ func parseConfig(path string, data []byte) (Config, error) {
 			return Config{}, fmt.Errorf("groups[%d] must be a mapping", index)
 		}
 		loc := fmt.Sprintf("groups[%d]", index)
-		if err := rejectUnknownKeys(groupMap, []string{"name", "command", "outputs", "inputs", "clean", "tools"}, loc); err != nil {
+		if err := rejectUnknownKeys(groupMap, []string{"name", "command", "outputs", "inputs", "clean", "tools", "timeout"}, loc); err != nil {
 			return Config{}, err
 		}
 
@@ -265,6 +271,15 @@ func parseConfig(path string, data []byte) (Config, error) {
 			clean = groupClean.value
 		}
 
+		timeout := defaultTimeout.value
+		groupTimeout, err := optionalDuration(groupMap, "timeout", fmt.Sprintf("groups[%d].timeout", index))
+		if err != nil {
+			return Config{}, err
+		}
+		if groupTimeout.set {
+			timeout = groupTimeout.value
+		}
+
 		toolRefs, err := parseGroupTools(groupMap, loc, declared)
 		if err != nil {
 			return Config{}, err
@@ -277,6 +292,7 @@ func parseConfig(path string, data []byte) (Config, error) {
 			Inputs:  inputs,
 			Clean:   clean,
 			Tools:   toolRefs,
+			Timeout: timeout,
 		})
 	}
 	if err := rejectDuplicateGroupNames(groups); err != nil {
@@ -534,6 +550,30 @@ func resolveStart(start string) (string, error) {
 type boolOpt struct {
 	value bool
 	set   bool
+}
+
+type durationOpt struct {
+	value time.Duration
+	set   bool
+}
+
+func optionalDuration(m map[string]any, key, loc string) (durationOpt, error) {
+	value, ok := m[key]
+	if !ok || value == nil {
+		return durationOpt{}, nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return durationOpt{}, fmt.Errorf("%s must be a duration string", loc)
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(text))
+	if err != nil {
+		return durationOpt{}, fmt.Errorf("%s must be a Go duration", loc)
+	}
+	if d <= 0 {
+		return durationOpt{}, fmt.Errorf("%s must be a duration greater than zero", loc)
+	}
+	return durationOpt{value: d, set: true}, nil
 }
 
 func optionalBool(m map[string]any, key, loc string) (boolOpt, error) {

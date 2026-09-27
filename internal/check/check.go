@@ -132,8 +132,14 @@ func runPreparedGroup(root string, group config.Group, tools []config.Tool, base
 
 	defer log.beginGroup(group.Name)()
 
+	// A configured timeout wins. commandLog.timeout injects one when the group has none.
+	limit := group.Timeout
+	if limit == 0 {
+		limit = log.timeout
+	}
+
 	if len(group.Tools) > 0 {
-		observed, err := verifyTools(root, tools, group.Tools, log.timeout, log.toolCache)
+		observed, err := verifyTools(root, tools, group.Tools, limit, log.toolCache)
 		result.Tools = observed
 		if err != nil {
 			result.Status = GroupError
@@ -166,7 +172,7 @@ func runPreparedGroup(root string, group config.Group, tools []config.Tool, base
 	if stream != nil {
 		header = log.label(group.Name)
 	}
-	tail, err := runCommand(root, group.Command, stream, header, log.timeout)
+	tail, err := runCommand(root, group.Command, stream, header, limit)
 	if log.quiet && log.groups() && tail != "" {
 		log.writeGroupedTail(group.Name, tail)
 		tail = ""

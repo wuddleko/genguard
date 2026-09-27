@@ -4,11 +4,12 @@
 
 ## README
 
-In the config section, name `tools` with the other top-level keys, add the group bullet, and add the section.
+In the config section, name `tools` and `timeout` with the other top-level keys, add the group bullets, and add the Tools section.
 
-Top-level keys are `groups` (required, non-empty), `clean`, and `tools`. An unknown key is an error.
+Top-level keys are `groups` (required, non-empty), `clean`, `tools`, and `timeout`. An unknown key is an error.
 
 - **`tools`** — optional names from the top-level `tools` list.
+- **`timeout`** — optional Go duration greater than zero (`200ms`, `1m`). A top-level value applies to every group. A group value replaces it. Omitting it on a group keeps the top-level value. Probes use that same limit. When the key is absent, the command has no limit. `0s`, a negative duration, a non-string, and a string that is not a Go duration are errors.
 
 ### Tools
 

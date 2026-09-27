@@ -190,3 +190,58 @@ func TestCheckTimeoutStillDiffs(t *testing.T) {
 		t.Fatalf("file = %q", data)
 	}
 }
+
+func TestCheckTimeoutFromConfig(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "left.txt", "ok\n")
+	writeTracked(t, root, "right.txt", "ok\n")
+	configPath := filepath.Join(root, "genguard.yaml")
+	content := "" +
+		"timeout: 200ms\n" +
+		"groups:\n" +
+		"  - name: greeting\n" +
+		"    command: python3 -c \"import sys,time; sys.stderr.write('line1'+chr(10)); sys.stderr.flush(); time.sleep(5)\"\n" +
+		"    outputs:\n" +
+		"      - left.txt\n" +
+		"  - name: other\n" +
+		"    timeout: 2s\n" +
+		"    command: python3 -c \"import time; time.sleep(0.5)\"\n" +
+		"    outputs:\n" +
+		"      - right.txt\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Groups[0].Timeout != 200*time.Millisecond || cfg.Groups[1].Timeout != 2*time.Second {
+		t.Fatalf("timeouts = %s, %s", cfg.Groups[0].Timeout, cfg.Groups[1].Timeout)
+	}
+
+	start := time.Now()
+	result, err := checkConfig(cfg, "", nil, commandLog{})
+	if time.Since(start) >= 3*time.Second {
+		t.Fatalf("took %s", time.Since(start))
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", result.ExitCode())
+	}
+	if len(result.Groups) != 2 {
+		t.Fatalf("groups = %+v", result.Groups)
+	}
+	greeting := result.Groups[0]
+	if greeting.Status != GroupError || greeting.Err == nil || greeting.Err.Error() != "command timed out after 200ms" {
+		t.Fatalf("greeting = %+v", greeting)
+	}
+	if greeting.CommandTail != "line1\n" {
+		t.Fatalf("tail = %q", greeting.CommandTail)
+	}
+	other := result.Groups[1]
+	if other.Status != GroupOK || other.Err != nil {
+		t.Fatalf("other = %+v", other)
+	}
+}
