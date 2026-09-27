@@ -751,7 +751,7 @@ func TestCheckAllFormatsNestedDriftReport(t *testing.T) {
 		"1 group: 0 ok, 1 drift, 0 error\n\n" + webHeader,
 		webHeader + "\n  web: OK",
 		"1 group: 1 ok, 0 drift, 0 error\n\n2 configs: 1 ok, 1 drift, 0 error\n",
-		"\nDrift\n" + apiHeader + "\n[modified] api: out.txt\n",
+		"\nDrift\n" + apiHeader + "\n[modified] api: api/out.txt\n",
 		"diff --git",
 		"+new",
 		"\nerror: 1 generated path drifted; commit the generator output or fix the command\n",
@@ -787,8 +787,8 @@ func TestCheckAllFormatsTwoDriftSections(t *testing.T) {
 	}
 	apiHeader := filepath.Join("api", "genguard.yaml")
 	webHeader := filepath.Join("web", "genguard.yaml")
-	first := strings.Index(report, "\nDrift\n"+apiHeader+"\n[modified] api: out.txt\n")
-	second := strings.Index(report, "\n\n"+webHeader+"\n[modified] web: out.txt\n")
+	first := strings.Index(report, "\nDrift\n"+apiHeader+"\n[modified] api: api/out.txt\n")
+	second := strings.Index(report, "\n\n"+webHeader+"\n[modified] web: web/out.txt\n")
 	if first < 0 || second < 0 || first >= second {
 		t.Fatalf("drift sections:\n%s", report)
 	}
@@ -1072,7 +1072,7 @@ func TestCheckAllIsolatedReportUsesCapturedDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 	apiHeader := filepath.Join("api", "genguard.yaml")
-	if !strings.Contains(report, apiHeader+"\n[modified] api: out.txt\n") {
+	if !strings.Contains(report, apiHeader+"\n[modified] api: api/out.txt\n") {
 		t.Fatalf("report missing user config path:\n%s", report)
 	}
 	if strings.Contains(report, "genguard-") {

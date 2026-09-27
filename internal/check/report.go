@@ -18,7 +18,7 @@ func FormatFailureReport(result ConfigResult, root string) (string, error) {
 	drifts := result.AllDrifts()
 	if len(drifts) > 0 {
 		b.WriteString("\nDrift\n")
-		if err := writeDriftBody(&b, result, root, drifts); err != nil {
+		if err := writeDriftBody(&b, result, newDriftBase(root, ""), drifts); err != nil {
 			return b.String(), err
 		}
 	}
@@ -57,7 +57,7 @@ func FormatRunFailureReport(run RunResult) (string, error) {
 		}
 		b.WriteString(displayConfigPath(run.RepoRoot, cfg.Path))
 		b.WriteString("\n")
-		if err := writeDriftBody(&b, cfg.Result, filepath.Dir(cfg.Path), drifts); err != nil {
+		if err := writeDriftBody(&b, cfg.Result, newDriftBase(filepath.Dir(cfg.Path), run.RepoRoot), drifts); err != nil {
 			return b.String(), err
 		}
 	}
@@ -110,11 +110,11 @@ func writeCommandTails(b *strings.Builder, groups []GroupResult, label func(name
 	}
 }
 
-func writeDriftBody(b *strings.Builder, result ConfigResult, root string, drifts []Drift) error {
+func writeDriftBody(b *strings.Builder, result ConfigResult, base driftBase, drifts []Drift) error {
 	for _, item := range drifts {
-		fmt.Fprintf(b, "[%s] %s: %s\n", item.Kind, item.Group, item.Path)
+		fmt.Fprintf(b, "[%s] %s: %s\n", item.Kind, item.Group, base.shown(item.Path))
 	}
-	diff, err := resultDriftDiff(result, root, drifts)
+	diff, err := resultDriftDiff(result, base, drifts)
 	if err != nil {
 		return err
 	}
@@ -126,11 +126,11 @@ func writeDriftBody(b *strings.Builder, result ConfigResult, root string, drifts
 	return nil
 }
 
-func resultDriftDiff(result ConfigResult, root string, drifts []Drift) (string, error) {
+func resultDriftDiff(result ConfigResult, base driftBase, drifts []Drift) (string, error) {
 	if result.captured != nil {
 		return result.captured.text, result.captured.err
 	}
-	return DriftDiff(root, drifts)
+	return driftDiff(base, drifts)
 }
 
 func driftKindSummary(drifts []Drift) string {

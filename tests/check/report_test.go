@@ -11,6 +11,88 @@ import (
 	"github.com/wuddleko/genguard/tests/testutil"
 )
 
+func TestFormatFailureReportUsesRepoRelativePaths(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	svc := filepath.Join(root, "svc")
+	gen := filepath.Join(svc, "gen")
+	if err := os.MkdirAll(gen, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gen, "a.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "svc/gen/a.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gen, "a.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gen, "b.txt"), []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := check.ConfigResult{Groups: []check.GroupResult{{
+		Name:   "g",
+		Status: check.GroupDrift,
+		Drifts: []check.Drift{
+			{Group: "g", Kind: "modified", Path: "gen/a.txt"},
+			{Group: "g", Kind: "untracked", Path: "gen/b.txt"},
+		},
+	}}}
+	report, err := check.FormatFailureReport(result, svc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{
+		"[modified] g: svc/gen/a.txt",
+		"[untracked] g: svc/gen/b.txt",
+		"diff --git a/svc/gen/a.txt b/svc/gen/a.txt",
+		"diff --git a/svc/gen/b.txt b/svc/gen/b.txt",
+	} {
+		if !strings.Contains(report, part) {
+			t.Fatalf("report missing %q:\n%s", part, report)
+		}
+	}
+	if result.Groups[0].Drifts[0].Path != "gen/a.txt" || result.Groups[0].Drifts[1].Path != "gen/b.txt" {
+		t.Fatalf("stored paths changed: %v", result.Groups[0].Drifts)
+	}
+}
+
+func TestFormatRunFailureReportUsesAllRepoRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	api := filepath.Join(root, "api")
+	if err := testutil.InitGitRepo(api); err != nil {
+		t.Fatal(err)
+	}
+	run := check.RunResult{
+		RepoRoot: root,
+		Configs: []check.ConfigRun{{
+			Path: filepath.Join(api, "genguard.yaml"),
+			Result: check.ConfigResult{Groups: []check.GroupResult{{
+				Name:   "api",
+				Status: check.GroupDrift,
+				Drifts: []check.Drift{{Group: "api", Kind: "modified", Path: "out.txt"}},
+			}}},
+		}},
+	}
+	report, _ := check.FormatRunFailureReport(run)
+	if !strings.Contains(report, "[modified] api: api/out.txt") {
+		t.Fatalf("report missing parent-relative path:\n%s", report)
+	}
+	if strings.Contains(report, "[modified] api: out.txt\n") {
+		t.Fatalf("used nested git root:\n%s", report)
+	}
+}
+
 func TestFormatFailureReportSections(t *testing.T) {
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
 	if err != nil {

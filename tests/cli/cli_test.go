@@ -548,7 +548,7 @@ func TestCLICheckDiffFailureExit2(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q", stdout)
 	}
-	for _, part := range []string{"Summary", "[modified] web: out.txt", "error: forced diff failure"} {
+	for _, part := range []string{"Summary", "[modified] web: web/out.txt", "error: forced diff failure"} {
 		if !strings.Contains(stderr, part) {
 			t.Fatalf("stderr missing %q:\n%s", part, stderr)
 		}
@@ -2862,7 +2862,7 @@ func TestCLICheckAllDriftExit1(t *testing.T) {
 		filepath.Join("api", "genguard.yaml"),
 		filepath.Join("web", "genguard.yaml"),
 		"web: OK",
-		"[modified] api: out.txt",
+		"[modified] api: api/out.txt",
 		"2 configs: 1 ok, 1 drift, 0 error",
 		"diff --git",
 		"error: 1 generated path drifted; commit the generator output or fix the command",
@@ -2939,7 +2939,7 @@ func TestCLICheckAllIsolatedDriftUsesCapturedDiff(t *testing.T) {
 
 	stdout, stderr, code := runCLI([]string{"check", "--all", "--isolated"})
 	requireCheckAllFailure(t, stdout, stderr, code, 1, []string{
-		filepath.Join("api", "genguard.yaml") + "\n[modified] api: out.txt\n",
+		filepath.Join("api", "genguard.yaml") + "\n[modified] api: api/out.txt\n",
 		"+new",
 		"error: 1 generated path drifted; commit the generator output or fix the command",
 	}, []string{
@@ -3259,7 +3259,7 @@ func TestCLICheckAllDriftAndErrorExit2(t *testing.T) {
 	requireCheckAllFailure(t, stdout, stderr, code, 2, []string{
 		"api: error (command failed (exit 3): no output)",
 		"web: drift (1 modified)",
-		"[modified] web: out.txt",
+		"[modified] web: web/out.txt",
 		"diff --git",
 		"2 configs: 0 ok, 1 drift, 1 error",
 		"error: 1 config failed; 1 config drifted",
@@ -3269,7 +3269,7 @@ func TestCLICheckAllDriftAndErrorExit2(t *testing.T) {
 		"web: drift (1 modified)",
 		"2 configs: 0 ok, 1 drift, 1 error",
 		"\nDrift\n",
-		"[modified] web: out.txt",
+		"[modified] web: web/out.txt",
 		"error: 1 config failed; 1 config drifted",
 	)
 }
@@ -3292,17 +3292,17 @@ func TestCLICheckAllTwoDriftsExit1(t *testing.T) {
 	requireCheckAllFailure(t, stdout, stderr, code, 1, []string{
 		"api: drift (1 modified)",
 		"web: drift (1 modified)",
-		"[modified] api: out.txt",
-		"[modified] web: out.txt",
+		"[modified] api: api/out.txt",
+		"[modified] web: web/out.txt",
 		"+aaa",
 		"+bbb",
 		"2 configs: 0 ok, 2 drift, 0 error",
 		"error: 2 generated paths drifted; commit the generator output or fix the command",
 	}, []string{": OK", ": error"})
 	requireOrder(t, stderr,
-		"[modified] api: out.txt",
+		"[modified] api: api/out.txt",
 		"+aaa",
-		"[modified] web: out.txt",
+		"[modified] web: web/out.txt",
 		"+bbb",
 		"error: 2 generated paths drifted",
 	)
@@ -3326,14 +3326,14 @@ func TestCLICheckAllMissingAndUntrackedExit1(t *testing.T) {
 	requireCheckAllFailure(t, stdout, stderr, code, 1, []string{
 		"api: drift (1 missing)",
 		"web: drift (1 untracked)",
-		"[missing] api: out.txt",
-		"[untracked] web: extra.txt",
+		"[missing] api: api/out.txt",
+		"[untracked] web: web/extra.txt",
 		"2 configs: 0 ok, 2 drift, 0 error",
 		"error: 2 generated paths drifted; commit the generator output or fix the command",
 	}, nil)
 	requireOrder(t, stderr,
-		"[missing] api: out.txt",
-		"[untracked] web: extra.txt",
+		"[missing] api: api/out.txt",
+		"[untracked] web: web/extra.txt",
 	)
 }
 
@@ -3356,15 +3356,15 @@ func TestCLICheckAllDiffFailureExit2(t *testing.T) {
 	requireCheckAllFailure(t, stdout, stderr, code, 2, []string{
 		"api: drift (1 modified)",
 		"web: drift (1 modified)",
-		"[modified] api: out.txt",
+		"[modified] api: api/out.txt",
 		"+aaa",
-		"[modified] web: out.txt",
+		"[modified] web: web/out.txt",
 		"error: forced diff failure",
 	}, []string{"+bbb", "generated path"})
 	requireOrder(t, stderr,
-		"[modified] api: out.txt",
+		"[modified] api: api/out.txt",
 		"+aaa",
-		"[modified] web: out.txt",
+		"[modified] web: web/out.txt",
 		"error: forced diff failure",
 	)
 }
@@ -3681,7 +3681,9 @@ func requireOrder(t *testing.T, s string, parts ...string) {
 	}
 }
 
-// failGitDiffIn breaks only `git diff --no-color`, which drift detection does not use.
+// failGitDiffIn breaks `git diff --no-color` for one config directory.
+// Drift detection does not use --no-color. A patch diff from the repository root
+// still fails when a pathspec after -- or --no-index is inside that directory.
 func failGitDiffIn(t *testing.T, suffix string) {
 	t.Helper()
 	real, err := exec.LookPath("git")
@@ -3699,8 +3701,10 @@ func failGitDiffIn(t *testing.T, suffix string) {
 
 func installUnixGitShim(t *testing.T, bin, real, suffix string) {
 	t.Helper()
+	rel := strings.TrimPrefix(suffix, string(filepath.Separator))
 	script := "#!/bin/sh\n" +
-		"root=\nprev=\nnocolor=0\n" +
+		"root=\nprev=\nnocolor=0\nmatch=0\ndashdash=0\nnoindex=0\n" +
+		"rel=" + shellQuote(rel) + "\n" +
 		"for arg in \"$@\"; do\n" +
 		"  if [ \"$prev\" = \"-C\" ]; then\n" +
 		"    root=$arg\n" +
@@ -3708,15 +3712,38 @@ func installUnixGitShim(t *testing.T, bin, real, suffix string) {
 		"  if [ \"$arg\" = \"--no-color\" ]; then\n" +
 		"    nocolor=1\n" +
 		"  fi\n" +
+		"  if [ \"$arg\" = \"--\" ]; then\n" +
+		"    dashdash=1\n" +
+		"    prev=$arg\n" +
+		"    continue\n" +
+		"  fi\n" +
+		"  if [ \"$arg\" = \"--no-index\" ]; then\n" +
+		"    noindex=1\n" +
+		"    prev=$arg\n" +
+		"    continue\n" +
+		"  fi\n" +
+		"  check=0\n" +
+		"  if [ \"$dashdash\" -eq 1 ]; then\n" +
+		"    check=1\n" +
+		"  fi\n" +
+		"  if [ \"$noindex\" -eq 1 ] && [ \"${arg#-}\" = \"$arg\" ]; then\n" +
+		"    check=1\n" +
+		"  fi\n" +
+		"  if [ \"$check\" -eq 1 ]; then\n" +
+		"    case \"$arg\" in\n" +
+		"      \"$rel\"|\"$rel\"/*) match=1 ;;\n" +
+		"    esac\n" +
+		"  fi\n" +
 		"  prev=$arg\n" +
 		"done\n" +
 		"if [ \"$nocolor\" -eq 1 ]; then\n" +
 		"  case \"$root\" in\n" +
-		"    *" + suffix + ")\n" +
-		"      echo \"forced diff failure\" >&2\n" +
-		"      exit 129\n" +
-		"      ;;\n" +
+		"    *" + suffix + ") match=1 ;;\n" +
 		"  esac\n" +
+		"fi\n" +
+		"if [ \"$nocolor\" -eq 1 ] && [ \"$match\" -eq 1 ]; then\n" +
+		"  echo \"forced diff failure\" >&2\n" +
+		"  exit 129\n" +
 		"fi\n" +
 		"exec " + shellQuote(real) + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
@@ -3764,7 +3791,8 @@ func gitWrapMain() int {
 		prev = arg
 	}
 	suffix := os.Getenv("GENGUARD_FAIL_GIT_SUFFIX")
-	if noColor && suffix != "" && strings.HasSuffix(root, suffix) {
+	rel := strings.TrimPrefix(suffix, string(filepath.Separator))
+	if noColor && suffix != "" && (strings.HasSuffix(root, suffix) || gitArgUnder(args, rel)) {
 		_, _ = os.Stderr.WriteString("forced diff failure\n")
 		return 129
 	}
@@ -3791,6 +3819,61 @@ func gitWrapMain() int {
 	}
 	_, _ = os.Stderr.WriteString(err.Error() + "\n")
 	return 1
+}
+
+func gitArgUnder(args []string, rel string) bool {
+	if rel == "" {
+		return false
+	}
+	for _, arg := range gitPathArgs(args) {
+		if gitPathInDir(arg, rel) {
+			return true
+		}
+	}
+	return false
+}
+
+func gitPathArgs(args []string) []string {
+	for i, arg := range args {
+		if arg == "--" {
+			return args[i+1:]
+		}
+	}
+	out := make([]string, 0)
+	noIndex := false
+	for _, arg := range args {
+		if arg == "--no-index" {
+			noIndex = true
+			continue
+		}
+		if !noIndex || arg == "" {
+			continue
+		}
+		if strings.HasPrefix(arg, "-") && arg != "-" {
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+func gitPathInDir(arg, rel string) bool {
+	if arg == rel {
+		return true
+	}
+	return strings.HasPrefix(arg, rel+"/") || strings.HasPrefix(arg, rel+`\`)
+}
+
+func TestGitArgUnderMatchesPathspecsOnly(t *testing.T) {
+	if gitArgUnder([]string{"-C", "/tmp/web", "diff", "--no-color", "HEAD", "--", "web/out.txt"}, "web") != true {
+		t.Fatal("path after --")
+	}
+	if gitArgUnder([]string{"-C", "/tmp/web", "-c", "diff.relative=false", "diff", "--no-color", "--no-ext-diff", "--no-index", os.DevNull, "web/extra.txt"}, "web") != true {
+		t.Fatal("path after --no-index")
+	}
+	if gitArgUnder([]string{"-C", "/tmp/web-project", "diff", "--no-color", "HEAD", "--", "api/out.txt"}, "web") {
+		t.Fatal("-C path and unrelated pathspec")
+	}
 }
 
 func shellQuote(s string) string {

@@ -101,6 +101,9 @@ func jsonDriftPath(repoRoot, configPath, driftPath string) string {
 	if repoRoot == "" || driftPath == "" || !filepath.IsAbs(configPath) {
 		return driftPath
 	}
-	abs := filepath.Join(filepath.Dir(configPath), filepath.FromSlash(driftPath))
-	return filepath.ToSlash(displayConfigPath(repoRoot, abs))
+	rel, ok := repoRelDrift(repoRoot, filepath.Dir(configPath), driftPath)
+	if !ok {
+		return driftPath
+	}
+	return rel
 }

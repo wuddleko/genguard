@@ -31,6 +31,10 @@ func DriftForGroup(root string, group config.Group) ([]Drift, error) {
 }
 
 func DriftDiff(root string, drifts []Drift) (string, error) {
+	return driftDiff(newDriftBase(root, ""), drifts)
+}
+
+func driftDiff(base driftBase, drifts []Drift) (string, error) {
 	parts := make([]string, 0, len(drifts))
 	seen := make(map[string]struct{}, len(drifts))
 
@@ -39,10 +43,11 @@ func DriftDiff(root string, drifts []Drift) (string, error) {
 			continue
 		}
 		seen[item.Path] = struct{}{}
+		gitRoot, rel := base.gitArg(item.Path)
 
 		switch item.Kind {
 		case "modified", "missing":
-			diff, err := gitDiffText(root, "HEAD", "--", item.Path)
+			diff, err := gitDiffText(gitRoot, "HEAD", "--", rel)
 			if err != nil {
 				return "", err
 			}
@@ -51,13 +56,13 @@ func DriftDiff(root string, drifts []Drift) (string, error) {
 				parts = append(parts, diff)
 			}
 		case "untracked":
-			target := filepath.Join(root, item.Path)
+			target := filepath.Join(gitRoot, filepath.FromSlash(rel))
 			info, err := os.Stat(target)
 			if err != nil || !info.Mode().IsRegular() {
-				parts = append(parts, fmt.Sprintf("Untracked generated file: %s", item.Path))
+				parts = append(parts, fmt.Sprintf("Untracked generated file: %s", rel))
 				continue
 			}
-			diff, err := gitDiffText(root, "--no-index", os.DevNull, item.Path)
+			diff, err := gitDiffText(gitRoot, "--no-index", os.DevNull, rel)
 			if err != nil {
 				return "", err
 			}
@@ -65,12 +70,61 @@ func DriftDiff(root string, drifts []Drift) (string, error) {
 			if diff != "" {
 				parts = append(parts, diff)
 			} else {
-				parts = append(parts, fmt.Sprintf("Untracked generated file: %s", item.Path))
+				parts = append(parts, fmt.Sprintf("Untracked generated file: %s", rel))
 			}
 		}
 	}
 
 	return strings.Join(parts, "\n"), nil
+}
+
+// driftBase is the repository used to print and diff a config-relative drift path.
+type driftBase struct {
+	repoRoot  string
+	configDir string
+}
+
+func newDriftBase(configDir, repoRoot string) driftBase {
+	absDir, err := filepath.Abs(configDir)
+	if err != nil {
+		absDir = configDir
+	}
+	repoRoot = strings.TrimSpace(repoRoot)
+	if repoRoot == "" {
+		if found, err := gitRepoRoot(absDir); err == nil {
+			repoRoot = found
+		}
+	}
+	return driftBase{repoRoot: repoRoot, configDir: absDir}
+}
+
+func (d driftBase) shown(path string) string {
+	rel, ok := repoRelDrift(d.repoRoot, d.configDir, path)
+	if !ok {
+		return path
+	}
+	return rel
+}
+
+func (d driftBase) gitArg(path string) (gitRoot, rel string) {
+	rel, ok := repoRelDrift(d.repoRoot, d.configDir, path)
+	if !ok {
+		return d.configDir, path
+	}
+	return d.repoRoot, rel
+}
+
+// repoRelDrift maps a stored, config-relative drift onto a repository path.
+func repoRelDrift(repoRoot, configDir, driftPath string) (string, bool) {
+	if repoRoot == "" || configDir == "" || driftPath == "" {
+		return driftPath, false
+	}
+	abs := filepath.Join(configDir, filepath.FromSlash(driftPath))
+	rel, err := relInsideRepo(repoRoot, abs)
+	if err != nil {
+		return driftPath, false
+	}
+	return filepath.ToSlash(rel), true
 }
 
 func recordCleanDamage(damage map[string]pathSnap, root string, group config.Group) {
