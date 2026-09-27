@@ -49,6 +49,11 @@ func TestRunCommandTimeoutWithNoOutput(t *testing.T) {
 	}
 }
 
+func processRunning(pid int) bool {
+	err := unix.Kill(pid, 0)
+	return err == nil || errors.Is(err, unix.EPERM)
+}
+
 func assertPidGone(t *testing.T, pidPath string) {
 	t.Helper()
 	data, err := os.ReadFile(pidPath)

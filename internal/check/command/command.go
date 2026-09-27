@@ -1,11 +1,16 @@
 package command
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 	"time"
 )
+
+// waitDelay bounds the wait for pipe copies after the child exits.
+// A grandchild holding stdout would otherwise hang the run. Tests shorten it.
+var waitDelay = 10 * time.Second
 
 func Run(root, command string, onLine func(string), timeout time.Duration) (string, error) {
 	return run(root, command, onLine, timeout)
@@ -35,6 +40,7 @@ func execute(root, command string, onLine func(string), timeout time.Duration) (
 	name, args := shellInvocation(command)
 	cmd := exec.Command(name, args...)
 	cmd.Dir = root
+	cmd.WaitDelay = waitDelay
 	var ring tailRing
 	if onLine != nil {
 		ring.onLine = onLine
@@ -59,6 +65,11 @@ func execute(root, command string, onLine func(string), timeout time.Duration) (
 				if !timer.Stop() {
 					<-timer.C
 				}
+				// The child has exited. Stop the group so a grandchild
+				// holding a pipe does not outlive WaitDelay.
+				if errors.Is(err, exec.ErrWaitDelay) {
+					group.stop(cmd)
+				}
 			case <-timer.C:
 				timedOut = true
 				group.stop(cmd)
@@ -67,7 +78,7 @@ func execute(root, command string, onLine func(string), timeout time.Duration) (
 		}
 	} else {
 		err = cmd.Run()
-		if err != nil && !exitError(err) {
+		if err != nil && !exitError(err) && !errors.Is(err, exec.ErrWaitDelay) {
 			return "", 0, &StartError{err: err}
 		}
 	}
@@ -75,7 +86,8 @@ func execute(root, command string, onLine func(string), timeout time.Duration) (
 	if timedOut {
 		return ring.String(), 0, fmt.Errorf("command timed out after %s", timeout)
 	}
-	if err == nil {
+	// The child already exited 0. ErrWaitDelay means a grandchild still held a pipe.
+	if err == nil || (errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success()) {
 		return ring.String(), 0, nil
 	}
 
