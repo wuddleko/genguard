@@ -435,6 +435,13 @@ func TestFinalErrorLine(t *testing.T) {
 			want: "error: command failed (exit 3): no output",
 		},
 		{
+			name: "single error is one line",
+			groups: []check.GroupResult{
+				{Name: "g", Status: check.GroupError, Err: errors.New("command failed (exit 1):\nline1\n  line2")},
+			},
+			want: "error: command failed (exit 1): line1 line2",
+		},
+		{
 			name: "error with its own drift stays the command error",
 			groups: []check.GroupResult{
 				{

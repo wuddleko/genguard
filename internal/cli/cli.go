@@ -36,9 +36,10 @@ func RunWithIO(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, Version)
 		return 0
 	case "-h", "--help", "help":
-		printUsage(stderr)
+		printUsage(stdout)
 		return 0
 	default:
+		fmt.Fprintf(stderr, "unknown command %q\n", args[0])
 		printUsage(stderr)
 		return 2
 	}

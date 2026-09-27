@@ -647,35 +647,41 @@ func TestCLICheckDiffFailureExit2(t *testing.T) {
 }
 
 func TestCLIHelp(t *testing.T) {
-	_, stderr, code := runCLI([]string{"--help"})
-	if code != 0 {
-		t.Fatalf("code = %d, want 0", code)
+	for _, args := range [][]string{{"help"}, {"-h"}, {"--help"}} {
+		stdout, stderr, code := runCLI(args)
+		if code != 0 {
+			t.Fatalf("%v: code = %d, want 0", args, code)
+		}
+		if stderr != "" {
+			t.Fatalf("%v: stderr = %q", args, stderr)
+		}
+		for _, part := range []string{
+			"genguard check",
+			"genguard check --all",
+			"--since",
+			"--isolated",
+			"genguard run",
+			"genguard run --all",
+			"--json",
+			"--verbose",
+			"genguard version",
+		} {
+			if !strings.Contains(stdout, part) {
+				t.Fatalf("%v: stdout missing %q:\n%s", args, part, stdout)
+			}
+		}
 	}
-	if !strings.Contains(stderr, "genguard check") {
+}
+
+func TestCLIUnknownCommand(t *testing.T) {
+	stdout, stderr, code := runCLI([]string{"nosuch"})
+	if code != 2 || stdout != "" {
+		t.Fatalf("code = %d stdout = %q stderr = %q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "unknown command \"nosuch\"") || !strings.Contains(stderr, "Usage:") {
 		t.Fatalf("stderr = %q", stderr)
 	}
-	if !strings.Contains(stderr, "genguard check --all") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "--since") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "--isolated") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "genguard run") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "genguard run --all") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "--json") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "--verbose") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "genguard version") {
+	if strings.Index(stderr, "unknown command \"nosuch\"") > strings.Index(stderr, "Usage:") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 }

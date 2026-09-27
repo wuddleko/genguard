@@ -187,7 +187,7 @@ func (r ConfigResult) groupFinalErrorLine() string {
 	case errors > 0:
 		if errors == 1 {
 			if err := r.firstGroupError(); err != nil {
-				return "error: " + err.Error()
+				return "error: " + oneLineError(err)
 			}
 			return "error: 1 group failed"
 		}
