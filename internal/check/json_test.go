@@ -109,6 +109,28 @@ func TestFormatJSONSkippedAndLoadError(t *testing.T) {
 	}
 }
 
+func TestFormatJSONCleanupOutranksDrift(t *testing.T) {
+	result := ConfigResult{Groups: []GroupResult{{
+		Name:   "api",
+		Status: GroupDrift,
+		Drifts: []Drift{{Kind: "modified", Path: "out.txt"}},
+	}}}
+	result.noteCleanup(errors.New("git worktree remove: boom"))
+	if result.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", result.ExitCode())
+	}
+	doc := decodeJSON(t, mustFormatJSON(t, RunResult{Configs: []ConfigRun{{
+		Path:   "genguard.yaml",
+		Result: result,
+	}}}))
+	if doc.Exit != 2 || doc.Configs[0].Exit != 2 || doc.Configs[0].Error != "git worktree remove: boom" {
+		t.Fatalf("doc = %+v", doc)
+	}
+	if doc.Configs[0].Groups[0].Status != "drift" {
+		t.Fatalf("group = %+v", doc.Configs[0].Groups[0])
+	}
+}
+
 func TestFormatJSONCleanupError(t *testing.T) {
 	result := ConfigResult{Groups: []GroupResult{{Name: "api", Status: GroupOK}}}
 	result.noteCleanup(errors.New("git worktree remove: boom"))

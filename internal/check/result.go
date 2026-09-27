@@ -60,15 +60,15 @@ func (r ConfigResult) AllDrifts() []Drift {
 }
 
 func (r ConfigResult) ExitCode() int {
+	if r.cleanup != nil {
+		return 2
+	}
 	_, drift, errors := r.Counts()
 	if errors > 0 {
 		return 2
 	}
 	if drift > 0 {
 		return 1
-	}
-	if r.cleanup != nil {
-		return 2
 	}
 	return 0
 }

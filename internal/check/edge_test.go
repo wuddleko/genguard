@@ -102,27 +102,60 @@ func TestCheckCommandFailureThenDriftError(t *testing.T) {
 	if group.Status != GroupError || group.Err == nil {
 		t.Fatalf("group = %+v", group)
 	}
-	if !strings.Contains(group.Err.Error(), "fatal") {
-		t.Fatalf("error = %v, want the git failure", group.Err)
+	if !strings.Contains(group.Err.Error(), "command failed") {
+		t.Fatalf("error = %v, want the command error kept", group.Err)
 	}
-	if strings.Contains(group.Err.Error(), "command failed") {
-		t.Fatalf("error = %v, want the drift error to replace the command error", group.Err)
+	if !strings.Contains(group.Err.Error(), "fatal") {
+		t.Fatalf("error = %v, want the git failure appended", group.Err)
 	}
 	if len(group.Drifts) != 0 {
 		t.Fatalf("drifts = %+v", group.Drifts)
 	}
 }
 
-func TestRecordCleanDamageIgnoresDriftError(t *testing.T) {
+func TestRecordCleanDamageReturnsDriftError(t *testing.T) {
 	damage := map[string]pathSnap{}
-	recordCleanDamage(damage, t.TempDir(), config.Group{Outputs: []string{"missing.txt"}})
+	err := recordCleanDamage(damage, t.TempDir(), config.Group{Outputs: []string{"missing.txt"}})
+	if err == nil {
+		t.Fatal("expected a drift listing error")
+	}
 	if len(damage) != 0 {
 		t.Fatalf("damage = %+v", damage)
 	}
-	snap := map[string]pathSnap{}
-	recordCleanDamage(snap, t.TempDir(), config.Group{Outputs: []string{"missing.txt"}})
-	if len(snap) != 0 {
-		t.Fatalf("snap = %+v", snap)
+}
+
+func TestPostCleanListingFailureSkipsCommand(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "generated/hello.txt", "hello\n")
+	saved := os.Getenv("PATH")
+	installGitShim(t, "others-fail")
+	t.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+saved)
+
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Groups: []config.Group{{
+			Name:    "broken",
+			Clean:   true,
+			Command: `python3 -c "open('generated/ran.txt','w').close()"`,
+			Outputs: []string{"generated/hello.txt"},
+		}},
+	}
+	result, err := checkConfig(cfg, "", map[string]pathSnap{}, commandLog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := result.Groups[0]
+	if group.Status != GroupError || group.Err == nil || !strings.Contains(group.Err.Error(), "fatal: others") {
+		t.Fatalf("group = %+v", group)
+	}
+	if strings.Contains(group.Err.Error(), "command failed") {
+		t.Fatalf("command ran: %v", group.Err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "generated", "ran.txt")); !os.IsNotExist(statErr) {
+		t.Fatal("command wrote generated/ran.txt")
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "generated", "hello.txt")); !os.IsNotExist(statErr) {
+		t.Fatal("clean did not wipe generated/hello.txt")
 	}
 }
 
@@ -398,8 +431,8 @@ func TestIsolatedRunKeepsCompletedCheck(t *testing.T) {
 	if len(run.Result.Groups) != 1 || run.Result.Groups[0].Status != GroupDrift {
 		t.Fatalf("Result = %+v", run.Result)
 	}
-	if run.ExitCode() != 1 {
-		t.Fatalf("exit = %d, want 1", run.ExitCode())
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d, want 2", run.ExitCode())
 	}
 	line := run.Result.FinalErrorLine()
 	if !strings.Contains(line, "generated path drifted") || !strings.Contains(line, "git worktree remove: busy") {

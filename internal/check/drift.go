@@ -127,12 +127,13 @@ func repoRelDrift(repoRoot, configDir, driftPath string) (string, bool) {
 	return filepath.ToSlash(rel), true
 }
 
-func recordCleanDamage(damage map[string]pathSnap, root string, group config.Group) {
+func recordCleanDamage(damage map[string]pathSnap, root string, group config.Group) error {
 	found, err := driftForGroup(root, group)
 	if err != nil {
-		return
+		return err
 	}
 	recordFoundDamage(damage, root, found)
+	return nil
 }
 
 func recordFoundDamage(damage map[string]pathSnap, root string, found []Drift) {

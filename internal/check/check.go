@@ -79,13 +79,13 @@ func checkGroup(root string, group config.Group, tools []config.Tool, damage map
 	defer dropRepairedDamage(damage)
 
 	var wipe map[string]pathSnap
-	result := runPreparedGroup(root, group, tools, base, configPath, log, func() {
+	result := runPreparedGroup(root, group, tools, base, configPath, log, func() error {
 		wipe = map[string]pathSnap{}
-		recordCleanDamage(wipe, root, group)
+		return recordCleanDamage(wipe, root, group)
 	}, func(result GroupResult) GroupResult {
 		found, driftErr := driftForGroup(root, group)
 		if driftErr != nil {
-			result.Err = driftErr
+			result.Err = newGenguardError("%s: %s", result.Err.Error(), driftErr.Error())
 			return result
 		}
 		reported := omitUnchangedDamage(root, found, damage)
@@ -115,7 +115,7 @@ func checkGroup(root string, group config.Group, tools []config.Tool, damage map
 	return result
 }
 
-func runPreparedGroup(root string, group config.Group, tools []config.Tool, base, configPath string, log commandLog, afterClean func(), onCommandError func(GroupResult) GroupResult) GroupResult {
+func runPreparedGroup(root string, group config.Group, tools []config.Tool, base, configPath string, log commandLog, afterClean func() error, onCommandError func(GroupResult) GroupResult) GroupResult {
 	result := GroupResult{Name: group.Name}
 	if base != "" && len(group.Inputs) > 0 {
 		affected, err := groupAffected(root, base, loadedConfigName(configPath), group)
@@ -149,7 +149,12 @@ func runPreparedGroup(root string, group config.Group, tools []config.Tool, base
 			return result
 		}
 		if afterClean != nil {
-			afterClean()
+			// The wipe is already done. Without a snapshot the generator must not run.
+			if err := afterClean(); err != nil {
+				result.Status = GroupError
+				result.Err = err
+				return result
+			}
 		}
 	}
 
