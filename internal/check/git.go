@@ -93,9 +93,10 @@ func mergeBase(root, since string) (string, error) {
 	return base, nil
 }
 
+// --no-renames keeps a staged rename as a delete plus an add.
 // --relative hides paths outside this directory, so names stay repo-root paths.
 func gitDiffNames(root, rev string, specs []string) ([]string, error) {
-	args := append([]string{"-c", "diff.relative=false", "diff", "--name-only", "-z", rev, "--"}, specs...)
+	args := append([]string{"-c", "diff.relative=false", "diff", "--no-renames", "--name-only", "-z", rev, "--"}, specs...)
 	return gitNames(root, args...)
 }
 
@@ -105,7 +106,8 @@ func gitUntracked(root string, specs []string) ([]string, error) {
 }
 
 func gitDiffText(root string, args ...string) (string, error) {
-	full := append([]string{"-c", "diff.relative=false", "diff", "--no-color"}, args...)
+	// --no-ext-diff ignores diff.external so the report stays a unified diff.
+	full := append([]string{"-c", "diff.relative=false", "diff", "--no-color", "--no-ext-diff"}, args...)
 	out, code, err := git(root, full...)
 	if err != nil {
 		return "", err

@@ -15,6 +15,10 @@ func TestMain(m *testing.M) {
 	if os.Getenv("GENGUARD_GIT_SHIM") == "1" {
 		os.Exit(gitShimMain())
 	}
+	if base := filepath.Base(os.Args[0]); base == "ext" || base == "ext.exe" {
+		fmt.Println("EXTERNAL DIFF TOOL RAN")
+		os.Exit(0)
+	}
 	// CI sets GITHUB_ACTIONS on the test process. Pause tests opt in with t.Setenv.
 	os.Unsetenv("GITHUB_ACTIONS")
 	os.Unsetenv("GITHUB_WORKSPACE")

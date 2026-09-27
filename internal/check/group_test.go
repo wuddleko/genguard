@@ -2,8 +2,10 @@ package check
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -383,6 +385,75 @@ func TestWorkflowGroupQuietTailStaysWithoutActions(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Fatalf("log = %q", buf.String())
 	}
+}
+
+func TestExternalDiffStaysOutOfTheReport(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "out.txt", "old\n")
+	gitExec(t, root, "config", "diff.external", writeExternalDiff(t, t.TempDir()))
+	if err := os.WriteFile(filepath.Join(root, "out.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := DriftDiff(root, []Drift{{Group: "g", Path: "out.txt", Kind: "modified"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "diff --git") || strings.Contains(diff, "EXTERNAL DIFF TOOL RAN") {
+		t.Fatalf("diff = %q", diff)
+	}
+}
+
+func TestStagedRenameListsBothPaths(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "gen/a.txt", "same content line\nline two\nline three\n")
+	gitExec(t, root, "mv", "gen/a.txt", "gen/b.txt")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Groups: []config.Group{{
+			Name:    "g",
+			Command: "true",
+			Outputs: []string{"gen/"},
+		}},
+	}
+
+	result, err := CheckConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for _, drift := range result.AllDrifts() {
+		found[drift.Path] = true
+	}
+	if !found["gen/a.txt"] || !found["gen/b.txt"] {
+		t.Fatalf("drifts = %+v", result.AllDrifts())
+	}
+}
+
+func writeExternalDiff(t *testing.T, dir string) string {
+	t.Helper()
+	name := "ext"
+	if runtime.GOOS == "windows" {
+		name = "ext.exe"
+	}
+	dstPath := filepath.Join(dir, name)
+	src, err := os.Open(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(dst, src); err != nil {
+		dst.Close()
+		t.Fatal(err)
+	}
+	if err := dst.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return dstPath
 }
 
 func splitWorkflowGroup(t *testing.T, text, title string) (body, after string) {
