@@ -243,7 +243,7 @@ func TestInterruptStillDiffs(t *testing.T) {
 		Path: filepath.Join(root, "genguard.yaml"),
 		Groups: []config.Group{{
 			Name:    "greeting",
-			Command: `python3 -c "f=open('generated/hello.txt','w'); f.write('new\n'); f.flush(); f.close(); import time; time.sleep(30)"`,
+			Command: `python3 -c "f=open('generated/hello.txt','wb'); f.write(b'new\n'); f.flush(); f.close(); import time; time.sleep(30)"`,
 			Outputs: []string{"generated/hello.txt"},
 		}},
 	}
@@ -283,7 +283,7 @@ func TestInterruptBetweenGroupsKeepsDrift(t *testing.T) {
 	cfg := config.Config{
 		Path: filepath.Join(root, "genguard.yaml"),
 		Groups: []config.Group{
-			{Name: "first", Command: `python3 -c "open('left.txt','w').write('new\n')"`, Outputs: []string{"left.txt"}},
+			{Name: "first", Command: `python3 -c "open('left.txt','wb').write(b'new\n')"`, Outputs: []string{"left.txt"}},
 			{Name: "second", Command: "true", Outputs: []string{"right.txt"}, Clean: true},
 		},
 	}
