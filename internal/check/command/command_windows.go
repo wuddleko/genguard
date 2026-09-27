@@ -17,7 +17,7 @@ type commandGroup struct {
 var ntResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
 
 func startCommand(cmd *exec.Cmd) (commandGroup, error) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED}
+	applySuspendedStart(cmd)
 	if err := cmd.Start(); err != nil {
 		return commandGroup{}, err
 	}
@@ -47,6 +47,25 @@ func (g commandGroup) release() {
 	if g.job != 0 {
 		_ = windows.CloseHandle(g.job)
 	}
+}
+
+func setCmdLine(cmd *exec.Cmd, cmdLine string) {
+	if cmdLine == "" {
+		return
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.CmdLine = cmdLine
+}
+
+// applySuspendedStart adds CREATE_SUSPENDED to the attributes already set,
+// including a cmd.exe CmdLine.
+func applySuspendedStart(cmd *exec.Cmd) {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_SUSPENDED
 }
 
 func createCommandJob(pid uint32) (windows.Handle, error) {

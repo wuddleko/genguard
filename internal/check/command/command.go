@@ -53,8 +53,9 @@ func execute(ctx context.Context, root, command string, onLine func(string), tim
 		return "", 0, ErrInterrupted
 	}
 
-	name, args := shellInvocation(command)
+	name, args, cmdLine := shellInvocation(command)
 	cmd := exec.Command(name, args...)
+	setCmdLine(cmd, cmdLine)
 	cmd.Dir = root
 	var ring tailRing
 	if onLine != nil {

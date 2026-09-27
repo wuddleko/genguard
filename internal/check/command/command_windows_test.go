@@ -5,9 +5,11 @@ package command
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -32,6 +34,19 @@ func TestRunCommandTimeoutKillsProcessGroup(t *testing.T) {
 		t.Fatalf("tail = %q", tail)
 	}
 	assertPidGone(t, pidPath)
+}
+
+func TestApplySuspendedStartKeepsCmdLine(t *testing.T) {
+	cmd := exec.Command("cmd.exe")
+	const line = `cmd.exe /C echo hello world`
+	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: line}
+	applySuspendedStart(cmd)
+	if cmd.SysProcAttr.CmdLine != line {
+		t.Fatalf("cmdline = %q", cmd.SysProcAttr.CmdLine)
+	}
+	if cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED == 0 {
+		t.Fatal("CREATE_SUSPENDED is unset")
+	}
 }
 
 func assertPidGone(t *testing.T, pidPath string) {

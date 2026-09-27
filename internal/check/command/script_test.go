@@ -44,12 +44,12 @@ func pythonCommand(t *testing.T, root, name, body string) string {
 }
 
 func quoteForShell(arg string) string {
-	_, args := shellInvocation("")
-	return quoteForInvocation(args, arg)
+	_, args, cmdLine := shellInvocation("")
+	return quoteForInvocation(args, cmdLine, arg)
 }
 
-func quoteForInvocation(args []string, arg string) string {
-	if len(args) > 0 && args[0] == "/C" {
+func quoteForInvocation(args []string, cmdLine, arg string) string {
+	if cmdLine != "" || (len(args) > 0 && args[0] == "/C") {
 		return cmdQuote(arg)
 	}
 	return shSingle(arg)

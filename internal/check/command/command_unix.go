@@ -24,3 +24,5 @@ func (commandGroup) stop(cmd *exec.Cmd) {
 }
 
 func (commandGroup) release() {}
+
+func setCmdLine(_ *exec.Cmd, _ string) {}
