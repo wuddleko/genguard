@@ -163,6 +163,30 @@ func TestLoadConfigDefaultGroupName(t *testing.T) {
 	}
 }
 
+func TestLoadConfigUnnamedGroupsAreDistinct(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	configPath := filepath.Join(root, "genguard.yaml")
+	content := "groups:\n" +
+		"  - command: \"true\"\n" +
+		"    outputs:\n" +
+		"      - a.txt\n" +
+		"  - command: \"true\"\n" +
+		"    outputs:\n" +
+		"      - b.txt\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Groups[0].Name != "groups[0]" || cfg.Groups[1].Name != "groups[1]" {
+		t.Fatalf("names = %q, %q", cfg.Groups[0].Name, cfg.Groups[1].Name)
+	}
+}
+
 func TestLoadConfigMultipleGroups(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -346,6 +370,14 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 		{
 			"groups:\n  - command: \"true\"\n    outputs:\n      - gen/\n    inputs:\n      - \":(exclude)queries/\"\n",
 			"groups[0].inputs[0]: pathspec magic is not supported: \":(exclude)queries/\"",
+		},
+		{
+			"groups:\n  - name: same\n    command: \"true\"\n    outputs:\n      - a.txt\n  - name: same\n    command: \"true\"\n    outputs:\n      - b.txt\n",
+			`duplicate name "same" at groups[0] and groups[1]`,
+		},
+		{
+			"groups:\n  - command: \"true\"\n    outputs:\n      - a.txt\n  - name: groups[0]\n    command: \"true\"\n    outputs:\n      - b.txt\n",
+			`duplicate name "groups[0]" at groups[0] and groups[1]`,
 		},
 	}
 	for _, tc := range cases {

@@ -49,10 +49,15 @@ func FuzzParseConfig(f *testing.F) {
 				t.Fatalf("tool %d has a blank command", i)
 			}
 		}
+		names := make(map[string]int, len(cfg.Groups))
 		for i, group := range cfg.Groups {
 			if group.Name == "" {
 				t.Fatalf("group %d has an empty name", i)
 			}
+			if prev, ok := names[group.Name]; ok {
+				t.Fatalf("group %d duplicates name %q from group %d", i, group.Name, prev)
+			}
+			names[group.Name] = i
 			if strings.TrimSpace(group.Command) == "" {
 				t.Fatalf("group %d has an empty command", i)
 			}

@@ -214,8 +214,23 @@ func parseConfig(path string, data []byte) (Config, error) {
 			Tools:   toolRefs,
 		})
 	}
+	if err := rejectDuplicateGroupNames(groups); err != nil {
+		return Config{}, err
+	}
 
 	return Config{Path: path, Tools: tools, Groups: groups}, nil
+}
+
+func rejectDuplicateGroupNames(groups []Group) error {
+	seen := make(map[string]int, len(groups))
+	for i, group := range groups {
+		prev, ok := seen[group.Name]
+		if ok {
+			return fmt.Errorf("duplicate name %q at groups[%d] and groups[%d]", group.Name, prev, i)
+		}
+		seen[group.Name] = i
+	}
+	return nil
 }
 
 func parseTools(raw map[string]any, loc string) ([]Tool, error) {
