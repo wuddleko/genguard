@@ -158,6 +158,9 @@ func parseCommandFlags(args []string, stderr io.Writer, usage commandUsage) (com
 		}
 		return commandFlags{}, 2, false
 	}
+	if *configPath != "" && *configShort != "" && *configPath != *configShort {
+		return commandFlags{}, errorExit(stderr, "", "cannot use -c and --config with different paths"), false
+	}
 	selected := *configPath
 	if selected == "" {
 		selected = *configShort
@@ -195,7 +198,7 @@ func resolveConfigPath(stderr io.Writer, flags commandFlags) (path string, useAl
 			return "", false, errorExit(stderr, "", err.Error()), false
 		}
 		if found == "" {
-			return "", false, errorExit(stderr, "", "no genguard.yaml found (pass --config)"), false
+			return "", false, errorExit(stderr, "", "no genguard.yaml or genguard.yml found (pass --config)"), false
 		}
 		path = found
 	}

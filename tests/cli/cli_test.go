@@ -114,8 +114,45 @@ func TestCLINoConfigExit2(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("code = %d, want 2", code)
 	}
-	if !strings.Contains(stderr, "no genguard.yaml found") {
+	if !strings.Contains(stderr, "no genguard.yaml or genguard.yml found (pass --config)") {
 		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestCLIConfigFlagsAreOnePath(t *testing.T) {
+	root := initCLIRepo(t)
+	writeCLIConfig(t, root, "greeting", `python3 -c "open('ran','w').close()"`)
+	commitRepo(t, root)
+	configPath := filepath.Join(root, "genguard.yaml")
+	other := filepath.Join(root, "other.yaml")
+
+	for _, args := range [][]string{
+		{"check", "-c", other, "--config", configPath},
+		{"check", "--config", configPath, "-c", other},
+		{"run", "-c", other, "--config", configPath},
+		{"run", "--config", configPath, "-c", other},
+	} {
+		stdout, stderr, code := runCLI(args)
+		if code != 2 || stdout != "" || !strings.Contains(stderr, "cannot use -c and --config with different paths") {
+			t.Fatalf("%v: code = %d stdout = %q stderr = %q", args, code, stdout, stderr)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); !os.IsNotExist(err) {
+		t.Fatal("command ran")
+	}
+
+	for _, args := range [][]string{
+		{"check", "-c", configPath},
+		{"check", "--config", configPath},
+		{"check", "-c", configPath, "--config", configPath},
+	} {
+		_, stderr, code := runCLI(args)
+		if code != 0 {
+			t.Fatalf("%v: code = %d stderr = %q", args, code, stderr)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "ran")); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -2234,7 +2271,7 @@ func TestCLIRunNoConfigExit2(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("code = %d, want 2", code)
 	}
-	if stdout != "" || !strings.Contains(stderr, "no genguard.yaml found") {
+	if stdout != "" || !strings.Contains(stderr, "no genguard.yaml or genguard.yml found (pass --config)") {
 		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
 	}
 }
@@ -2386,56 +2423,6 @@ func TestCLICheckShortConfig(t *testing.T) {
 	}
 	if string(got) != "hello world\n" {
 		t.Fatalf("output = %q", got)
-	}
-}
-
-func TestCLICheckConfigFlagWinsOverShort(t *testing.T) {
-	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bad := filepath.Join(root, "bad.yaml")
-	if err := os.WriteFile(bad, []byte("groups:\n  - name: broken\n    command: \"exit 3\"\n    outputs:\n      - generated/hello.txt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	good := filepath.Join(root, "genguard.yaml")
-
-	for _, args := range [][]string{
-		{"check", "-c", bad, "--config", good},
-		{"check", "--config", good, "-c", bad},
-	} {
-		stdout, stderr, code := runCLI(args)
-		if code != 0 {
-			t.Fatalf("%v: code = %d, want 0; stderr = %q", args, code, stderr)
-		}
-		if stdout != "Generated files match the generators.\n" {
-			t.Fatalf("%v: stdout = %q", args, stdout)
-		}
-	}
-}
-
-func TestCLIRunConfigFlagWinsOverShort(t *testing.T) {
-	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bad := filepath.Join(root, "bad.yaml")
-	if err := os.WriteFile(bad, []byte("groups:\n  - name: broken\n    command: \"exit 3\"\n    outputs:\n      - generated/hello.txt\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	good := filepath.Join(root, "genguard.yaml")
-
-	for _, args := range [][]string{
-		{"run", "-c", bad, "--config", good},
-		{"run", "--config", good, "-c", bad},
-	} {
-		stdout, stderr, code := runCLI(args)
-		if code != 0 {
-			t.Fatalf("%v: code = %d, want 0; stderr = %q", args, code, stderr)
-		}
-		if stdout != "Generated files written.\n" {
-			t.Fatalf("%v: stdout = %q", args, stdout)
-		}
 	}
 }
 
@@ -3090,7 +3077,6 @@ func TestCLICheckAllRejectsConfigFlag(t *testing.T) {
 		{"check", "-c", "genguard.yaml", "--all"},
 		{"check", "--config", "genguard.yaml", "--all"},
 		{"check", "-all", "-c", "genguard.yaml"},
-		{"check", "--all", "-c", "a.yaml", "--config", "b.yaml"},
 	} {
 		stdout, stderr, code := runCLI(args)
 		if code != 2 {
