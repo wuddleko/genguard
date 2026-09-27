@@ -60,13 +60,13 @@ func FuzzParseConfig(f *testing.F) {
 				t.Fatalf("group %d has no outputs", i)
 			}
 			for _, output := range group.Outputs {
-				if strings.TrimSpace(output) == "" {
-					t.Fatalf("group %d has a blank output %q", i, output)
+				if strings.TrimSpace(output) == "" || strings.HasPrefix(output, ":") {
+					t.Fatalf("group %d has output %q", i, output)
 				}
 			}
 			for _, input := range group.Inputs {
-				if strings.TrimSpace(input) == "" {
-					t.Fatalf("group %d has a blank input %q", i, input)
+				if strings.TrimSpace(input) == "" || strings.HasPrefix(input, ":") {
+					t.Fatalf("group %d has input %q", i, input)
 				}
 			}
 			seen := make(map[string]struct{}, len(group.Tools))

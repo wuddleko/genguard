@@ -231,6 +231,35 @@ func TestLoadConfigFiltersBlankOutputEntries(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAcceptsLiteralPathsAndGlobs(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	configPath := filepath.Join(root, "genguard.yaml")
+	content := "groups:\n" +
+		"  - command: \"true\"\n" +
+		"    outputs:\n" +
+		"      - gen/\n" +
+		"      - gen/a.txt\n" +
+		"      - \"*.pb.go\"\n" +
+		"    inputs:\n" +
+		"      - proto/\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := cfg.Groups[0]
+	if strings.Join(got.Outputs, ",") != "gen/,gen/a.txt,*.pb.go" {
+		t.Fatalf("outputs = %v", got.Outputs)
+	}
+	if len(got.Inputs) != 1 || got.Inputs[0] != "proto/" {
+		t.Fatalf("inputs = %v", got.Inputs)
+	}
+}
+
 func TestLoadConfigValidationErrors(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -301,6 +330,22 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 		{
 			"typo: true\ngroups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n",
 			`genguard.yaml: unknown key "typo"`,
+		},
+		{
+			"groups:\n  - command: \"true\"\n    outputs:\n      - \":(exclude)gen/keep.txt\"\n",
+			"groups[0].outputs[0]: pathspec magic is not supported: \":(exclude)gen/keep.txt\"",
+		},
+		{
+			"groups:\n  - command: \"true\"\n    outputs:\n      - \":!gen/keep.txt\"\n",
+			"groups[0].outputs[0]: pathspec magic is not supported: \":!gen/keep.txt\"",
+		},
+		{
+			"groups:\n  - command: \"true\"\n    outputs:\n      - \":/gen/a.txt\"\n",
+			"groups[0].outputs[0]: pathspec magic is not supported: \":/gen/a.txt\"",
+		},
+		{
+			"groups:\n  - command: \"true\"\n    outputs:\n      - gen/\n    inputs:\n      - \":(exclude)queries/\"\n",
+			"groups[0].inputs[0]: pathspec magic is not supported: \":(exclude)queries/\"",
 		},
 	}
 	for _, tc := range cases {

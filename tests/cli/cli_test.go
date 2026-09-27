@@ -119,6 +119,55 @@ func TestCLINoConfigExit2(t *testing.T) {
 	}
 }
 
+func TestCLIPathspecMagicDoesNotDelete(t *testing.T) {
+	root := t.TempDir()
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	keep := filepath.Join(root, "gen", "keep.txt")
+	if err := os.MkdirAll(filepath.Dir(keep), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keep, []byte("hand-written\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "gen", "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(root, "genguard.yaml")
+	content := "clean: true\n" +
+		"groups:\n" +
+		"  - name: g\n" +
+		"    command: \"true\"\n" +
+		"    outputs:\n" +
+		"      - gen/\n" +
+		"      - \":(exclude)gen/keep.txt\"\n"
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "."); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, code := runCLI([]string{"check", "--config", configPath})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
+	}
+	if !strings.Contains(stderr, "pathspec magic is not supported") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+	got, err := os.ReadFile(keep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hand-written\n" {
+		t.Fatalf("keep.txt = %q", string(got))
+	}
+}
+
 func TestCLIInvalidConfigExit2(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "genguard.yaml")

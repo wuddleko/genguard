@@ -142,8 +142,8 @@ Top-level keys are `groups` (required, non-empty) and `clean`. An unknown key is
 
 - **`name`** — optional label. The fallback is `groups[0]`, `groups[1]`, and so on.
 - **`command`** — required. Run with `sh -c` from the config directory. On Windows, `sh` or `bash` on `PATH`; otherwise `%COMSPEC% /C`.
-- **`outputs`** — required, non-empty git pathspecs, relative to the config file.
-- **`inputs`** — optional pathspecs for `--since`. Omit the key and the group runs every time. An empty list is an error.
+- **`outputs`** — required, non-empty literal paths and globs, relative to the config file. An entry starting with `:` is a config error.
+- **`inputs`** — optional paths for `--since`, with the same rules as `outputs`. Omit the key and the group runs every time. An empty list is an error.
 - **`clean`** — optional, default `false`. Delete the outputs before the command. A top-level `clean` applies to every group; a group can override it.
 
 After the command, genguard compares `HEAD` to the working tree under `outputs`:

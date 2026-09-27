@@ -419,9 +419,14 @@ func pathsFrom(raw any, key, loc string) ([]string, error) {
 			return nil, fmt.Errorf("%s.%s[%d] must be a string", loc, key, i)
 		}
 		value = strings.TrimSpace(value)
-		if value != "" {
-			paths = append(paths, value)
+		if value == "" {
+			continue
 		}
+		// clean treats each entry as a path. Git magic such as :(exclude) would not protect it.
+		if strings.HasPrefix(value, ":") {
+			return nil, fmt.Errorf("%s.%s[%d]: pathspec magic is not supported: %q", loc, key, i, value)
+		}
+		paths = append(paths, value)
 	}
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("%s '%s' has no usable paths", loc, key)
