@@ -118,6 +118,27 @@ func TestSummaryLine(t *testing.T) {
 			want: "  greeting: OK",
 		},
 		{
+			name: "ok with tools",
+			g: check.GroupResult{
+				Name:   "protobuf",
+				Status: check.GroupOK,
+				Tools: []check.ToolResult{
+					{Name: "buf", Want: "1.32.0", Have: "1.32.0"},
+					{Name: "sqlc", Have: "1.27.0"},
+				},
+			},
+			want: "  protobuf: OK; buf 1.32.0, sqlc 1.27.0",
+		},
+		{
+			name: "ok skips a tool with no version",
+			g: check.GroupResult{
+				Name:   "protobuf",
+				Status: check.GroupOK,
+				Tools:  []check.ToolResult{{Name: "buf", Want: "1.0.0"}},
+			},
+			want: "  protobuf: OK",
+		},
+		{
 			name: "skipped",
 			g:    check.GroupResult{Name: "protobuf", Status: check.GroupSkipped},
 			want: "  protobuf: skipped",
@@ -130,6 +151,16 @@ func TestSummaryLine(t *testing.T) {
 				Drifts: []check.Drift{{Kind: "modified", Path: "a"}},
 			},
 			want: "  greeting: drift (1 modified)",
+		},
+		{
+			name: "drift with tool",
+			g: check.GroupResult{
+				Name:   "protobuf",
+				Status: check.GroupDrift,
+				Drifts: []check.Drift{{Kind: "modified", Path: "a"}},
+				Tools:  []check.ToolResult{{Name: "buf", Want: "1.32.0", Have: "1.32.0"}},
+			},
+			want: "  protobuf: drift (1 modified); buf 1.32.0",
 		},
 		{
 			name: "mixed kinds",
@@ -236,6 +267,64 @@ func TestSummaryLine(t *testing.T) {
 			name: "nil error",
 			g:    check.GroupResult{Name: "greeting", Status: check.GroupError},
 			want: "  greeting: error (unknown error)",
+		},
+		{
+			name: "tool error stays one clause",
+			g: check.GroupResult{
+				Name:   "protobuf",
+				Status: check.GroupError,
+				Err:    errors.New("buf: want 1.32.0, have 1.28.1"),
+				Tools:  []check.ToolResult{{Name: "buf", Want: "1.32.0", Have: "1.28.1"}},
+			},
+			want: "  protobuf: error (buf: want 1.32.0, have 1.28.1)",
+		},
+		{
+			name: "second mismatch stays in the error",
+			g: check.GroupResult{
+				Name:   "protobuf",
+				Status: check.GroupError,
+				Err:    errors.New("buf: want 1.32.0, have 1.28.1"),
+				Tools: []check.ToolResult{
+					{Name: "buf", Want: "1.32.0", Have: "1.28.1"},
+					{Name: "sqlc", Want: "2.0.0", Have: "9.9.9"},
+				},
+			},
+			want: "  protobuf: error (buf: want 1.32.0, have 1.28.1)",
+		},
+		{
+			name: "command error names a matched tool",
+			g: check.GroupResult{
+				Name:   "protobuf",
+				Status: check.GroupError,
+				Err:    errors.New("command failed (exit 1): no output"),
+				Tools:  []check.ToolResult{{Name: "buf", Want: "1.32.0", Have: "1.32.0"}},
+			},
+			want: "  protobuf: error (command failed (exit 1): no output); buf 1.32.0",
+		},
+		{
+			name: "command error with drift names the tool last",
+			g: check.GroupResult{
+				Name:   "protobuf",
+				Status: check.GroupError,
+				Err:    errors.New("command failed (exit 1): no output"),
+				Drifts: []check.Drift{{Kind: "modified", Path: "a"}},
+				Tools:  []check.ToolResult{{Name: "buf", Want: "1.32.0", Have: "1.32.0"}},
+			},
+			want: "  protobuf: error (command failed (exit 1): no output); drift (1 modified); buf 1.32.0",
+		},
+		{
+			name: "error keeps a matched sibling",
+			g: check.GroupResult{
+				Name:   "protobuf",
+				Status: check.GroupError,
+				Err:    errors.New("sqlc: want 2.0.0, have 9.9.9"),
+				Tools: []check.ToolResult{
+					{Name: "buf", Want: "1.32.0", Have: "1.32.0"},
+					{Name: "sqlc", Want: "2.0.0", Have: "9.9.9"},
+					{Name: "protoc", Have: "1.0.0"},
+				},
+			},
+			want: "  protobuf: error (sqlc: want 2.0.0, have 9.9.9); buf 1.32.0, protoc 1.0.0",
 		},
 		{
 			name: "whitespace error",

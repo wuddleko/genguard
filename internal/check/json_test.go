@@ -124,6 +124,53 @@ func TestFormatJSONCleanupError(t *testing.T) {
 	}
 }
 
+func TestFormatJSONTools(t *testing.T) {
+	run := RunResult{Configs: []ConfigRun{{
+		Path: "genguard.yaml",
+		Result: ConfigResult{Groups: []GroupResult{
+			{
+				Name:   "protobuf",
+				Status: GroupDrift,
+				Drifts: []Drift{{Kind: "modified", Path: "gen/a.go"}},
+				Tools: []ToolResult{
+					{Name: "buf", Want: "1.32.0", Have: "1.28.1"},
+					{Name: "sqlc", Have: "1.27.0"},
+					{Name: "protoc", Want: "1.0.0"},
+				},
+			},
+			{Name: "quiet", Status: GroupSkipped, Tools: []ToolResult{{Name: "buf", Have: "1.0.0"}}},
+			{Name: "plain", Status: GroupOK},
+		}},
+	}}}
+	text := mustFormatJSON(t, run)
+	if strings.Contains(text, `"tools": null`) {
+		t.Fatalf("json = %s", text)
+	}
+	doc := decodeJSON(t, text)
+	got := doc.Configs[0].Groups[0].Tools
+	if len(got) != 3 || got[0].Name != "buf" || got[0].Want != "1.32.0" || got[0].Have != "1.28.1" {
+		t.Fatalf("tools = %+v", got)
+	}
+	if got[1].Name != "sqlc" || got[1].Want != "" || got[1].Have != "1.27.0" {
+		t.Fatalf("unpinned = %+v", got[1])
+	}
+	if got[2].Name != "protoc" || got[2].Want != "1.0.0" || got[2].Have != "" {
+		t.Fatalf("missing version = %+v", got[2])
+	}
+	sqlc := text[strings.Index(text, `"name": "sqlc"`):strings.Index(text, `"name": "protoc"`)]
+	if strings.Contains(sqlc, `"want"`) {
+		t.Fatalf("unpinned tool has want: %s", sqlc)
+	}
+	protoc := text[strings.Index(text, `"name": "protoc"`):]
+	protoc = protoc[:strings.Index(protoc, "}")]
+	if strings.Contains(protoc, `"have"`) {
+		t.Fatalf("tool with no version has have: %s", protoc)
+	}
+	if doc.Configs[0].Groups[1].Tools != nil || doc.Configs[0].Groups[2].Tools != nil {
+		t.Fatalf("omitted tools = %+v %+v", doc.Configs[0].Groups[1].Tools, doc.Configs[0].Groups[2].Tools)
+	}
+}
+
 func TestFormatJSONDoesNotEscapePath(t *testing.T) {
 	text := mustFormatJSON(t, RunResult{Configs: []ConfigRun{{
 		Path: "a<b>&c.yaml",
@@ -161,6 +208,11 @@ type jsonDoc struct {
 				Kind string `json:"kind"`
 				Path string `json:"path"`
 			} `json:"drifts"`
+			Tools []struct {
+				Name string `json:"name"`
+				Want string `json:"want"`
+				Have string `json:"have"`
+			} `json:"tools"`
 		} `json:"groups"`
 	} `json:"configs"`
 }

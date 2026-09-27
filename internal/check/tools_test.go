@@ -695,6 +695,80 @@ func TestVersionProbeFollowsTheConfigDirectory(t *testing.T) {
 	}
 }
 
+func TestToolVersionsInSummaryAndJSON(t *testing.T) {
+	t.Run("ok", func(t *testing.T) {
+		result := checkToolReport(t, "1.32.0", "1.32.0", "true")
+		if result.Groups[0].SummaryLine() != "  protobuf: OK; buf 1.32.0" {
+			t.Fatalf("summary = %q", result.Groups[0].SummaryLine())
+		}
+		assertToolJSON(t, result, "1.32.0", "1.32.0")
+	})
+	t.Run("drift", func(t *testing.T) {
+		result := checkToolReport(t, "1.32.0", "1.32.0", `python3 -c "open('out.txt','w').write('new\n')"`)
+		if result.Groups[0].SummaryLine() != "  protobuf: drift (1 modified); buf 1.32.0" {
+			t.Fatalf("summary = %q", result.Groups[0].SummaryLine())
+		}
+		assertToolJSON(t, result, "1.32.0", "1.32.0")
+	})
+	t.Run("mismatch", func(t *testing.T) {
+		result := checkToolReport(t, "9.9.9", "1.28.1", "true")
+		const want = "  protobuf: error (buf: want 9.9.9, have 1.28.1)"
+		if result.Groups[0].SummaryLine() != want {
+			t.Fatalf("summary = %q", result.Groups[0].SummaryLine())
+		}
+		assertToolJSON(t, result, "9.9.9", "1.28.1")
+	})
+	t.Run("command", func(t *testing.T) {
+		result := checkToolReport(t, "1.32.0", "1.32.0", "exit 1")
+		const want = "  protobuf: error (command failed (exit 1): no output); buf 1.32.0"
+		if result.Groups[0].SummaryLine() != want {
+			t.Fatalf("summary = %q", result.Groups[0].SummaryLine())
+		}
+		assertToolJSON(t, result, "1.32.0", "1.32.0")
+	})
+}
+
+func checkToolReport(t *testing.T, pin, printed, generate string) ConfigResult {
+	t.Helper()
+	root := gitRepo(t)
+	writeTracked(t, root, "out.txt", "old\n")
+	cfg := config.Config{
+		Path: filepath.Join(root, "genguard.yaml"),
+		Tools: []config.Tool{{
+			Name:    "buf",
+			Version: pin,
+			Command: fmt.Sprintf(`python3 -c "print('%s')"`, printed),
+		}},
+		Groups: []config.Group{{
+			Name:    "protobuf",
+			Command: generate,
+			Outputs: []string{"out.txt"},
+			Tools:   []string{"buf"},
+		}},
+	}
+	result, err := checkConfig(cfg, "", nil, commandLog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func assertToolJSON(t *testing.T, result ConfigResult, want, have string) {
+	t.Helper()
+	text, err := FormatJSON(RunResult{Configs: []ConfigRun{{
+		Path:   "genguard.yaml",
+		Result: result,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := decodeJSON(t, text)
+	tools := doc.Configs[0].Groups[0].Tools
+	if len(tools) != 1 || tools[0].Name != "buf" || tools[0].Want != want || tools[0].Have != have {
+		t.Fatalf("tools = %+v\n%s", tools, text)
+	}
+}
+
 func countingProbe(t *testing.T, printed string) (command, countPath string) {
 	t.Helper()
 	return writeCountingProbe(t, fmt.Sprintf("print(%s)\n", strconv.Quote(printed)))

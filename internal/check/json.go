@@ -23,6 +23,13 @@ type jsonGroup struct {
 	Status string      `json:"status"`
 	Error  string      `json:"error,omitempty"`
 	Drifts []jsonDrift `json:"drifts,omitempty"`
+	Tools  []jsonTool  `json:"tools,omitempty"`
+}
+
+type jsonTool struct {
+	Name string `json:"name"`
+	Want string `json:"want,omitempty"`
+	Have string `json:"have,omitempty"`
 }
 
 type jsonDrift struct {
@@ -73,6 +80,15 @@ func jsonConfigFrom(repoRoot string, cfg ConfigRun) jsonConfig {
 				Kind: drift.Kind,
 				Path: jsonDriftPath(repoRoot, cfg.Path, drift.Path),
 			})
+		}
+		if group.Status != GroupSkipped {
+			for _, tool := range group.Tools {
+				item.Tools = append(item.Tools, jsonTool{
+					Name: tool.Name,
+					Want: tool.Want,
+					Have: tool.Have,
+				})
+			}
 		}
 		out.Groups = append(out.Groups, item)
 	}

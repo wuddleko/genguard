@@ -93,20 +93,48 @@ func (r ConfigResult) Counts() (ok, drift, errors int) {
 func (g GroupResult) SummaryLine() string {
 	switch g.Status {
 	case GroupOK:
-		return fmt.Sprintf("  %s: OK", g.Name)
+		return withToolVersions(fmt.Sprintf("  %s: OK", g.Name), g.Tools)
 	case GroupDrift:
-		return fmt.Sprintf("  %s: drift (%s)", g.Name, driftKindSummary(g.Drifts))
+		line := fmt.Sprintf("  %s: drift (%s)", g.Name, driftKindSummary(g.Drifts))
+		return withToolVersions(line, g.Tools)
 	case GroupError:
 		line := fmt.Sprintf("  %s: error (%s)", g.Name, oneLineError(g.Err))
 		if len(g.Drifts) > 0 {
 			line += "; drift (" + driftKindSummary(g.Drifts) + ")"
 		}
-		return line
+		return withToolVersions(line, matchedTools(g.Tools))
 	case GroupSkipped:
 		return fmt.Sprintf("  %s: skipped", g.Name)
 	default:
 		return fmt.Sprintf("  %s: unknown", g.Name)
 	}
+}
+
+// matchedTools keeps tools that reported the version the config asked for, and tools with no version set.
+// A tool on the wrong version is already named in the error, so the summary does not list it again.
+func matchedTools(tools []ToolResult) []ToolResult {
+	matched := make([]ToolResult, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Have == "" || (tool.Want != "" && tool.Want != tool.Have) {
+			continue
+		}
+		matched = append(matched, tool)
+	}
+	return matched
+}
+
+func withToolVersions(line string, tools []ToolResult) string {
+	parts := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Have == "" {
+			continue
+		}
+		parts = append(parts, tool.Name+" "+tool.Have)
+	}
+	if len(parts) == 0 {
+		return line
+	}
+	return line + "; " + strings.Join(parts, ", ")
 }
 
 func (r ConfigResult) SummaryLines() []string {
