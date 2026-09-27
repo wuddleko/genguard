@@ -312,10 +312,10 @@ func TestDiscoveryWhenWorkingDirectoryIsGone(t *testing.T) {
 	if _, err := config.FindAll("repo"); err == nil {
 		t.Fatal("FindAll relative start")
 	}
-	if _, err := config.FindConfig(""); err == nil {
+	if _, err := config.FindConfig("", ""); err == nil {
 		t.Fatal("FindConfig empty start")
 	}
-	if _, err := config.FindConfig("repo"); err == nil {
+	if _, err := config.FindConfig("repo", ""); err == nil {
 		t.Fatal("FindConfig relative start")
 	}
 }

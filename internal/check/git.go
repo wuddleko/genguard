@@ -23,6 +23,12 @@ func requireGitRepo(root string) error {
 	return nil
 }
 
+// RepoRoot is the git working tree that contains dir.
+// An empty dir uses the current working directory.
+func RepoRoot(dir string) (string, error) {
+	return gitRepoRoot(dir)
+}
+
 func gitRepoRoot(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {

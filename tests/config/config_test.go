@@ -514,7 +514,7 @@ func TestFindConfigInCurrentDirectory(t *testing.T) {
 	}
 	testutil.Chdir(t, root)
 
-	found, err := config.FindConfig("")
+	found, err := config.FindConfig("", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,13 +534,122 @@ func TestFindConfigInParentDirectory(t *testing.T) {
 	}
 	testutil.Chdir(t, nested)
 
-	found, err := config.FindConfig("")
+	found, err := config.FindConfig("", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if found != filepath.Join(root, "genguard.yaml") {
 		t.Fatalf("found = %q", found)
 	}
+}
+
+func TestFindConfigIncludesStopAndSkipsItsParent(t *testing.T) {
+	parent := t.TempDir()
+	if _, err := testutil.WriteGenguardConfig(parent, "out.txt", "true", "genguard.yaml", nil); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "repo")
+	nested := filepath.Join(root, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := config.FindConfig(nested, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found != "" {
+		t.Fatalf("found = %q", found)
+	}
+
+	if _, err := testutil.WriteGenguardConfig(root, "out.txt", "true", "genguard.yml", nil); err != nil {
+		t.Fatal(err)
+	}
+	found, err = config.FindConfig(nested, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found != filepath.Join(root, "genguard.yml") {
+		t.Fatalf("found = %q", found)
+	}
+}
+
+func TestFindConfigStopIgnoresUnrelatedWalk(t *testing.T) {
+	parent := t.TempDir()
+	if _, err := testutil.WriteGenguardConfig(parent, "out.txt", "true", "genguard.yaml", nil); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "repo")
+	nested := filepath.Join(root, "nested")
+	other := filepath.Join(parent, "other")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := config.FindConfig(nested, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found != "" {
+		t.Fatalf("found = %q", found)
+	}
+}
+
+func TestFindConfigStopMatchesSymlinkSpelling(t *testing.T) {
+	parent := t.TempDir()
+	if _, err := testutil.WriteGenguardConfig(parent, "out.txt", "true", "genguard.yaml", nil); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "repo")
+	nested := filepath.Join(root, "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(root, "out.txt", "true", "genguard.yml", nil); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(parent, "link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := config.FindConfig(nested, link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameConfigPath(t, found, filepath.Join(root, "genguard.yml")) {
+		t.Fatalf("found = %q", found)
+	}
+
+	found, err = config.FindConfig(filepath.Join(link, "nested"), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameConfigPath(t, found, filepath.Join(root, "genguard.yml")) {
+		t.Fatalf("found = %q", found)
+	}
+}
+
+func sameConfigPath(t *testing.T, got, want string) bool {
+	t.Helper()
+	if got == want {
+		return true
+	}
+	if got == "" || want == "" {
+		return false
+	}
+	left, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		return false
+	}
+	right, err := filepath.EvalSymlinks(want)
+	if err != nil {
+		return false
+	}
+	return left == right
 }
 
 func TestFindConfigPrefersNearest(t *testing.T) {
@@ -557,7 +666,7 @@ func TestFindConfigPrefersNearest(t *testing.T) {
 	}
 	testutil.Chdir(t, nested)
 
-	found, err := config.FindConfig("")
+	found, err := config.FindConfig("", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -671,7 +780,7 @@ func TestFindConfigRejectsBothNames(t *testing.T) {
 	}
 	testutil.Chdir(t, nested)
 
-	_, err := config.FindConfig("")
+	_, err := config.FindConfig("", "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -689,7 +798,7 @@ func TestFindConfigIgnoresDirectoryNamedYaml(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	found, err := config.FindConfig(root)
+	found, err := config.FindConfig(root, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -712,7 +821,7 @@ func TestFindConfigStatError(t *testing.T) {
 		t.Skip("directory permissions are not enforced")
 	}
 
-	_, err := config.FindConfig(root)
+	_, err := config.FindConfig(root, "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -725,7 +834,7 @@ func TestFindConfigReturnsEmpty(t *testing.T) {
 	root := t.TempDir()
 	testutil.Chdir(t, root)
 
-	found, err := config.FindConfig("")
+	found, err := config.FindConfig("", "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -146,8 +146,8 @@ func parseCommandFlags(args []string, stderr io.Writer, usage commandUsage) (com
 	fs := flag.NewFlagSet(usage.name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	all := fs.Bool("all", false, usage.all)
-	configPath := fs.String("config", "", "Path to genguard.yaml (default: walk parents from cwd)")
-	configShort := fs.String("c", "", "Path to genguard.yaml (default: walk parents from cwd)")
+	configPath := fs.String("config", "", "Path to genguard.yaml (default: walk from cwd up to the git repository root)")
+	configShort := fs.String("c", "", "Path to genguard.yaml (default: walk from cwd up to the git repository root)")
 	since := fs.String("since", "", "Run a group with inputs when its inputs, outputs, or config file differ from HEAD or from the merge-base of this ref, or a declared output file is missing")
 	isolated := fs.Bool("isolated", false, usage.isolated)
 	asJSON := fs.Bool("json", false, "Print the result as JSON on stdout")
@@ -193,7 +193,11 @@ func resolveConfigPath(stderr io.Writer, flags commandFlags) (path string, useAl
 	}
 	path = flags.selected
 	if path == "" {
-		found, err := config.FindConfig("")
+		root, err := check.RepoRoot("")
+		if err != nil {
+			return "", false, errorExit(stderr, "", err.Error()), false
+		}
+		found, err := config.FindConfig("", root)
 		if err != nil {
 			return "", false, errorExit(stderr, "", err.Error()), false
 		}

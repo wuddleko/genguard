@@ -44,10 +44,23 @@ func (c Config) Root() string {
 	return filepath.Dir(c.Path)
 }
 
-func FindConfig(start string) (string, error) {
+// FindConfig walks from start toward the filesystem root.
+// stop is included and its parent is not, including symlink spellings.
+// An empty stop does not limit the walk. A stop that is not an ancestor
+// of start ends the walk after start, so a config above stop is not used.
+func FindConfig(start, stop string) (string, error) {
 	here, err := resolveStart(start)
 	if err != nil {
 		return "", err
+	}
+	here = filepath.Clean(here)
+	stopDir := ""
+	if strings.TrimSpace(stop) != "" {
+		stopDir, err = resolveStart(stop)
+		if err != nil {
+			return "", err
+		}
+		stopDir = filepath.Clean(stopDir)
 	}
 	for dir := here; ; dir = filepath.Dir(dir) {
 		found, err := configFile(dir)
@@ -57,12 +70,64 @@ func FindConfig(start string) (string, error) {
 		if found != "" {
 			return found, nil
 		}
+		if stopDir != "" && reachedStop(dir, stopDir) {
+			break
+		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			break
 		}
 	}
 	return "", nil
+}
+
+func reachedStop(dir, stop string) bool {
+	if sameDir(dir, stop) {
+		return true
+	}
+	return !dirInside(stop, dir)
+}
+
+func sameDir(a, b string) bool {
+	a = filepath.Clean(a)
+	b = filepath.Clean(b)
+	if a == b {
+		return true
+	}
+	left, err := filepath.EvalSymlinks(a)
+	if err != nil {
+		return false
+	}
+	right, err := filepath.EvalSymlinks(b)
+	if err != nil {
+		return false
+	}
+	return filepath.Clean(left) == filepath.Clean(right)
+}
+
+func dirInside(root, path string) bool {
+	root = filepath.Clean(root)
+	path = filepath.Clean(path)
+	if relInside(root, path) {
+		return true
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	resolvedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return false
+	}
+	return relInside(filepath.Clean(resolvedRoot), filepath.Clean(resolvedPath))
+}
+
+func relInside(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func configFile(dir string) (string, error) {

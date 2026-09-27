@@ -114,7 +114,7 @@ func TestCLINoConfigExit2(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("code = %d, want 2", code)
 	}
-	if !strings.Contains(stderr, "no genguard.yaml or genguard.yml found (pass --config)") {
+	if !strings.Contains(stderr, "not a git work tree") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 }
@@ -444,6 +444,57 @@ func TestCLIAutoDiscoversConfig(t *testing.T) {
 	}
 }
 
+func TestCLIDiscoveryStopsAtRepoRoot(t *testing.T) {
+	parent := t.TempDir()
+	if _, err := testutil.WriteGenguardConfig(parent, "out.txt", "true", "genguard.yaml", nil); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(parent, "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "svc")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, nested)
+
+	stdout, stderr, code := runCLI([]string{"check"})
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "no genguard.yaml or genguard.yml found (pass --config)") {
+		t.Fatalf("code = %d stdout = %q stderr = %q", code, stdout, stderr)
+	}
+
+	writeCLIConfig(t, root, "greeting", "true")
+	commitRepo(t, root)
+	stdout, stderr, code = runCLI([]string{"check"})
+	if code != 0 {
+		t.Fatalf("code = %d stdout = %q stderr = %q", code, stdout, stderr)
+	}
+}
+
+func TestCLIDiscoverNotGitIgnoresParentConfig(t *testing.T) {
+	parent := t.TempDir()
+	if _, err := testutil.WriteGenguardConfig(parent, "out.txt", "true", "genguard.yaml", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "out.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scratch := filepath.Join(parent, "scratch")
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, scratch)
+
+	stdout, stderr, code := runCLI([]string{"check"})
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "not a git work tree") {
+		t.Fatalf("code = %d stdout = %q stderr = %q", code, stdout, stderr)
+	}
+	if strings.Contains(stderr, "Generated files") {
+		t.Fatalf("used parent config: stderr = %q", stderr)
+	}
+}
+
 func TestCLIEntryPoint(t *testing.T) {
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
 	if err != nil {
@@ -646,6 +697,9 @@ func TestCLICheckHelpExit0(t *testing.T) {
 		}
 		if !strings.Contains(stderr, "-config") && !strings.Contains(stderr, "-c") {
 			t.Fatalf("%v: stderr = %q", args, stderr)
+		}
+		if !strings.Contains(stderr, "up to the git repository root") {
+			t.Fatalf("%v: missing config default: %q", args, stderr)
 		}
 	}
 }
@@ -1742,6 +1796,9 @@ func TestCLIRunHelpExit0(t *testing.T) {
 		if !strings.Contains(stderr, "-config") && !strings.Contains(stderr, "-c") {
 			t.Fatalf("%v: stderr = %q", args, stderr)
 		}
+		if !strings.Contains(stderr, "up to the git repository root") {
+			t.Fatalf("%v: missing config default: %q", args, stderr)
+		}
 		if !strings.Contains(stderr, "-since") {
 			t.Fatalf("%v: missing -since: %q", args, stderr)
 		}
@@ -2271,7 +2328,7 @@ func TestCLIRunNoConfigExit2(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("code = %d, want 2", code)
 	}
-	if stdout != "" || !strings.Contains(stderr, "no genguard.yaml or genguard.yml found (pass --config)") {
+	if stdout != "" || !strings.Contains(stderr, "not a git work tree") {
 		t.Fatalf("stdout = %q stderr = %q", stdout, stderr)
 	}
 }

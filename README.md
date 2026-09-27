@@ -97,7 +97,7 @@ A group with no `inputs` still runs. A skipped group does not run its command, a
 - `check` — run the generators, leave their files in place, and fail if the declared outputs differ from `HEAD`. A file that is only staged still fails until it is committed.
 - `run` — run the generators and leave their files in place. A success exits 0.
 - `version` — print the version.
-- `-c`, `--config` — config file to use. Otherwise genguard walks up from the current directory for `genguard.yaml` or `genguard.yml`.
+- `-c`, `--config` — config file to use. Otherwise genguard walks up from the current directory for `genguard.yaml` or `genguard.yml`, inside a git work tree.
 - `--all` — every config under the repository.
 - `--since` — skip a group with `inputs` when those paths, its outputs, and the config still match the latest commit that `HEAD` and the ref share.
 - `--isolated` — check the committed files in a temporary worktree and leave your checkout alone. `check` only.
