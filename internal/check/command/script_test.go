@@ -9,12 +9,11 @@ import (
 )
 
 func timeoutScript(pidPath string) string {
-	return "import sys\n" +
+	return "import os, subprocess, sys\n" +
 		"sys.stderr.write('line1\\n')\n" +
 		"sys.stderr.flush()\n" +
-		"import os, subprocess\n" +
 		"child = subprocess.Popen(\n" +
-		"    [sys.executable, '-c', 'import time; time.sleep(30)'],\n" +
+		"    [sys.executable, '-c', 'import time; time.sleep(15)'],\n" +
 		"    stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr, close_fds=False)\n" +
 		"fd = os.open(" + strconv.Quote(pidPath) + ", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)\n" +
 		"os.write(fd, str(child.pid).encode())\n" +
@@ -24,15 +23,16 @@ func timeoutScript(pidPath string) string {
 
 func pythonCommand(t *testing.T, root, name, body string) string {
 	t.Helper()
-	_, args := shellInvocation("")
-	if len(args) == 0 || args[0] != "/C" {
-		return "python3 -c " + quoteForInvocation(args, body)
-	}
 	path := filepath.Join(root, name)
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return "python3 " + quoteForInvocation(args, path)
+	return "python3 " + quoteForShell(path)
+}
+
+func quoteForShell(arg string) string {
+	_, args := shellInvocation("")
+	return quoteForInvocation(args, arg)
 }
 
 func quoteForInvocation(args []string, arg string) string {
