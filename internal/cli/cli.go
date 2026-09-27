@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -8,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/wuddleko/genguard/internal/check"
 	"github.com/wuddleko/genguard/internal/config"
@@ -18,10 +21,22 @@ import (
 var Version = "dev"
 
 func Run(args []string) int {
-	return RunWithIO(args, os.Stdout, os.Stderr)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	// The first signal cancels the run. stop restores the default action so a
+	// second signal kills the process if cleanup is stuck.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	return runArgs(ctx, args, os.Stdout, os.Stderr)
 }
 
 func RunWithIO(args []string, stdout, stderr io.Writer) int {
+	return runArgs(nil, args, stdout, stderr)
+}
+
+func runArgs(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		printUsage(stderr)
 		return 2
@@ -29,9 +44,9 @@ func RunWithIO(args []string, stdout, stderr io.Writer) int {
 
 	switch args[0] {
 	case "check":
-		return runCheck(args[1:], stdout, stderr)
+		return runCheck(ctx, args[1:], stdout, stderr)
 	case "run":
-		return runRun(args[1:], stdout, stderr)
+		return runRun(ctx, args[1:], stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintln(stdout, Version)
 		return 0
@@ -45,7 +60,7 @@ func RunWithIO(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-func runCheck(args []string, stdout, stderr io.Writer) int {
+func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags, code, ok := parseCommandFlags(args, stderr, commandUsage{
 		name:     "check",
 		all:      "Check every genguard.yaml or genguard.yml under the git repository root",
@@ -60,14 +75,14 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	}
 	log, quiet := commandWriter(stderr, flags.verbose)
 	if useAll {
-		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Isolated: flags.isolated, Log: log, Quiet: quiet}, flags.asJSON, "Generated files match the generators.", check.CheckAll)
+		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Isolated: flags.isolated, Log: log, Quiet: quiet, Context: ctx}, flags.asJSON, "Generated files match the generators.", check.CheckAll)
 	}
 
 	var result check.ConfigResult
 	root := filepath.Dir(path)
 	if flags.isolated {
 		var err error
-		result, err = check.CheckSinceIsolatedLog(path, flags.since, log, quiet)
+		result, err = check.CheckSinceIsolatedLog(ctx, path, flags.since, log, quiet)
 		if err != nil && len(result.Groups) == 0 {
 			return errorExit(stderr, path, err.Error())
 		}
@@ -76,7 +91,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return errorExit(stderr, path, err.Error())
 		}
-		result, err = check.CheckSinceLog(cfg, flags.since, log, quiet)
+		result, err = check.CheckSinceLog(ctx, cfg, flags.since, log, quiet)
 		if err != nil {
 			return errorExit(stderr, path, err.Error())
 		}
@@ -96,7 +111,7 @@ func runAll(stdout, stderr io.Writer, opts check.CheckAllOptions, asJSON bool, s
 	return finishRun(stdout, stderr, result, success, asJSON)
 }
 
-func runRun(args []string, stdout, stderr io.Writer) int {
+func runRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags, code, ok := parseCommandFlags(args, stderr, commandUsage{
 		name:     "run",
 		all:      "Run every genguard.yaml or genguard.yml under the git repository root",
@@ -114,14 +129,14 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	}
 	log, quiet := commandWriter(stderr, flags.verbose)
 	if useAll {
-		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Log: log, Quiet: quiet}, flags.asJSON, "Generated files written.", check.RunAll)
+		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Log: log, Quiet: quiet, Context: ctx}, flags.asJSON, "Generated files written.", check.RunAll)
 	}
 
 	cfg, err := config.LoadConfig(path)
 	if err != nil {
 		return errorExit(stderr, path, err.Error())
 	}
-	result, err := check.RunSinceLog(cfg, flags.since, log, quiet)
+	result, err := check.RunSinceLog(ctx, cfg, flags.since, log, quiet)
 	if err != nil {
 		return errorExit(stderr, path, err.Error())
 	}

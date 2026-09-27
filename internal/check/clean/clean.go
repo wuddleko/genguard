@@ -1,19 +1,22 @@
 package clean
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/wuddleko/genguard/internal/check/command"
 	"github.com/wuddleko/genguard/internal/config"
 )
 
 const globChars = "*?[]"
 
-func Outputs(root, configPath string, group config.Group) error {
-	return cleanOutputs(root, configPath, group)
+func Outputs(ctx context.Context, root, configPath string, group config.Group) error {
+	return cleanOutputs(ctx, root, configPath, group)
 }
 
 type cleanTarget struct {
@@ -22,7 +25,10 @@ type cleanTarget struct {
 	isDir  bool
 }
 
-func cleanOutputs(root, configPath string, group config.Group) error {
+func cleanOutputs(ctx context.Context, root, configPath string, group config.Group) error {
+	if ctx != nil && ctx.Err() != nil {
+		return command.ErrInterrupted
+	}
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return err
@@ -37,7 +43,7 @@ func cleanOutputs(root, configPath string, group config.Group) error {
 
 	planned := make([]cleanTarget, 0, len(group.Outputs))
 	for _, spec := range group.Outputs {
-		items, err := planCleanSpec(absRoot, spec)
+		items, err := planCleanSpec(ctx, absRoot, spec)
 		if err != nil {
 			return err
 		}
@@ -56,9 +62,9 @@ func cleanOutputs(root, configPath string, group config.Group) error {
 	return nil
 }
 
-func planCleanSpec(root, spec string) ([]cleanTarget, error) {
+func planCleanSpec(ctx context.Context, root, spec string) ([]cleanTarget, error) {
 	if isGlob(spec) {
-		return planCleanGlob(root, spec)
+		return planCleanGlob(ctx, root, spec)
 	}
 	target, isDir, err := resolveCleanPath(root, spec, true)
 	if err != nil {
@@ -67,7 +73,7 @@ func planCleanSpec(root, spec string) ([]cleanTarget, error) {
 	return []cleanTarget{{spec: spec, target: target, isDir: isDir}}, nil
 }
 
-func planCleanGlob(root, spec string) ([]cleanTarget, error) {
+func planCleanGlob(ctx context.Context, root, spec string) ([]cleanTarget, error) {
 	spec = strings.TrimSpace(spec)
 	if err := validateGlobSpec(spec); err != nil {
 		return nil, err
@@ -75,8 +81,11 @@ func planCleanGlob(root, spec string) ([]cleanTarget, error) {
 	if err := refuseGlobPrefix(root, spec); err != nil {
 		return nil, err
 	}
-	names, err := globCleanFiles(root, spec)
+	names, err := globCleanFiles(ctx, root, spec)
 	if err != nil {
+		if errors.Is(err, command.ErrInterrupted) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("clean %q: %s", spec, err.Error())
 	}
 	items := make([]cleanTarget, 0, len(names))
@@ -123,12 +132,12 @@ func validateGlobSpec(spec string) error {
 	return nil
 }
 
-func globCleanFiles(root, spec string) ([]string, error) {
-	tracked, err := gitNames(root, "ls-files", "-z", "--", spec)
+func globCleanFiles(ctx context.Context, root, spec string) ([]string, error) {
+	tracked, err := gitNames(ctx, root, "ls-files", "-z", "--", spec)
 	if err != nil {
 		return nil, err
 	}
-	others, err := gitNames(root, "ls-files", "--others", "--exclude-standard", "-z", "--", spec)
+	others, err := gitNames(ctx, root, "ls-files", "--others", "--exclude-standard", "-z", "--", spec)
 	if err != nil {
 		return nil, err
 	}

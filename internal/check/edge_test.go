@@ -115,7 +115,7 @@ func TestCheckCommandFailureThenDriftError(t *testing.T) {
 
 func TestRecordCleanDamageReturnsDriftError(t *testing.T) {
 	damage := map[string]pathSnap{}
-	err := recordCleanDamage(damage, t.TempDir(), config.Group{Outputs: []string{"missing.txt"}})
+	err := recordCleanDamage(commandLog{}, damage, t.TempDir(), config.Group{Outputs: []string{"missing.txt"}})
 	if err == nil {
 		t.Fatal("expected a drift listing error")
 	}
@@ -233,22 +233,22 @@ func TestGitMissingFromPath(t *testing.T) {
 	if err == nil || code != -1 || out != "" {
 		t.Fatalf("git() = %q, %d, %v", out, code, err)
 	}
-	if _, err := gitNames(dir, "status"); err == nil {
+	if _, err := gitNames(commandLog{}, dir, "status"); err == nil {
 		t.Fatal("gitNames")
 	}
 	if _, err := gitDiffText(dir, "HEAD"); err == nil {
 		t.Fatal("gitDiffText")
 	}
-	if _, err := gitPrefix(dir); err == nil {
+	if _, err := gitPrefix(commandLog{}, dir); err == nil {
 		t.Fatal("gitPrefix")
 	}
-	if _, err := mergeBase(dir, "HEAD"); err == nil {
+	if _, err := mergeBase(commandLog{}, dir, "HEAD"); err == nil {
 		t.Fatal("mergeBase")
 	}
 }
 
 func TestMergeBaseBlankRef(t *testing.T) {
-	_, err := mergeBase(t.TempDir(), "  ")
+	_, err := mergeBase(commandLog{}, t.TempDir(), "  ")
 	if err == nil || !strings.Contains(err.Error(), "--since requires a ref") {
 		t.Fatalf("error = %v", err)
 	}
@@ -264,21 +264,21 @@ func TestGitQuietFailures(t *testing.T) {
 	})
 	t.Run("merge-base empty", func(t *testing.T) {
 		installGitShim(t, "merge-base-empty")
-		_, err := mergeBase(t.TempDir(), "HEAD")
+		_, err := mergeBase(commandLog{}, t.TempDir(), "HEAD")
 		if err == nil || !strings.Contains(err.Error(), "empty merge-base") {
 			t.Fatalf("error = %v", err)
 		}
 	})
 	t.Run("merge-base quiet", func(t *testing.T) {
 		installGitShim(t, "merge-base-quiet")
-		_, err := mergeBase(t.TempDir(), "HEAD")
+		_, err := mergeBase(commandLog{}, t.TempDir(), "HEAD")
 		if err == nil || !strings.Contains(err.Error(), "git merge-base failed") {
 			t.Fatalf("error = %v", err)
 		}
 	})
 	t.Run("show-prefix quiet", func(t *testing.T) {
 		installGitShim(t, "show-prefix-quiet")
-		_, err := gitPrefix(t.TempDir())
+		_, err := gitPrefix(commandLog{}, t.TempDir())
 		if err == nil || !strings.Contains(err.Error(), "git rev-parse --show-prefix failed") {
 			t.Fatalf("error = %v", err)
 		}

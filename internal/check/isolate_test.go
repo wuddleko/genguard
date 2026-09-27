@@ -19,7 +19,7 @@ func TestWithIsolatedWorktreeOmitsDirtyFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := withIsolatedWorktree(root, func(wt isolatedWorktree) error {
+	err := withIsolatedWorktree(commandLog{}, root, func(wt isolatedWorktree) error {
 		got, err := os.ReadFile(filepath.Join(wt.root, "tracked.txt"))
 		if err != nil {
 			return err
@@ -63,7 +63,7 @@ func TestWithIsolatedWorktreeRemovesOnSuccess(t *testing.T) {
 	root := gitRepo(t)
 	writeTracked(t, root, "tracked.txt", "ok\n")
 	var wtRoot string
-	err := withIsolatedWorktree(root, func(wt isolatedWorktree) error {
+	err := withIsolatedWorktree(commandLog{}, root, func(wt isolatedWorktree) error {
 		wtRoot = wt.root
 		if _, err := os.Stat(wt.root); err != nil {
 			t.Fatalf("worktree missing during fn: %v", err)
@@ -81,7 +81,7 @@ func TestWithIsolatedWorktreeRemovesOnFnError(t *testing.T) {
 	writeTracked(t, root, "tracked.txt", "ok\n")
 	boom := errors.New("boom")
 	var wtRoot string
-	err := withIsolatedWorktree(root, func(wt isolatedWorktree) error {
+	err := withIsolatedWorktree(commandLog{}, root, func(wt isolatedWorktree) error {
 		wtRoot = wt.root
 		return boom
 	})
@@ -93,7 +93,7 @@ func TestWithIsolatedWorktreeRemovesOnFnError(t *testing.T) {
 
 func TestWithIsolatedWorktreeAddFailureIsGenguardError(t *testing.T) {
 	t.Run("not a git work tree", func(t *testing.T) {
-		err := withIsolatedWorktree(t.TempDir(), func(isolatedWorktree) error {
+		err := withIsolatedWorktree(commandLog{}, t.TempDir(), func(isolatedWorktree) error {
 			t.Fatal("fn ran")
 			return nil
 		})
@@ -101,7 +101,7 @@ func TestWithIsolatedWorktreeAddFailureIsGenguardError(t *testing.T) {
 	})
 	t.Run("git worktree add", func(t *testing.T) {
 		root := gitRepo(t)
-		err := withIsolatedWorktree(root, func(isolatedWorktree) error {
+		err := withIsolatedWorktree(commandLog{}, root, func(isolatedWorktree) error {
 			t.Fatal("fn ran")
 			return nil
 		})
@@ -119,7 +119,7 @@ func TestWithIsolatedWorktreeAddFailureIsGenguardError(t *testing.T) {
 func TestMapPathRefusesOutsideRepo(t *testing.T) {
 	root := gitRepo(t)
 	writeTracked(t, root, "tracked.txt", "ok\n")
-	err := withIsolatedWorktree(root, func(wt isolatedWorktree) error {
+	err := withIsolatedWorktree(commandLog{}, root, func(wt isolatedWorktree) error {
 		_, err := wt.mapPath(t.TempDir())
 		assertIsolateGenguardError(t, err, "is not inside the repository")
 		mapped, err := wt.mapPath(root)
@@ -139,7 +139,7 @@ func TestMapPathRefusesOutsideRepo(t *testing.T) {
 func TestWithIsolatedWorktreeFromSubdir(t *testing.T) {
 	root := gitRepo(t)
 	writeTracked(t, root, "api/genguard.yaml", "nested\n")
-	err := withIsolatedWorktree(filepath.Join(root, "api"), func(wt isolatedWorktree) error {
+	err := withIsolatedWorktree(commandLog{}, filepath.Join(root, "api"), func(wt isolatedWorktree) error {
 		mapped, err := wt.mapPath(filepath.Join(root, "api", "genguard.yaml"))
 		if err != nil {
 			return err

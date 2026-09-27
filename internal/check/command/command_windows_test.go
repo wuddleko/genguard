@@ -21,7 +21,7 @@ func TestRunCommandTimeoutKillsProcessGroup(t *testing.T) {
 
 	const limit = 3 * time.Second
 	start := time.Now()
-	tail, err := run(root, command, nil, limit)
+	tail, err := run(nil, root, command, nil, limit)
 	if time.Since(start) >= 6*time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}

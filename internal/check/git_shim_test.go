@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -120,6 +121,9 @@ var gitShimModes = []shimMode{
 	{name: "verify-quiet", steps: []shimStep{shimExit(2, "--verify")}},
 	{name: "drop-on-toplevel", steps: []shimStep{{when: shimOn("--show-toplevel"), drop: true}}},
 	{name: "drop-after-proxy", steps: []shimStep{{drop: true}}},
+	{name: "hold-diff", steps: []shimStep{{when: shimOn("diff"), hold: true, stop: true}}},
+	{name: "hold-merge-base", steps: []shimStep{{when: shimOn("merge-base"), hold: true, stop: true}}},
+	{name: "hold-worktree", steps: []shimStep{{when: shimOn("worktree", "add"), hold: true, stop: true}}},
 }
 
 type shimWhen struct {
@@ -155,6 +159,7 @@ type shimStep struct {
 	code   int
 	stop   bool
 	drop   bool
+	hold   bool
 }
 
 func shimExit(code int, args ...string) shimStep {
@@ -183,6 +188,12 @@ func gitShimMain() int {
 			}
 			if step.drop {
 				dropShim()
+			}
+			if step.hold {
+				if ready := os.Getenv("GENGUARD_GIT_HOLD_READY"); ready != "" {
+					_ = os.WriteFile(ready, []byte("x"), 0o644)
+				}
+				time.Sleep(30 * time.Second)
 			}
 			if step.stdout != "" {
 				fmt.Print(step.stdout)
@@ -312,6 +323,10 @@ func writeShimStep(b *strings.Builder, step shimStep) {
 	}
 	if step.drop {
 		fmt.Fprintf(b, "%s/bin/rm -f @SCRIPT@\n", indent)
+	}
+	if step.hold {
+		fmt.Fprintf(b, "%sif [ -n \"$GENGUARD_GIT_HOLD_READY\" ]; then : > \"$GENGUARD_GIT_HOLD_READY\"; fi\n", indent)
+		fmt.Fprintf(b, "%s/bin/sleep 30\n", indent)
 	}
 	if step.stop {
 		fmt.Fprintf(b, "%sexit %d\n", indent, step.code)

@@ -1,8 +1,10 @@
 package check
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +21,9 @@ type commandLog struct {
 	// quiet keeps lines off the writer. A failure tail is written into the
 	// group instead, and CommandTail is left empty.
 	quiet bool
+	// ctx, when set, starts each command in its own process group and kills
+	// that group when the context is canceled. Git calls for this run use it too.
+	ctx context.Context
 	// toolCache is shared by pointer across every group and config in one run.
 	toolCache *toolCache
 }
@@ -28,6 +33,10 @@ func (c commandLog) withToolCache() commandLog {
 		c.toolCache = &toolCache{}
 	}
 	return c
+}
+
+func (c commandLog) canceled() bool {
+	return c.ctx != nil && c.ctx.Err() != nil
 }
 
 func (c commandLog) label(name string) string {
@@ -173,15 +182,22 @@ func RunCommand(root, commandText string) (string, error) {
 }
 
 func runCommand(root, commandText string, log io.Writer, header string, timeout time.Duration) (string, error) {
+	return runCommandContext(nil, root, commandText, log, header, timeout)
+}
+
+func runCommandContext(ctx context.Context, root, commandText string, log io.Writer, header string, timeout time.Duration) (string, error) {
 	stream := newCommandStream(log, header)
 	defer stream.finish()
 	var onLine func(string)
 	if stream.active {
 		onLine = stream.onLine
 	}
-	tail, err := command.Run(root, commandText, onLine, timeout)
+	tail, err := command.RunContext(ctx, root, commandText, onLine, timeout)
 	if err != nil && stream.streamed() {
 		tail = ""
+	}
+	if errors.Is(err, command.ErrInterrupted) {
+		return tail, errInterrupted
 	}
 	if err != nil {
 		return tail, newGenguardError("%s", err.Error())

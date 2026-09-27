@@ -88,27 +88,27 @@ func TestCallerPathErrorRewritesOrWraps(t *testing.T) {
 
 func TestIsolateSinceRejectsUnusableRefs(t *testing.T) {
 	dir := t.TempDir()
-	_, err := isolateSince(dir, "HEAD")
+	_, err := isolateSince(commandLog{}, dir, "HEAD")
 	if err == nil || !strings.Contains(err.Error(), "not a git work tree") {
 		t.Fatalf("non-repo: %v", err)
 	}
 
 	root := gitRepo(t)
-	_, err = isolateSince(root, "not-a-ref")
+	_, err = isolateSince(commandLog{}, root, "not-a-ref")
 	if err == nil || !strings.Contains(err.Error(), "bad --since ref") {
 		t.Fatalf("bad ref: %v", err)
 	}
 
 	t.Run("quiet", func(t *testing.T) {
 		installGitShim(t, "verify-quiet")
-		_, err := isolateSince(root, "HEAD")
+		_, err := isolateSince(commandLog{}, root, "HEAD")
 		if err == nil || !strings.Contains(err.Error(), "git rev-parse failed") {
 			t.Fatalf("error = %v", err)
 		}
 	})
 	t.Run("empty", func(t *testing.T) {
 		installGitShim(t, "verify-empty")
-		_, err := isolateSince(root, "HEAD")
+		_, err := isolateSince(commandLog{}, root, "HEAD")
 		if err == nil || !strings.Contains(err.Error(), "empty revision") {
 			t.Fatalf("error = %v", err)
 		}
@@ -185,7 +185,7 @@ func TestAddIsolatedWorktreeTempDirFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("TMPDIR", file)
-	err := withIsolatedWorktree(root, func(isolatedWorktree) error {
+	err := withIsolatedWorktree(commandLog{}, root, func(isolatedWorktree) error {
 		t.Fatal("fn ran")
 		return nil
 	})
@@ -217,7 +217,7 @@ func TestFindCommittedConfigsGitFailures(t *testing.T) {
 
 	t.Run("quiet", func(t *testing.T) {
 		installGitShim(t, "ls-tree-quiet")
-		_, err := findCommittedConfigs(root)
+		_, err := findCommittedConfigs(commandLog{}, root)
 		if err == nil || !strings.Contains(err.Error(), "git ls-tree failed") {
 			t.Fatalf("error = %v", err)
 		}
@@ -227,7 +227,7 @@ func TestFindCommittedConfigsGitFailures(t *testing.T) {
 		if _, _, err := git(root, "rev-parse", "--is-inside-work-tree"); err != nil {
 			t.Fatal(err)
 		}
-		_, err := findCommittedConfigs(root)
+		_, err := findCommittedConfigs(commandLog{}, root)
 		if err == nil {
 			t.Fatal("git still on PATH after the shim removed itself")
 		}
@@ -248,7 +248,7 @@ func TestWithIsolatedCheckRejectsBadSince(t *testing.T) {
 func TestIsolateSinceGitDisappears(t *testing.T) {
 	root := gitRepo(t)
 	installGitShim(t, "drop-on-toplevel")
-	_, err := isolateSince(root, "HEAD")
+	_, err := isolateSince(commandLog{}, root, "HEAD")
 	if err == nil {
 		t.Fatal("expected git to be missing for rev-parse --verify")
 	}

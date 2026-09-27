@@ -24,7 +24,7 @@ func TestCleanPathsWhenWorkingDirectoryIsGone(t *testing.T) {
 	if _, _, err := resolveCleanPath("rel", "out.txt", true); err == nil {
 		t.Fatal("resolveCleanPath")
 	}
-	if err := cleanOutputs("rel", "", config.Group{Outputs: []string{"out.txt"}}); err == nil {
+	if err := cleanOutputs(nil, "rel", "", config.Group{Outputs: []string{"out.txt"}}); err == nil {
 		t.Fatal("cleanOutputs")
 	}
 }

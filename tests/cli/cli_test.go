@@ -21,6 +21,9 @@ func TestMain(m *testing.M) {
 	if os.Getenv("GENGUARD_GIT_WRAP") == "1" {
 		os.Exit(gitWrapMain())
 	}
+	if os.Getenv("GENGUARD_RUN") == "1" {
+		os.Exit(cli.Run(os.Args[1:]))
+	}
 	// CI sets these on the test process. Annotation tests opt in with t.Setenv.
 	os.Unsetenv("GITHUB_ACTIONS")
 	os.Unsetenv("GENGUARD_ANNOTATIONS")

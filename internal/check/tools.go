@@ -62,7 +62,7 @@ func (p cachedProbe) apply(name, want string) (ToolResult, error) {
 	return item, newGenguardError("%s: %s", name, p.detail)
 }
 
-func verifyTools(root string, declared []config.Tool, names []string, timeout time.Duration, cache *toolCache) ([]ToolResult, error) {
+func verifyTools(root string, declared []config.Tool, names []string, timeout time.Duration, log commandLog) ([]ToolResult, error) {
 	byName := make(map[string]config.Tool, len(declared))
 	for _, tool := range declared {
 		byName[tool.Name] = tool
@@ -78,7 +78,7 @@ func verifyTools(root string, declared []config.Tool, names []string, timeout ti
 			}
 			continue
 		}
-		item, err := probeTool(root, tool, timeout, cache)
+		item, err := probeTool(root, tool, timeout, log)
 		observed = append(observed, item)
 		if err != nil && first == nil {
 			first = err
@@ -87,21 +87,24 @@ func verifyTools(root string, declared []config.Tool, names []string, timeout ti
 	return observed, first
 }
 
-func probeTool(root string, tool config.Tool, timeout time.Duration, cache *toolCache) (ToolResult, error) {
+func probeTool(root string, tool config.Tool, timeout time.Duration, log commandLog) (ToolResult, error) {
 	item := ToolResult{Name: tool.Name, Want: pinVersion(tool.Version)}
 	commandText := strings.TrimSpace(tool.Command)
 	if commandText == "" {
 		commandText = tool.Name + " --version"
 	}
-	if hit, ok := cache.lookup(root, commandText, item.Want, timeout); ok {
+	if hit, ok := log.toolCache.lookup(root, commandText, item.Want, timeout); ok {
 		return hit.apply(tool.Name, item.Want)
 	}
-	item, detail, err := runProbe(root, tool, commandText, item, timeout)
-	cache.remember(root, commandText, item.Want, timeout, item.Have, detail)
+	item, detail, err := runProbe(root, tool, commandText, item, timeout, log)
+	if isInterrupt(err) {
+		return item, err
+	}
+	log.toolCache.remember(root, commandText, item.Want, timeout, item.Have, detail)
 	return item, err
 }
 
-func runProbe(root string, tool config.Tool, commandText string, item ToolResult, timeout time.Duration) (ToolResult, string, error) {
+func runProbe(root string, tool config.Tool, commandText string, item ToolResult, timeout time.Duration, log commandLog) (ToolResult, string, error) {
 	fail := func(detail string) (ToolResult, string, error) {
 		return item, detail, newGenguardError("%s: %s", tool.Name, detail)
 	}
@@ -110,11 +113,14 @@ func runProbe(root string, tool config.Tool, commandText string, item ToolResult
 			return fail("not on PATH")
 		}
 	}
-	output, code, err := command.Capture(root, commandText, timeout)
+	output, code, err := command.CaptureContext(log.ctx, root, commandText, timeout)
 	if err != nil {
 		var start *command.StartError
 		if errors.As(err, &start) {
 			return fail("not on PATH")
+		}
+		if errors.Is(err, command.ErrInterrupted) {
+			return item, "", errInterrupted
 		}
 		if strings.HasPrefix(err.Error(), "command timed out after ") {
 			return fail(err.Error())

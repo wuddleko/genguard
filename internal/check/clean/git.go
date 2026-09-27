@@ -1,14 +1,17 @@
 package clean
 
 import (
-	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/wuddleko/genguard/internal/check/command"
 )
 
-func gitNames(root string, args ...string) ([]string, error) {
-	out, code, err := git(root, args...)
+func gitNames(ctx context.Context, root string, args ...string) ([]string, error) {
+	out, code, err := git(ctx, root, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -40,13 +43,12 @@ func gitDetail(out, fallback string) string {
 	return detail
 }
 
-func git(root string, args ...string) (string, int, error) {
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return gitResult(stdout.String(), stderr.String(), err)
+func git(ctx context.Context, root string, args ...string) (string, int, error) {
+	stdout, stderr, err := command.Output(ctx, "git", append([]string{"-C", root}, args...)...)
+	if errors.Is(err, command.ErrInterrupted) {
+		return "", 0, err
+	}
+	return gitResult(stdout, stderr, err)
 }
 
 func gitResult(stdout, stderr string, err error) (string, int, error) {

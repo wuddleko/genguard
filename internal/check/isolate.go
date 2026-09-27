@@ -1,6 +1,7 @@
 package check
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,8 +16,8 @@ func CheckSinceIsolated(path, since string) (ConfigResult, error) {
 	return checkSinceIsolated(path, since, commandLog{})
 }
 
-func CheckSinceIsolatedLog(path, since string, log io.Writer, quiet bool) (ConfigResult, error) {
-	return checkSinceIsolated(path, since, commandLog{w: log, quiet: quiet})
+func CheckSinceIsolatedLog(ctx context.Context, path, since string, log io.Writer, quiet bool) (ConfigResult, error) {
+	return checkSinceIsolated(path, since, commandLog{w: log, quiet: quiet, ctx: ctx})
 }
 
 func checkSinceIsolated(path, since string, log commandLog) (ConfigResult, error) {
@@ -30,7 +31,13 @@ func checkSinceIsolated(path, since string, log commandLog) (ConfigResult, error
 		return nil
 	})
 	if err != nil && len(result.Groups) > 0 {
-		result.noteCleanup(err)
+		// An interrupt marker is only there so a drifted run exits 2.
+		// A failed worktree remove is the failure to report.
+		if isInterrupt(result.cleanup) {
+			result.cleanup = err
+		} else {
+			result.noteCleanup(err)
+		}
 	}
 	return result, err
 }
@@ -41,11 +48,11 @@ func withIsolatedCheck(path, since string, log commandLog, fn func(config.Config
 		return err
 	}
 	// @{u} and HEAD@{1} are meaningless in the detached worktree.
-	since, err = isolateSince(filepath.Dir(abs), since)
+	since, err = isolateSince(log, filepath.Dir(abs), since)
 	if err != nil {
 		return err
 	}
-	return withIsolatedWorktree(filepath.Dir(abs), func(wt isolatedWorktree) error {
+	return withIsolatedWorktree(log, filepath.Dir(abs), func(wt isolatedWorktree) error {
 		mapped, err := wt.mapPath(abs)
 		if err != nil {
 			return err
@@ -65,7 +72,7 @@ func withIsolatedCheck(path, since string, log commandLog, fn func(config.Config
 	})
 }
 
-func isolateSince(dir, since string) (string, error) {
+func isolateSince(log commandLog, dir, since string) (string, error) {
 	since = strings.TrimSpace(since)
 	if since == "" {
 		return "", nil
@@ -74,7 +81,7 @@ func isolateSince(dir, since string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	out, code, err := git(root, "rev-parse", "--verify", since+"^{commit}")
+	out, code, err := log.git(root, "rev-parse", "--verify", since+"^{commit}")
 	if err != nil {
 		return "", err
 	}
@@ -110,20 +117,21 @@ type isolatedWorktree struct {
 	root string
 }
 
-func withIsolatedWorktree(repoRoot string, fn func(isolatedWorktree) error) (err error) {
-	wt, err := addIsolatedWorktree(repoRoot)
+func withIsolatedWorktree(log commandLog, repoRoot string, fn func(isolatedWorktree) error) (err error) {
+	wt, err := addIsolatedWorktree(log, repoRoot)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if cerr := wt.close(); cerr != nil && err == nil {
+		cerr := wt.close()
+		if cerr != nil && (err == nil || isInterrupt(err)) {
 			err = cerr
 		}
 	}()
 	return fn(wt)
 }
 
-func addIsolatedWorktree(repoRoot string) (isolatedWorktree, error) {
+func addIsolatedWorktree(log commandLog, repoRoot string) (isolatedWorktree, error) {
 	repo, err := gitRepoRoot(repoRoot)
 	if err != nil {
 		return isolatedWorktree{}, err
@@ -138,10 +146,13 @@ func addIsolatedWorktree(repoRoot string) (isolatedWorktree, error) {
 	}
 	// A missing hooks directory skips post-checkout, which would edit the new tree.
 	hooks := dir + "-hooks"
-	out, code, err := git(repo, "-c", "core.hooksPath="+hooks, "worktree", "add", "--detach", dir, "HEAD")
+	out, code, err := log.git(repo, "-c", "core.hooksPath="+hooks, "worktree", "add", "--detach", dir, "HEAD")
 	if err != nil || code != 0 {
 		_ = os.RemoveAll(dir)
 		_, _, _ = git(repo, "worktree", "prune")
+		if isInterrupt(err) {
+			return isolatedWorktree{}, err
+		}
 		return isolatedWorktree{}, isolateGitError("add", out, err)
 	}
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {

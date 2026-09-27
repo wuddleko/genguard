@@ -38,7 +38,7 @@ func TestCleanUnixPermissionFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 		lockDir(t, locked)
-		err := cleanOutputs(root, "", config.Group{Outputs: []string{"generated/"}})
+		err := cleanOutputs(nil, root, "", config.Group{Outputs: []string{"generated/"}})
 		if err == nil || !strings.Contains(err.Error(), `clean "generated/"`) {
 			t.Fatalf("error = %v", err)
 		}

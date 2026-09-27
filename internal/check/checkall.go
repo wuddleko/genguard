@@ -1,6 +1,7 @@
 package check
 
 import (
+	"context"
 	"io"
 	"path"
 	"path/filepath"
@@ -17,6 +18,7 @@ type CheckAllOptions struct {
 	Isolated bool
 	Log      io.Writer
 	Quiet    bool
+	Context  context.Context
 }
 
 func CheckAll(opts CheckAllOptions) (RunResult, error) {
@@ -31,7 +33,11 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 	cache := &toolCache{}
 	if opts.Isolated {
 		for _, configPath := range paths {
+			if stop, err := canceledStop(opts.Context, run.ExitCode(), func(interrupt error) { noteInterruptedDrift(&run, interrupt) }); stop {
+				return run, err
+			}
 			log := streamFor(repoRoot, configPath, opts.Log, opts.Quiet)
+			log.ctx = opts.Context
 			log.toolCache = cache
 			run.Configs = append(run.Configs, checkOneIsolated(configPath, base, log))
 		}
@@ -39,7 +45,11 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 	}
 	damage := map[string]pathSnap{}
 	for _, configPath := range paths {
+		if stop, err := canceledStop(opts.Context, run.ExitCode(), func(interrupt error) { noteInterruptedDrift(&run, interrupt) }); stop {
+			return run, err
+		}
 		log := streamFor(repoRoot, configPath, opts.Log, opts.Quiet)
+		log.ctx = opts.Context
 		log.toolCache = cache
 		run.Configs = append(run.Configs, checkOne(configPath, base, damage, log))
 	}
@@ -63,7 +73,7 @@ func discoverConfigs(opts CheckAllOptions) (repoRoot string, paths []string, bas
 	if len(paths) == 0 {
 		var found []string
 		if opts.Isolated {
-			found, err = findCommittedConfigs(repoRoot)
+			found, err = findCommittedConfigs(commandLog{ctx: opts.Context}, repoRoot)
 		} else {
 			found, err = config.FindAll(repoRoot)
 		}
@@ -78,7 +88,7 @@ func discoverConfigs(opts CheckAllOptions) (repoRoot string, paths []string, bas
 		return "", nil, "", err
 	}
 	if strings.TrimSpace(opts.Since) != "" {
-		base, err = mergeBase(repoRoot, opts.Since)
+		base, err = mergeBase(commandLog{ctx: opts.Context}, repoRoot, opts.Since)
 		if err != nil {
 			return "", nil, "", err
 		}
@@ -99,8 +109,8 @@ func isolatedRun(configPath string, result ConfigResult, err error) ConfigRun {
 	return run
 }
 
-func findCommittedConfigs(repoRoot string) ([]string, error) {
-	out, code, err := git(repoRoot, "ls-tree", "-r", "-z", "--name-only", "HEAD")
+func findCommittedConfigs(log commandLog, repoRoot string) ([]string, error) {
+	out, code, err := log.git(repoRoot, "ls-tree", "-r", "-z", "--name-only", "HEAD")
 	if err != nil {
 		return nil, err
 	}

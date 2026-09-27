@@ -1,19 +1,21 @@
 package check
 
 import (
-	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/wuddleko/genguard/internal/check/command"
 )
 
 func RequireGitRepo(root string) error {
-	return requireGitRepo(root)
+	return requireGitRepo(commandLog{}, root)
 }
 
-func requireGitRepo(root string) error {
-	out, code, err := git(root, "rev-parse", "--is-inside-work-tree")
+func requireGitRepo(log commandLog, root string) error {
+	out, code, err := log.git(root, "rev-parse", "--is-inside-work-tree")
 	if err != nil {
 		return err
 	}
@@ -42,7 +44,7 @@ func gitRepoRoot(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := requireGitRepo(abs); err != nil {
+	if err := requireGitRepo(commandLog{}, abs); err != nil {
 		return "", err
 	}
 	out, code, err := git(abs, "rev-parse", "--show-toplevel")
@@ -80,12 +82,12 @@ func callerRepoRoot(start, gitRoot string) string {
 	return filepath.Clean(gitRoot)
 }
 
-func mergeBase(root, since string) (string, error) {
+func mergeBase(log commandLog, root, since string) (string, error) {
 	since = strings.TrimSpace(since)
 	if since == "" {
 		return "", newGenguardError("--since requires a ref")
 	}
-	out, code, err := git(root, "merge-base", "HEAD", since)
+	out, code, err := log.git(root, "merge-base", "HEAD", since)
 	if err != nil {
 		return "", err
 	}
@@ -101,14 +103,14 @@ func mergeBase(root, since string) (string, error) {
 
 // --no-renames keeps a staged rename as a delete plus an add.
 // --relative hides paths outside this directory, so names stay repo-root paths.
-func gitDiffNames(root, rev string, specs []string) ([]string, error) {
+func gitDiffNames(log commandLog, root, rev string, specs []string) ([]string, error) {
 	args := append([]string{"-c", "diff.relative=false", "diff", "--no-renames", "--name-only", "-z", rev, "--"}, specs...)
-	return gitNames(root, args...)
+	return gitNames(log, root, args...)
 }
 
-func gitUntracked(root string, specs []string) ([]string, error) {
+func gitUntracked(log commandLog, root string, specs []string) ([]string, error) {
 	args := append([]string{"ls-files", "--others", "--exclude-standard", "-z", "--"}, specs...)
-	return gitNames(root, args...)
+	return gitNames(log, root, args...)
 }
 
 func gitDiffText(root string, args ...string) (string, error) {
@@ -124,8 +126,8 @@ func gitDiffText(root string, args ...string) (string, error) {
 	return out, nil
 }
 
-func gitNames(root string, args ...string) ([]string, error) {
-	out, code, err := git(root, args...)
+func gitNames(log commandLog, root string, args ...string) ([]string, error) {
+	out, code, err := log.git(root, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -135,8 +137,8 @@ func gitNames(root string, args ...string) ([]string, error) {
 	return parseGitNameList(out), nil
 }
 
-func gitPrefix(root string) (string, error) {
-	out, code, err := git(root, "rev-parse", "--show-prefix")
+func gitPrefix(log commandLog, root string) (string, error) {
+	out, code, err := log.git(root, "rev-parse", "--show-prefix")
 	if err != nil {
 		return "", err
 	}
@@ -181,12 +183,17 @@ func gitDetail(out, fallback string) string {
 }
 
 func git(root string, args ...string) (string, int, error) {
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return gitResult(stdout.String(), stderr.String(), err)
+	return commandLog{}.git(root, args...)
+}
+
+// git runs git for this run. A canceled context kills the process group and
+// returns interrupted, including when git would otherwise exit 0 or look like a bad ref.
+func (c commandLog) git(root string, args ...string) (string, int, error) {
+	stdout, stderr, err := command.Output(c.ctx, "git", append([]string{"-C", root}, args...)...)
+	if errors.Is(err, command.ErrInterrupted) {
+		return "", 0, errInterrupted
+	}
+	return gitResult(stdout, stderr, err)
 }
 
 func gitResult(stdout, stderr string, err error) (string, int, error) {

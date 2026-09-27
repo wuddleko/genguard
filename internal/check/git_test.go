@@ -110,7 +110,7 @@ func TestGitSeparatesStdoutAndStderr(t *testing.T) {
 		if !strings.Contains(out, "fatal:") || !strings.Contains(out, "HEAD") || strings.Contains(out, "diff --git") {
 			t.Fatalf("stdout = %q, want the fatal text", out)
 		}
-		if _, err := gitPrefix(t.TempDir()); err == nil || !strings.Contains(err.Error(), "fatal:") {
+		if _, err := gitPrefix(commandLog{}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "fatal:") {
 			t.Fatalf("gitPrefix error = %v, want git fatal text", err)
 		}
 	})
@@ -137,11 +137,11 @@ func TestGitNamesAndDiffTextKeepTheRightStream(t *testing.T) {
 	if err != nil || code != 0 || strings.TrimSpace(out) != "true" {
 		t.Fatalf("git() = %q, %d, %v", out, code, err)
 	}
-	names, err := gitNames(root, "ls-files", "-z", "--", "no-such.txt")
+	names, err := gitNames(commandLog{}, root, "ls-files", "-z", "--", "no-such.txt")
 	if err != nil || names != nil {
 		t.Fatalf("names = %#v, %v", names, err)
 	}
-	names, err = gitNames(root, "-c", "diff.relative=false", "diff", "--name-only", "-z", "HEAD", "--", "generated/changed.txt")
+	names, err = gitNames(commandLog{}, root, "-c", "diff.relative=false", "diff", "--name-only", "-z", "HEAD", "--", "generated/changed.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,17 +165,17 @@ func TestGitNamesAndDiffTextKeepTheRightStream(t *testing.T) {
 		t.Fatalf("diff = %q, %v", text, err)
 	}
 
-	if _, err := gitNames(root, "config", "--get", "no.such.key"); err == nil || !strings.Contains(err.Error(), "git failed") {
+	if _, err := gitNames(commandLog{}, root, "config", "--get", "no.such.key"); err == nil || !strings.Contains(err.Error(), "git failed") {
 		t.Fatalf("error = %v, want git failed", err)
 	}
-	if _, err := gitNames(root, "not-a-command"); err == nil || !strings.Contains(err.Error(), "not a git command") {
+	if _, err := gitNames(commandLog{}, root, "not-a-command"); err == nil || !strings.Contains(err.Error(), "not a git command") {
 		t.Fatalf("error = %v, want the git error", err)
 	}
 
 	if err := os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("ref: refs/heads/missing\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := gitNames(root, "diff", "--name-only", "-z", "HEAD"); err == nil || !strings.Contains(err.Error(), "fatal:") {
+	if _, err := gitNames(commandLog{}, root, "diff", "--name-only", "-z", "HEAD"); err == nil || !strings.Contains(err.Error(), "fatal:") {
 		t.Fatalf("error = %v, want git fatal text", err)
 	}
 	if _, err := gitDiffText(root, "HEAD", "--", "generated/changed.txt"); err == nil || !strings.Contains(err.Error(), "fatal: bad revision 'HEAD'") {

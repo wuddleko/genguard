@@ -27,7 +27,7 @@ type pathSnap struct {
 }
 
 func DriftForGroup(root string, group config.Group) ([]Drift, error) {
-	return driftForGroup(root, group)
+	return driftForGroup(commandLog{}, root, group)
 }
 
 func DriftDiff(root string, drifts []Drift) (string, error) {
@@ -127,8 +127,8 @@ func repoRelDrift(repoRoot, configDir, driftPath string) (string, bool) {
 	return filepath.ToSlash(rel), true
 }
 
-func recordCleanDamage(damage map[string]pathSnap, root string, group config.Group) error {
-	found, err := driftForGroup(root, group)
+func recordCleanDamage(log commandLog, damage map[string]pathSnap, root string, group config.Group) error {
+	found, err := driftForGroup(log, root, group)
 	if err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ func driftPath(path string) string {
 	return filepath.ToSlash(filepath.Clean(path))
 }
 
-func driftForGroup(root string, group config.Group) ([]Drift, error) {
+func driftForGroup(log commandLog, root string, group config.Group) ([]Drift, error) {
 	found := make([]Drift, 0)
 	seen := make(map[string]struct{})
 	record := func(path, kind string) {
@@ -228,12 +228,12 @@ func driftForGroup(root string, group config.Group) ([]Drift, error) {
 		found = append(found, Drift{Group: group.Name, Path: path, Kind: kind})
 	}
 
-	modified, err := gitDiffNames(root, "HEAD", group.Outputs)
+	modified, err := gitDiffNames(log, root, "HEAD", group.Outputs)
 	if err != nil {
 		return nil, err
 	}
 	if len(modified) > 0 {
-		prefix, err := gitPrefix(root)
+		prefix, err := gitPrefix(log, root)
 		if err != nil {
 			return nil, err
 		}
@@ -245,7 +245,7 @@ func driftForGroup(root string, group config.Group) ([]Drift, error) {
 			modified[i] = rel
 		}
 	}
-	untracked, err := gitUntracked(root, group.Outputs)
+	untracked, err := gitUntracked(log, root, group.Outputs)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +270,7 @@ func driftForGroup(root string, group config.Group) ([]Drift, error) {
 	return found, nil
 }
 
-func groupAffected(root, base, configName string, group config.Group) (bool, error) {
+func groupAffected(log commandLog, root, base, configName string, group config.Group) (bool, error) {
 	for _, spec := range group.Outputs {
 		if literalOutputAbsent(root, spec) {
 			return true, nil
@@ -283,12 +283,12 @@ func groupAffected(root, base, configName string, group config.Group) (bool, err
 		specs = append(specs, configName)
 	}
 	for _, rev := range []string{base, "HEAD"} {
-		names, err := gitDiffNames(root, rev, specs)
+		names, err := gitDiffNames(log, root, rev, specs)
 		if err != nil || len(names) > 0 {
 			return len(names) > 0, err
 		}
 	}
-	untracked, err := gitUntracked(root, specs)
+	untracked, err := gitUntracked(log, root, specs)
 	return len(untracked) > 0, err
 }
 

@@ -16,7 +16,7 @@ func TestCleanOutputsGlobSecondListFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	installGitShim(t, "others-fail")
-	err := clean.Outputs(root, "", config.Group{Outputs: []string{"*.txt"}})
+	err := clean.Outputs(nil, root, "", config.Group{Outputs: []string{"*.txt"}})
 	if err == nil || !strings.Contains(err.Error(), "others") {
 		t.Fatalf("error = %v", err)
 	}
@@ -32,7 +32,7 @@ func TestCleanOutputsGlobDuplicateNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	installGitShim(t, "dup-names")
-	if err := clean.Outputs(root, "", config.Group{Outputs: []string{"*.go"}}); err != nil {
+	if err := clean.Outputs(nil, root, "", config.Group{Outputs: []string{"*.go"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(dup); !os.IsNotExist(err) {
