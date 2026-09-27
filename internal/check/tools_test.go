@@ -165,6 +165,16 @@ func TestOmittedCommandUsesNameVersion(t *testing.T) {
 	}
 }
 
+func TestRunProbeStartFailureIsNotOnPath(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("COMSPEC", "genguard-missing-shell.exe")
+	tool := config.Tool{Name: "buf", Command: "genguard-not-a-binary --version"}
+	_, detail, err := runProbe(t.TempDir(), tool, tool.Command, ToolResult{Name: tool.Name}, 0)
+	if detail != "not on PATH" || err == nil || err.Error() != "buf: not on PATH" {
+		t.Fatalf("detail = %q err = %v", detail, err)
+	}
+}
+
 func TestToolProbeFailuresLeaveTheTree(t *testing.T) {
 	cases := []struct {
 		name    string

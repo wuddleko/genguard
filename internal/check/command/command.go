@@ -46,6 +46,9 @@ func execute(root, command string, onLine func(string), timeout time.Duration) (
 	if timeout > 0 {
 		var group commandGroup
 		group, err = startCommand(cmd)
+		if err != nil && cmd.Process == nil && !exitError(err) {
+			return "", 0, &StartError{err: err}
+		}
 		if err == nil {
 			defer group.release()
 			wait := make(chan error, 1)
@@ -64,6 +67,9 @@ func execute(root, command string, onLine func(string), timeout time.Duration) (
 		}
 	} else {
 		err = cmd.Run()
+		if err != nil && !exitError(err) {
+			return "", 0, &StartError{err: err}
+		}
 	}
 	ring.flush()
 	if timedOut {
@@ -83,6 +89,24 @@ func execute(root, command string, onLine func(string), timeout time.Duration) (
 		return "", exitCode, fmt.Errorf("command failed (exit %d): no output", exitCode)
 	}
 	return tail, exitCode, fmt.Errorf("command failed (exit %d)", exitCode)
+}
+
+// StartError means the process never started. Capture reports exit code 0.
+type StartError struct {
+	err error
+}
+
+func (e *StartError) Error() string {
+	return "command failed to start: " + e.err.Error()
+}
+
+func (e *StartError) Unwrap() error {
+	return e.err
+}
+
+func exitError(err error) bool {
+	var exitErr *exec.ExitError
+	return errorsAsExit(err, &exitErr)
 }
 
 func errorsAsExit(err error, target **exec.ExitError) bool {

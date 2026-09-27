@@ -379,7 +379,7 @@ func TestRunCommandStartFailure(t *testing.T) {
 	if tail != "" {
 		t.Fatalf("tail = %q", tail)
 	}
-	if err.Error() != "command failed (exit 1): no output" {
+	if !strings.HasPrefix(err.Error(), "command failed to start:") {
 		t.Fatalf("err = %v", err)
 	}
 }

@@ -3,11 +3,32 @@ package check
 import (
 	"bytes"
 	"errors"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wuddleko/genguard/internal/check/command"
 )
+
+func TestCaptureReportsStartFailure(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("COMSPEC", "genguard-missing-shell.exe")
+	for _, timeout := range []time.Duration{0, time.Second} {
+		out, code, err := command.Capture(t.TempDir(), "genguard-not-a-binary --version", timeout)
+		if out != "" || code != 0 {
+			t.Fatalf("timeout %s: out = %q code = %d err = %v", timeout, out, code, err)
+		}
+		var start *command.StartError
+		if !errors.As(err, &start) || !errors.Is(err, exec.ErrNotFound) {
+			t.Fatalf("timeout %s: err = %v", timeout, err)
+		}
+		if !strings.HasPrefix(err.Error(), "command failed to start: ") {
+			t.Fatalf("timeout %s: err = %v", timeout, err)
+		}
+	}
+}
 
 func TestRunCommandCopiesLines(t *testing.T) {
 	root := t.TempDir()
@@ -174,7 +195,7 @@ func TestRunCommandWriterStartFailure(t *testing.T) {
 	root := t.TempDir()
 	var buf bytes.Buffer
 	tail, err := runCommand(filepath.Join(root, "missing"), "true", &buf, "", 0)
-	if err == nil || err.Error() != "command failed (exit 1): no output" {
+	if err == nil || !strings.HasPrefix(err.Error(), "command failed to start:") {
 		t.Fatalf("err = %v", err)
 	}
 	if tail != "" || buf.Len() != 0 {
@@ -288,7 +309,7 @@ func TestRunCommandTimeoutStartFailure(t *testing.T) {
 	root := t.TempDir()
 	var buf bytes.Buffer
 	tail, err := runCommand(filepath.Join(root, "missing"), "true", &buf, "", time.Second)
-	if err == nil || err.Error() != "command failed (exit 1): no output" {
+	if err == nil || !strings.HasPrefix(err.Error(), "command failed to start:") {
 		t.Fatalf("err = %v", err)
 	}
 	if tail != "" || buf.Len() != 0 {

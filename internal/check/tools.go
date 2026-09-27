@@ -1,6 +1,7 @@
 package check
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -109,6 +110,10 @@ func runProbe(root string, tool config.Tool, commandText string, item ToolResult
 	}
 	output, code, err := command.Capture(root, commandText, timeout)
 	if err != nil {
+		var start *command.StartError
+		if errors.As(err, &start) {
+			return fail("not on PATH")
+		}
 		if strings.HasPrefix(err.Error(), "command timed out after ") {
 			return fail(err.Error())
 		}
