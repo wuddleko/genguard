@@ -72,7 +72,25 @@ jobs:
       - name: Fuzz
         run: |
           set -euo pipefail
-          for target in FuzzParseGitNameList FuzzConfigRelativeGitPath FuzzResolveCleanPath; do
-            go test -count=1 -fuzz="^${target}$" -fuzztime=30s ./internal/check
+          # Go exits 0 when -fuzz names a target the package does not contain.
+          fuzz() {
+            target=$1
+            pkg=$2
+            log=$(mktemp)
+            code=0
+            go test -count=1 -fuzz="^${target}$" -fuzztime=30s "$pkg" 2>&1 | tee "$log" || code=$?
+            if grep -q "no fuzz tests to fuzz" "$log"; then
+              printf 'fuzz target %s not found in %s\n' "$target" "$pkg" >&2
+              rm -f "$log"
+              exit 1
+            fi
+            rm -f "$log"
+            if [ "$code" -ne 0 ]; then
+              exit "$code"
+            fi
+          }
+          for target in FuzzParseGitNameList FuzzConfigRelativeGitPath; do
+            fuzz "$target" ./internal/check
           done
-          go test -count=1 -fuzz='^FuzzParseConfig$' -fuzztime=30s ./internal/config
+          fuzz FuzzResolveCleanPath ./internal/check/clean
+          fuzz FuzzParseConfig ./internal/config
