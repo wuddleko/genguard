@@ -110,8 +110,6 @@ func (g GroupResult) SummaryLine() string {
 	}
 }
 
-// matchedTools keeps tools that reported the version the config asked for, and tools with no version set.
-// A tool on the wrong version is already named in the error, so the summary does not list it again.
 func matchedTools(tools []ToolResult) []ToolResult {
 	matched := make([]ToolResult, 0, len(tools))
 	for _, tool := range tools {

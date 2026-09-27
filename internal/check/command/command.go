@@ -10,11 +10,8 @@ import (
 	"time"
 )
 
-// ErrInterrupted is returned when the context is canceled while a command runs.
 var ErrInterrupted = errors.New("interrupted")
 
-// waitDelay bounds the wait for pipe copies after the child exits.
-// A grandchild holding stdout would otherwise hang the run. Tests shorten it.
 var waitDelay = 10 * time.Second
 
 func Run(root, command string, onLine func(string), timeout time.Duration) (string, error) {
@@ -25,9 +22,6 @@ func RunContext(ctx context.Context, root, command string, onLine func(string), 
 	return run(ctx, root, command, onLine, timeout)
 }
 
-// Capture runs command and returns its combined output, including on exit 0.
-// The exit code is 0 on success. A timeout, an interrupt, or a failure to
-// start returns a non-nil error and code 0.
 func Capture(root, command string, timeout time.Duration) (string, int, error) {
 	return execute(nil, root, command, nil, timeout)
 }
@@ -74,7 +68,6 @@ func execute(ctx context.Context, root, command string, onLine func(string), tim
 	if err != nil && !started {
 		return "", 0, &StartError{err: err}
 	}
-	// The child already exited 0. ErrWaitDelay means a grandchild still held a pipe.
 	if err == nil {
 		return ring.String(), 0, nil
 	}
@@ -91,9 +84,6 @@ func execute(ctx context.Context, root, command string, onLine func(string), tim
 	return tail, exitCode, fmt.Errorf("command failed (exit %d)", exitCode)
 }
 
-// Output runs name with args and keeps stdout and stderr apart.
-// A context whose Done channel is set starts a process group and returns
-// ErrInterrupted when that context is canceled.
 func Output(ctx context.Context, name string, args ...string) (string, string, error) {
 	if interrupted(ctx) {
 		return "", "", ErrInterrupted
@@ -109,13 +99,6 @@ func Output(ctx context.Context, name string, args ...string) (string, string, e
 	return stdout.String(), stderr.String(), err
 }
 
-// waitCommand starts cmd and waits.
-// WaitDelay bounds a pipe held open after the child exits. A timeout or a
-// context with a Done channel also starts a process group, and that group's
-// kill stays armed until Wait returns: a grandchild can keep the pipe open
-// after the child has already exited.
-// A context whose Done channel is nil is not a cancel. The command finishes,
-// and the caller reads Err() itself.
 func waitCommand(parent context.Context, cmd *exec.Cmd, timeout time.Duration) (bool, error) {
 	cmd.WaitDelay = waitDelay
 	if interrupted(parent) {
@@ -148,14 +131,11 @@ func waitCommand(parent context.Context, cmd *exec.Cmd, timeout time.Duration) (
 	select {
 	case err = <-wait:
 		stopTimer(timer)
-		// A cancel that arrived with the exit still wins.
 		if interrupted(parent) {
 			group.stop(cmd)
 			return true, ErrInterrupted
 		}
 		if errors.Is(err, exec.ErrWaitDelay) && succeeded(cmd) {
-			// The child has exited. Stop the group so a grandchild holding a
-			// pipe does not outlive WaitDelay.
 			group.stop(cmd)
 			return true, nil
 		}
@@ -215,7 +195,6 @@ func timeoutFailure(err error) bool {
 	return err != nil && strings.HasPrefix(err.Error(), "command timed out after ")
 }
 
-// StartError means the process never started. Capture reports exit code 0.
 type StartError struct {
 	err error
 }

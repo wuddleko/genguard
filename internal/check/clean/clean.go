@@ -215,10 +215,6 @@ func removesConfig(target, path string) (bool, error) {
 	return directoryContains(target, path)
 }
 
-// directoryContains reports whether target is a directory whose removal would
-// delete path. EvalSymlinks resolves a symlink to a file inside that directory.
-// Ancestor identity follows symlinks. It does not use the hard-link filename
-// rule in sameExistingFile.
 func directoryContains(target, path string) (bool, error) {
 	info, err := statPath(target, false)
 	if err != nil || info == nil {
@@ -251,10 +247,6 @@ func directoryContains(target, path string) (bool, error) {
 	}
 }
 
-// sameExistingFile reports whether deleting target deletes path.
-// Stat follows symlinks, so another spelling on a case-insensitive volume
-// matches, and so does the target of the path that loaded the config.
-// A second hard link is a different name; removing it leaves path in place.
 func sameExistingFile(target, path string) (bool, error) {
 	targetInfo, err := statPath(target, false)
 	if err != nil || targetInfo == nil {

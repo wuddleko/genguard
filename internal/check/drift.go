@@ -78,7 +78,6 @@ func driftDiff(base driftBase, drifts []Drift) (string, error) {
 	return strings.Join(parts, "\n"), nil
 }
 
-// driftBase is the repository used to print and diff a config-relative drift path.
 type driftBase struct {
 	repoRoot  string
 	configDir string
@@ -114,7 +113,6 @@ func (d driftBase) gitArg(path string) (gitRoot, rel string) {
 	return d.repoRoot, rel
 }
 
-// repoRelDrift maps a stored, config-relative drift onto a repository path.
 func repoRelDrift(repoRoot, configDir, driftPath string) (string, bool) {
 	if repoRoot == "" || configDir == "" || driftPath == "" {
 		return driftPath, false
@@ -210,8 +208,6 @@ func samePathSnap(abs string, snap pathSnap) bool {
 	return sha256.Sum256(data) == snap.sum
 }
 
-// driftPath is the config-relative spelling used as a drift key.
-// Clean collapses ./hello.txt and foo/../hello.txt onto hello.txt, which is what git reports.
 func driftPath(path string) string {
 	return filepath.ToSlash(filepath.Clean(path))
 }

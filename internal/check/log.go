@@ -15,16 +15,11 @@ import (
 )
 
 type commandLog struct {
-	w       io.Writer
-	prefix  string
-	timeout time.Duration
-	// quiet keeps lines off the writer. A failure tail is written into the
-	// group instead, and CommandTail is left empty.
-	quiet bool
-	// ctx, when set, starts each command in its own process group and kills
-	// that group when the context is canceled. Git calls for this run use it too.
-	ctx context.Context
-	// toolCache is shared by pointer across every group and config in one run.
+	w         io.Writer
+	prefix    string
+	timeout   time.Duration
+	quiet     bool
+	ctx       context.Context
 	toolCache *toolCache
 }
 
@@ -52,8 +47,7 @@ func (c commandLog) groupTitle(name string) string {
 	if c.prefix != "" {
 		text = c.prefix + name
 	}
-	// A raw break encoded as %0A is decoded again inside ##[group].
-	// Fold it to a space, then escapeData so a literal %0A stays text.
+	// ##[group] decodes %0A, so a raw break is folded before escapeData.
 	text = strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\r' {
 			return ' '
@@ -67,8 +61,6 @@ func (c commandLog) groups() bool {
 	return c.w != nil && os.Getenv("GITHUB_ACTIONS") == "true"
 }
 
-// beginGroup opens a workflow group when Actions is logging this command.
-// The returned function closes it. A nil writer leaves both as no-ops.
 func (c commandLog) beginGroup(name string) func() {
 	if !c.groups() {
 		return func() {}
@@ -108,9 +100,6 @@ func workflowStopToken() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
-// commandStream copies finished command lines to a writer.
-// On Actions the first line opens a stop-commands bracket. A token or write
-// failure turns copying off so the caller keeps the tail.
 type commandStream struct {
 	w           io.Writer
 	header      string
@@ -123,8 +112,6 @@ type commandStream struct {
 
 func newCommandStream(w io.Writer, header string) *commandStream {
 	s := &commandStream{w: w, header: header, active: w != nil}
-	// A streamed log on Actions is bracketed with stop-commands. The token is
-	// chosen before the child runs, so a rand failure skips the stream.
 	if s.active && os.Getenv("GITHUB_ACTIONS") == "true" {
 		token, err := workflowStopToken()
 		if err != nil {
@@ -151,7 +138,6 @@ func (s *commandStream) onLine(line string) {
 			return
 		}
 	}
-	// The label shares the first streamed line, inside the pause.
 	if s.header != "" && !s.headerWrote {
 		if _, werr := fmt.Fprintln(s.w, s.header); werr != nil {
 			s.stopFailed = true
@@ -163,7 +149,6 @@ func (s *commandStream) onLine(line string) {
 	fmt.Fprintln(s.w, line)
 }
 
-// finish closes the stop-commands bracket. The blank line follows the resume token.
 func (s *commandStream) finish() {
 	if s.paused {
 		fmt.Fprintf(s.w, "::%s::\n", s.token)

@@ -25,7 +25,6 @@ func newGenguardError(format string, args ...any) error {
 	return &GenguardError{msg: fmt.Sprintf(format, args...)}
 }
 
-// errInterrupted is the run's cancel error. Command failures keep their own text.
 var errInterrupted = errors.New("interrupted")
 
 func isInterrupt(err error) bool {
@@ -99,8 +98,6 @@ func checkGroup(root string, group config.Group, tools []config.Tool, damage map
 		wipe = map[string]pathSnap{}
 		return recordCleanDamage(log, wipe, root, group)
 	}, func(result GroupResult) GroupResult {
-		// The command already failed. Diff anyway, even when the context is
-		// already canceled, so the report still shows what changed.
 		found, driftErr := driftForGroup(commandLog{}, root, group)
 		if driftErr != nil {
 			result.Err = newGenguardError("%s: %s", result.Err.Error(), driftErr.Error())
@@ -143,8 +140,6 @@ func runPreparedGroup(root string, group config.Group, tools []config.Tool, base
 			return result
 		}
 		if !affected {
-			// Nothing in the group runs after this, so a cancel here would
-			// otherwise be reported as a skip.
 			if log.canceled() {
 				result.Status = GroupError
 				result.Err = errInterrupted
@@ -157,7 +152,6 @@ func runPreparedGroup(root string, group config.Group, tools []config.Tool, base
 
 	defer log.beginGroup(group.Name)()
 
-	// A configured timeout wins. commandLog.timeout injects one when the group has none.
 	limit := group.Timeout
 	if limit == 0 {
 		limit = log.timeout
@@ -184,7 +178,6 @@ func runPreparedGroup(root string, group config.Group, tools []config.Tool, base
 			return result
 		}
 		if afterClean != nil {
-			// The wipe is already done. Without a snapshot the generator must not run.
 			if err := afterClean(); err != nil {
 				result.Status = GroupError
 				result.Err = err
@@ -223,11 +216,6 @@ func runPreparedGroup(root string, group config.Group, tools []config.Tool, base
 	return result
 }
 
-// canceledStop reports that the walk should end.
-// Exit 2 is already a failure, so that result stays as it is.
-// Exit 1 is a finished drift. keep records the interrupt on that result so
-// the drift is still reported and the run exits 2.
-// A cancel before any failure is the error.
 func canceledStop(ctx context.Context, code int, keep func(error)) (bool, error) {
 	if ctx == nil || ctx.Err() == nil {
 		return false, nil
@@ -243,8 +231,6 @@ func canceledStop(ctx context.Context, code int, keep func(error)) (bool, error)
 	return true, err
 }
 
-// noteInterruptedDrift marks configs that already drifted, so a cancel between
-// configs still reports that drift and exits 2.
 func noteInterruptedDrift(run *RunResult, err error) {
 	for i := range run.Configs {
 		cfg := &run.Configs[i]

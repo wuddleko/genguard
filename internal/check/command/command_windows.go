@@ -59,8 +59,6 @@ func setCmdLine(cmd *exec.Cmd, cmdLine string) {
 	cmd.SysProcAttr.CmdLine = cmdLine
 }
 
-// applySuspendedStart adds CREATE_SUSPENDED to the attributes already set,
-// including a cmd.exe CmdLine.
 func applySuspendedStart(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}

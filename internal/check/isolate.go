@@ -31,8 +31,6 @@ func checkSinceIsolated(path, since string, log commandLog) (ConfigResult, error
 		return nil
 	})
 	if err != nil && len(result.Groups) > 0 {
-		// An interrupt marker is only there so a drifted run exits 2.
-		// A failed worktree remove is the failure to report.
 		if isInterrupt(result.cleanup) {
 			result.cleanup = err
 		} else {

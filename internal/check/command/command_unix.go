@@ -5,8 +5,6 @@ package command
 import (
 	"os/exec"
 	"syscall"
-
-	"golang.org/x/sys/unix"
 )
 
 type commandGroup struct{}
@@ -20,7 +18,7 @@ func (commandGroup) stop(cmd *exec.Cmd) {
 	if cmd.Process == nil {
 		return
 	}
-	_ = unix.Kill(-cmd.Process.Pid, unix.SIGKILL)
+	killGroup(cmd.Process.Pid)
 }
 
 func (commandGroup) release() {}

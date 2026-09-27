@@ -54,8 +54,6 @@ func writeAnnotation(b *strings.Builder, file, title, message string) {
 	b.WriteString("\n")
 }
 
-// FormatErrorAnnotation is the ::error line for a failure that happens before
-// any group result exists. file is a config path when there is one.
 func FormatErrorAnnotation(file, message string) string {
 	var b strings.Builder
 	writeAnnotation(&b, errorAnnotationFile(file), "", oneLineError(errors.New(message)))
@@ -77,8 +75,6 @@ func errorAnnotationFile(file string) string {
 	return workspaceFile(repoRoot, filepath.ToSlash(displayConfigPath(repoRoot, abs)))
 }
 
-// workspaceFile returns file relative to GITHUB_WORKSPACE when the repository
-// is inside it. GitHub resolves annotation paths from that directory.
 func workspaceFile(repoRoot, file string) string {
 	file = strings.ReplaceAll(file, "\\", "/")
 	if file == "" || repoRoot == "" || filepath.IsAbs(file) {

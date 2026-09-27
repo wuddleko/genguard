@@ -20,8 +20,6 @@ func shellInvocationFor(
 	if goos != "windows" {
 		return "sh", []string{"-c", command}, ""
 	}
-	// sh on PATH, then bash.exe beside git.exe, then bash on PATH.
-	// System32\bash.exe is the WSL stub and is never selected.
 	if path, err := lookPath("sh"); err == nil && usableWindowsShell(path) {
 		return path, []string{"-c", command}, ""
 	}
@@ -41,8 +39,6 @@ func shellInvocationFor(
 	return comspec, nil, windowsCmdLine(comspec, command)
 }
 
-// gitBashBeside is ../bin/bash.exe from git.exe, the Git for Windows layout
-// where git.exe lives in cmd\ and bash.exe lives in bin\.
 func gitBashBeside(gitExe string) string {
 	slash := strings.ReplaceAll(gitExe, "/", `\`)
 	dir, ok := parentDir(slash)

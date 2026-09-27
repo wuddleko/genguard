@@ -41,7 +41,6 @@ func installGitShim(t *testing.T, mode string) {
 	}
 	t.Setenv("GENGUARD_REAL_GIT", real)
 	t.Setenv("GENGUARD_GIT_MODE", mode)
-	// The shim is the only git on PATH and execs GENGUARD_REAL_GIT by absolute path.
 	t.Setenv("PATH", bin)
 }
 
@@ -86,8 +85,6 @@ func containsArg(args []string, want string) bool {
 	return false
 }
 
-// gitShimModes is the mode list for both shims. Unix tests run a shell script
-// generated from it. Windows tests run gitShimMain.
 var gitShimModes = []shimMode{
 	{name: "exit-2-empty", steps: []shimStep{shimExit(2)}},
 	{name: "merge-base-empty", steps: []shimStep{shimExit(0, "merge-base")}},
@@ -218,8 +215,7 @@ func dropShim() {
 	if os.Remove(path) == nil {
 		return
 	}
-	// Windows will not delete a running executable. Renaming it off PATH
-	// makes the next git lookup fail.
+	// A running executable cannot be deleted. Move it off PATH.
 	_ = os.Rename(path, path+".dropped")
 }
 
@@ -326,7 +322,7 @@ func writeShimStep(b *strings.Builder, step shimStep) {
 	}
 	if step.hold {
 		fmt.Fprintf(b, "%sif [ -n \"$GENGUARD_GIT_HOLD_READY\" ]; then : > \"$GENGUARD_GIT_HOLD_READY\"; fi\n", indent)
-		fmt.Fprintf(b, "%s/bin/sleep 30\n", indent)
+		fmt.Fprintf(b, "%sexec /bin/sleep 30\n", indent)
 	}
 	if step.stop {
 		fmt.Fprintf(b, "%sexit %d\n", indent, step.code)

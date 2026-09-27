@@ -23,8 +23,7 @@ var Version = "dev"
 func Run(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	// The first signal cancels the run. stop restores the default action so a
-	// second signal kills the process if cleanup is stuck.
+	// stop restores the default action so a second signal kills the process.
 	go func() {
 		<-ctx.Done()
 		stop()
@@ -191,8 +190,6 @@ func parseCommandFlags(args []string, stderr io.Writer, usage commandUsage) (com
 	}, 0, true
 }
 
-// commandWriter is stderr when lines are streamed or Actions is grouping.
-// The bool is quiet: Actions still opens groups, and only --verbose copies lines.
 func commandWriter(stderr io.Writer, verbose bool) (io.Writer, bool) {
 	if !verbose && os.Getenv("GITHUB_ACTIONS") != "true" {
 		return nil, false

@@ -25,8 +25,6 @@ func requireGitRepo(log commandLog, root string) error {
 	return nil
 }
 
-// RepoRoot is the git working tree that contains dir.
-// An empty dir uses the current working directory.
 func RepoRoot(dir string) (string, error) {
 	return gitRepoRoot(dir)
 }
@@ -101,8 +99,6 @@ func mergeBase(log commandLog, root, since string) (string, error) {
 	return base, nil
 }
 
-// --no-renames keeps a staged rename as a delete plus an add.
-// --relative hides paths outside this directory, so names stay repo-root paths.
 func gitDiffNames(log commandLog, root, rev string, specs []string) ([]string, error) {
 	args := append([]string{"-c", "diff.relative=false", "diff", "--no-renames", "--name-only", "-z", rev, "--"}, specs...)
 	return gitNames(log, root, args...)
@@ -114,7 +110,6 @@ func gitUntracked(log commandLog, root string, specs []string) ([]string, error)
 }
 
 func gitDiffText(root string, args ...string) (string, error) {
-	// --no-ext-diff ignores diff.external so the report stays a unified diff.
 	full := append([]string{"-c", "diff.relative=false", "diff", "--no-color", "--no-ext-diff"}, args...)
 	out, code, err := git(root, full...)
 	if err != nil {
@@ -186,8 +181,6 @@ func git(root string, args ...string) (string, int, error) {
 	return commandLog{}.git(root, args...)
 }
 
-// git runs git for this run. A canceled context kills the process group and
-// returns interrupted, including when git would otherwise exit 0 or look like a bad ref.
 func (c commandLog) git(root string, args ...string) (string, int, error) {
 	stdout, stderr, err := command.Output(c.ctx, "git", append([]string{"-C", root}, args...)...)
 	if errors.Is(err, command.ErrInterrupted) {

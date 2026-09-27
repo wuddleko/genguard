@@ -287,8 +287,6 @@ func TestInterruptBetweenGroupsKeepsDrift(t *testing.T) {
 			{Name: "second", Command: "true", Outputs: []string{"right.txt"}, Clean: true},
 		},
 	}
-	// The running command checks the context before it writes. The next check
-	// is the cancel between groups, once left.txt has drifted.
 	ctx := &errGate{Context: context.Background(), path: filepath.Join(root, "left.txt")}
 	result, err := checkConfig(cfg, "", nil, commandLog{ctx: ctx})
 	if err != nil {
@@ -386,8 +384,6 @@ func cancelWhenContains(t *testing.T, path, want string, cancel context.CancelFu
 	}
 }
 
-// errGate reports a cancel once path contains the drifted bytes.
-// Done stays nil so the command that writes the file is not killed.
 type errGate struct {
 	context.Context
 	path string

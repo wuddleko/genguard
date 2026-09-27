@@ -46,10 +46,6 @@ func (c Config) Root() string {
 	return filepath.Dir(c.Path)
 }
 
-// FindConfig walks from start toward the filesystem root.
-// stop is included and its parent is not, including symlink spellings.
-// An empty stop does not limit the walk. A stop that is not an ancestor
-// of start ends the walk after start, so a config above stop is not used.
 func FindConfig(start, stop string) (string, error) {
 	here, err := resolveStart(start)
 	if err != nil {

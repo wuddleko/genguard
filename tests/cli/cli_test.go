@@ -3733,9 +3733,6 @@ func requireOrder(t *testing.T, s string, parts ...string) {
 	}
 }
 
-// failGitDiffIn breaks `git diff --no-color` for one config directory.
-// Drift detection does not use --no-color. A patch diff from the repository root
-// still fails when a pathspec after -- or --no-index is inside that directory.
 func failGitDiffIn(t *testing.T, suffix string) {
 	t.Helper()
 	real, err := exec.LookPath("git")
@@ -3803,7 +3800,6 @@ func installUnixGitShim(t *testing.T, bin, real, suffix string) {
 	}
 }
 
-// Windows will not run an extensionless git shim, so this copies the test binary.
 func installWindowsGitShim(t *testing.T, bin, real, suffix string) {
 	t.Helper()
 	src, err := os.Open(os.Args[0])

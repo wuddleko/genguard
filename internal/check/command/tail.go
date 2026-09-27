@@ -7,9 +7,6 @@ const (
 	commandTailLineBytes = 8192
 )
 
-// tailRing keeps the last commandTailLines lines written to it.
-// A line longer than commandTailLineBytes is cut there. The rest of that
-// line is discarded until the next newline.
 type tailRing struct {
 	lines    []string
 	cur      []byte
@@ -43,7 +40,6 @@ func (r *tailRing) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// flush reports an unfinished line once. Later writes can report again. String does not.
 func (r *tailRing) flush() {
 	if r.reported || r.onLine == nil || r.drop || len(r.cur) == 0 {
 		return

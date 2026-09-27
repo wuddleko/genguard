@@ -12,14 +12,8 @@ import (
 	"github.com/wuddleko/genguard/internal/config"
 )
 
-// versionPattern is the first semver-shaped token in a version command's output.
-// A leading v is optional. One dotted pair is required, then an optional third
-// component, pre-release, and build.
 var versionPattern = regexp.MustCompile(`v?\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?`)
 
-// toolKey identifies one probe. root is the working directory Capture uses,
-// so the same command in another config or worktree is a different probe.
-// timeout is that group's deadline, so a different limit is a different probe.
 type toolKey struct {
 	root    string
 	command string

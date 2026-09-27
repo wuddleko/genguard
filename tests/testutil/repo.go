@@ -26,7 +26,6 @@ type GroupSpec struct {
 	Clean   bool
 }
 
-// Chdir changes the working directory for the test. t.Chdir needs Go 1.24.
 func Chdir(t *testing.T, dir string) {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -51,9 +50,6 @@ func Chdir(t *testing.T, dir string) {
 	})
 }
 
-// WithoutWorkingDirectory makes Getwd, and Abs of a relative path, fail.
-// On macOS a mode-0 parent is not enough: getcwd returns the cached path
-// until the path exceeds PATH_MAX, and only then does Go's ".." walk run.
 func WithoutWorkingDirectory(t *testing.T) {
 	t.Helper()
 	wd, err := os.Getwd()
@@ -109,6 +105,7 @@ func lockParent(t *testing.T, wd string) bool {
 
 func lockDeepParent(t *testing.T, wd string) bool {
 	t.Helper()
+	// macOS getcwd keeps a cached path until it exceeds PATH_MAX.
 	base := t.TempDir()
 	if err := os.Chdir(base); err != nil {
 		t.Fatal(err)
@@ -271,7 +268,6 @@ func MakeRepo(tmp string, outputs, configName string, groups []GroupSpec) (strin
 	return root, nil
 }
 
-// SkipIfFilenameRejected skips when the OS rejects name.
 func SkipIfFilenameRejected(t *testing.T, dir, name string) {
 	t.Helper()
 	if strings.ContainsAny(name, `/\`) {

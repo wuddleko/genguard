@@ -70,7 +70,6 @@ func FormatRunFailureReport(run RunResult) (string, error) {
 	return b.String(), nil
 }
 
-// FormatCommandTails is the group output printed before Summary for one config.
 func FormatCommandTails(result ConfigResult) string {
 	var b strings.Builder
 	writeCommandTails(&b, result.Groups, func(name string) string {
@@ -79,7 +78,6 @@ func FormatCommandTails(result ConfigResult) string {
 	return b.String()
 }
 
-// FormatRunCommandTails is the group output printed before Summary for --all.
 func FormatRunCommandTails(run RunResult) string {
 	var b strings.Builder
 	for _, cfg := range run.Configs {

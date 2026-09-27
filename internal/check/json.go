@@ -95,8 +95,6 @@ func jsonConfigFrom(repoRoot string, cfg ConfigRun) jsonConfig {
 	return out
 }
 
-// jsonDriftPath prints a drift relative to the repository root.
-// Stored drift paths are relative to the config directory.
 func jsonDriftPath(repoRoot, configPath, driftPath string) string {
 	if repoRoot == "" || driftPath == "" || !filepath.IsAbs(configPath) {
 		return driftPath

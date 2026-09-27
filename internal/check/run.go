@@ -157,9 +157,6 @@ func (r RunResult) configStatusCounts() (ok, drift, errors int) {
 	return ok, drift, errors
 }
 
-// SingleConfigRun is the one-config result --json prints. The config path is
-// absolute and RepoRoot is set, so FormatJSON can print the same repo-relative
-// path as check --all.
 func SingleConfigRun(configPath string, result ConfigResult) (RunResult, error) {
 	abs, err := filepath.Abs(configPath)
 	if err != nil {
