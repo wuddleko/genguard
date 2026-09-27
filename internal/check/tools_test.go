@@ -714,7 +714,8 @@ func writeCountingProbe(t *testing.T, tail string) (command, countPath string) {
 	if err := os.WriteFile(script, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return "python3 " + script, countPath
+	// Single quotes keep the path intact for sh, including Git Bash on Windows.
+	return "python3 " + shellQuote(filepath.ToSlash(script)), countPath
 }
 
 func probeCount(t *testing.T, path string) int {
