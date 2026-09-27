@@ -2671,6 +2671,26 @@ func TestCLISinceReportsSkipAndBadRef(t *testing.T) {
 	}
 }
 
+func TestCLISinceDashRef(t *testing.T) {
+	root := writeSinceRepo(t)
+	cfg := filepath.Join(root, "genguard.yaml")
+	for _, since := range []string{"--all", "-n"} {
+		for _, isolated := range []bool{false, true} {
+			args := []string{"check", "--config", cfg, "--since", since}
+			if isolated {
+				args = []string{"check", "--isolated", "--config", cfg, "--since", since}
+			}
+			stdout, stderr, code := runCLI(args)
+			if code != 2 || stdout != "" || !strings.Contains(stderr, "bad --since ref") {
+				t.Fatalf("args %q: code = %d stdout = %q stderr = %q", args, code, stdout, stderr)
+			}
+			if strings.Contains(stderr, "unknown option") || strings.Contains(stderr, "unrecognized argument") {
+				t.Fatalf("args %q: stderr = %q", args, stderr)
+			}
+		}
+	}
+}
+
 func TestSinceRunsWhenWorktreeMatchesBaseNotHEAD(t *testing.T) {
 	root := writeSinceRepo(t)
 	commitPath(t, root, "internal/db/out.txt", "edited\n")

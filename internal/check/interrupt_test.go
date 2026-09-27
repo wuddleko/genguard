@@ -444,6 +444,7 @@ func installHoldingGit(t *testing.T, mode, ready string) {
 
 func TestCancelDuringMergeBaseIsInterrupted(t *testing.T) {
 	root := gitRepo(t)
+	writeTracked(t, root, "f.txt", "ok\n")
 	ready := filepath.Join(t.TempDir(), "ready")
 	installHoldingGit(t, "hold-merge-base", ready)
 	ctx, cancel := context.WithCancel(context.Background())

@@ -80,12 +80,33 @@ func callerRepoRoot(start, gitRoot string) string {
 	return filepath.Clean(gitRoot)
 }
 
+// verifyCommit resolves since to one commit. The revision follows
+// --end-of-options, so git reads the ref text as a revision.
+func verifyCommit(log commandLog, root, since string) (string, error) {
+	out, code, err := log.git(root, "rev-parse", "--verify", "--end-of-options", since+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	if code != 0 {
+		return "", newGenguardError("bad --since ref: %s", gitDetail(out, "git rev-parse failed"))
+	}
+	rev := strings.TrimSpace(out)
+	if rev == "" {
+		return "", newGenguardError("bad --since ref: empty revision")
+	}
+	return rev, nil
+}
+
 func mergeBase(log commandLog, root, since string) (string, error) {
 	since = strings.TrimSpace(since)
 	if since == "" {
 		return "", newGenguardError("--since requires a ref")
 	}
-	out, code, err := log.git(root, "merge-base", "HEAD", since)
+	rev, err := verifyCommit(log, root, since)
+	if err != nil {
+		return "", err
+	}
+	out, code, err := log.git(root, "merge-base", "HEAD", rev)
 	if err != nil {
 		return "", err
 	}

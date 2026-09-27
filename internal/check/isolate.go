@@ -79,18 +79,7 @@ func isolateSince(log commandLog, dir, since string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	out, code, err := log.git(root, "rev-parse", "--verify", since+"^{commit}")
-	if err != nil {
-		return "", err
-	}
-	if code != 0 {
-		return "", newGenguardError("bad --since ref: %s", gitDetail(out, "git rev-parse failed"))
-	}
-	rev := strings.TrimSpace(out)
-	if rev == "" {
-		return "", newGenguardError("bad --since ref: empty revision")
-	}
-	return rev, nil
+	return verifyCommit(log, root, since)
 }
 
 func callerPathError(err error, mapped, path string) error {

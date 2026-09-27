@@ -87,8 +87,14 @@ func containsArg(args []string, want string) bool {
 
 var gitShimModes = []shimMode{
 	{name: "exit-2-empty", steps: []shimStep{shimExit(2)}},
-	{name: "merge-base-empty", steps: []shimStep{shimExit(0, "merge-base")}},
-	{name: "merge-base-quiet", steps: []shimStep{shimExit(2, "merge-base")}},
+	{name: "merge-base-empty", steps: []shimStep{
+		{when: shimOn("--verify"), stdout: "0123456789abcdef0123456789abcdef01234567\n", stop: true},
+		shimExit(0, "merge-base"),
+	}},
+	{name: "merge-base-quiet", steps: []shimStep{
+		{when: shimOn("--verify"), stdout: "0123456789abcdef0123456789abcdef01234567\n", stop: true},
+		shimExit(2, "merge-base"),
+	}},
 	{name: "show-prefix-abs", steps: []shimStep{{
 		when: shimOn("--show-prefix"), stdout: "/no/such/prefix/\n", stop: true,
 	}}},
@@ -174,6 +180,7 @@ type shimMode struct {
 
 func gitShimMain() int {
 	args := os.Args[1:]
+	recordGitArgs(args)
 	mode := os.Getenv("GENGUARD_GIT_MODE")
 	for _, spec := range gitShimModes {
 		if spec.name != mode {
@@ -245,11 +252,33 @@ func execRealGit(args []string) int {
 	return 1
 }
 
+func recordGitArgs(args []string) {
+	path := os.Getenv("GENGUARD_GIT_ARGS")
+	if path == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	for _, arg := range args {
+		fmt.Fprintln(f, arg)
+	}
+	fmt.Fprintln(f)
+}
+
 func unixGitShim() string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	b.WriteString("real=$GENGUARD_REAL_GIT\n")
 	b.WriteString("mode=$GENGUARD_GIT_MODE\n")
+	b.WriteString("if [ -n \"$GENGUARD_GIT_ARGS\" ]; then\n")
+	b.WriteString("  for arg in \"$@\"; do\n")
+	b.WriteString("    printf '%s\\n' \"$arg\" >> \"$GENGUARD_GIT_ARGS\"\n")
+	b.WriteString("  done\n")
+	b.WriteString("  printf '\\n' >> \"$GENGUARD_GIT_ARGS\"\n")
+	b.WriteString("fi\n")
 	watched := shimWatchedArgs()
 	for _, arg := range watched {
 		fmt.Fprintf(&b, "%s=0\n", shellVar(arg))
