@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/wuddleko/genguard/internal/pathx"
 )
 
 func FuzzResolveCleanPath(f *testing.F) {
@@ -38,7 +40,7 @@ func FuzzResolveCleanPath(f *testing.F) {
 			if filepath.IsAbs(trimmed) {
 				t.Fatalf("accepted absolute spec %q -> %s", spec, target)
 			}
-			if rejectGlob && isGlob(trimmed) {
+			if rejectGlob && pathx.IsGlob(trimmed) {
 				t.Fatalf("accepted glob spec %q -> %s", spec, target)
 			}
 			rel, relErr := filepath.Rel(absRoot, target)

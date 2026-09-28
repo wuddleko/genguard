@@ -3,6 +3,8 @@ package check
 import (
 	"fmt"
 	"path/filepath"
+
+	"github.com/wuddleko/genguard/internal/pathx"
 )
 
 type ConfigRun struct {
@@ -176,7 +178,7 @@ func displayConfigPath(repoRoot, path string) string {
 	if repoRoot == "" || path == "" {
 		return path
 	}
-	rel, ok := relInside(repoRoot, path)
+	rel, ok := pathx.RelInside(repoRoot, path)
 	if !ok {
 		return path
 	}

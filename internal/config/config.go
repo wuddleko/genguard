@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/wuddleko/genguard/internal/pathx"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -121,11 +123,8 @@ func dirInside(root, path string) bool {
 }
 
 func relInside(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	_, ok := pathx.RelInside(root, path)
+	return ok
 }
 
 func configFile(dir string) (string, error) {

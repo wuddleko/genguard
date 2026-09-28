@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/wuddleko/genguard/internal/pathx"
 )
 
 func FormatAnnotations(run RunResult) string {
@@ -92,7 +94,7 @@ func workspaceFile(repoRoot, file string) string {
 	if err != nil {
 		return file
 	}
-	prefix, ok := relInside(wsAbs, rootAbs)
+	prefix, ok := pathx.RelInside(wsAbs, rootAbs)
 	if !ok {
 		return file
 	}

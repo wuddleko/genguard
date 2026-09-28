@@ -12,9 +12,8 @@ import (
 	"github.com/wuddleko/genguard/internal/check/command"
 	"github.com/wuddleko/genguard/internal/config"
 	"github.com/wuddleko/genguard/internal/gitx"
+	"github.com/wuddleko/genguard/internal/pathx"
 )
-
-const globChars = "*?[]"
 
 func Outputs(ctx context.Context, root, configPath string, group config.Group) error {
 	return cleanOutputs(ctx, root, configPath, group)
@@ -64,7 +63,7 @@ func cleanOutputs(ctx context.Context, root, configPath string, group config.Gro
 }
 
 func planCleanSpec(ctx context.Context, root, spec string) ([]cleanTarget, error) {
-	if isGlob(spec) {
+	if pathx.IsGlob(spec) {
 		return planCleanGlob(ctx, root, spec)
 	}
 	target, isDir, err := resolveCleanPath(root, spec, true)
@@ -110,7 +109,7 @@ func refuseGlobPrefix(root, spec string) error {
 		if part == "" || part == "." {
 			continue
 		}
-		if strings.ContainsAny(part, globChars) {
+		if strings.ContainsAny(part, pathx.GlobChars) {
 			break
 		}
 		prefix = append(prefix, part)
@@ -312,7 +311,7 @@ func resolveCleanPath(root, spec string, rejectGlob bool) (string, bool, error) 
 	if spec == "" {
 		return "", false, fmt.Errorf("clean refuses an empty output path")
 	}
-	if rejectGlob && isGlob(spec) {
+	if rejectGlob && pathx.IsGlob(spec) {
 		return "", false, fmt.Errorf("clean refuses glob output %q", spec)
 	}
 	if filepath.IsAbs(spec) {
@@ -321,7 +320,7 @@ func resolveCleanPath(root, spec string, rejectGlob bool) (string, bool, error) 
 
 	dirHint := strings.HasSuffix(spec, "/") || strings.HasSuffix(spec, string(filepath.Separator))
 	cleaned := filepath.Clean(spec)
-	if cleaned == "." || relEscapes(cleaned) {
+	if cleaned == "." || pathx.RelEscapes(cleaned) {
 		return "", false, fmt.Errorf("clean refuses %q", spec)
 	}
 
@@ -330,7 +329,7 @@ func resolveCleanPath(root, spec string, rejectGlob bool) (string, bool, error) 
 		return "", false, err
 	}
 	target := filepath.Clean(filepath.Join(absRoot, cleaned))
-	rel, ok := relInside(absRoot, target)
+	rel, ok := pathx.RelInside(absRoot, target)
 	if !ok || rel == "." {
 		return "", false, fmt.Errorf("clean refuses %q", spec)
 	}
@@ -499,7 +498,7 @@ func wouldRemove(target, path string) bool {
 	if err != nil {
 		return false
 	}
-	_, ok := relInside(absTarget, absPath)
+	_, ok := pathx.RelInside(absTarget, absPath)
 	return ok
 }
 
@@ -516,20 +515,4 @@ func removeCleanTarget(root, target string, isDir bool) error {
 		return fmt.Errorf("clean refuses %q", rel)
 	}
 	return removePinned(root, parts, isDir)
-}
-
-func relInside(root, path string) (string, bool) {
-	rel, err := filepath.Rel(root, path)
-	if err != nil || relEscapes(rel) {
-		return "", false
-	}
-	return rel, true
-}
-
-func relEscapes(rel string) bool {
-	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-func isGlob(spec string) bool {
-	return strings.ContainsAny(spec, globChars)
 }

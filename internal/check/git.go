@@ -9,6 +9,7 @@ import (
 
 	"github.com/wuddleko/genguard/internal/check/command"
 	"github.com/wuddleko/genguard/internal/gitx"
+	"github.com/wuddleko/genguard/internal/pathx"
 )
 
 func RequireGitRepo(root string) error {
@@ -67,7 +68,7 @@ func callerRepoRoot(start, gitRoot string) string {
 	if err != nil {
 		return filepath.Clean(gitRoot)
 	}
-	rel, ok := relInside(resolvedRoot, resolvedStart)
+	rel, ok := pathx.RelInside(resolvedRoot, resolvedStart)
 	if !ok {
 		return filepath.Clean(gitRoot)
 	}

@@ -8,9 +8,8 @@ import (
 	"strings"
 
 	"github.com/wuddleko/genguard/internal/config"
+	"github.com/wuddleko/genguard/internal/pathx"
 )
-
-const globChars = "*?[]"
 
 type Drift struct {
 	Group string
@@ -289,13 +288,9 @@ func groupAffected(log commandLog, root, base, configName string, group config.G
 }
 
 func literalOutputAbsent(root, spec string) bool {
-	if isGlob(spec) || strings.HasSuffix(spec, "/") {
+	if pathx.IsGlob(spec) || strings.HasSuffix(spec, "/") {
 		return false
 	}
 	_, err := os.Stat(filepath.Join(root, spec))
 	return err != nil
-}
-
-func isGlob(spec string) bool {
-	return strings.ContainsAny(spec, globChars)
 }

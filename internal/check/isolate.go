@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/wuddleko/genguard/internal/config"
+	"github.com/wuddleko/genguard/internal/pathx"
 )
 
 func CheckSinceIsolated(path, since string) (ConfigResult, error) {
@@ -197,7 +198,7 @@ func relInsideRepo(root, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if rel, ok := relInside(absRoot, absPath); ok {
+	if rel, ok := pathx.RelInside(absRoot, absPath); ok {
 		return rel, nil
 	}
 	resolvedRoot, rootErr := filepath.EvalSymlinks(absRoot)
@@ -205,22 +206,10 @@ func relInsideRepo(root, path string) (string, error) {
 	if rootErr != nil || pathErr != nil {
 		return "", newGenguardError("%s is not inside the repository", path)
 	}
-	if rel, ok := relInside(resolvedRoot, resolvedPath); ok {
+	if rel, ok := pathx.RelInside(resolvedRoot, resolvedPath); ok {
 		return rel, nil
 	}
 	return "", newGenguardError("%s is not inside the repository", path)
-}
-
-func relInside(root, path string) (string, bool) {
-	rel, err := filepath.Rel(root, path)
-	if err != nil || relEscapes(rel) {
-		return "", false
-	}
-	return rel, true
-}
-
-func relEscapes(rel string) bool {
-	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func isolateGitError(op, out string, err error) error {
