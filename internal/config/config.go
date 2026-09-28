@@ -207,7 +207,7 @@ func parseConfig(path string, data []byte) (Config, error) {
 		declared[tool.Name] = struct{}{}
 	}
 
-	groupsRaw, ok := raw["groups"].([]any)
+	groupsRaw, ok := presentList(raw["groups"])
 	if !ok || len(groupsRaw) == 0 {
 		return Config{}, fmt.Errorf("%s must include a non-empty 'groups' list", path)
 	}
@@ -233,18 +233,19 @@ func parseConfig(path string, data []byte) (Config, error) {
 		}
 
 		name := loc
-		if rawName, exists := groupMap["name"]; exists && rawName != nil {
-			value, ok := rawName.(string)
+		if rawName, exists := groupMap["name"]; exists {
+			value, blank, ok := presentString(rawName)
 			if !ok {
 				return Config{}, fmt.Errorf("%s.name must be a string", loc)
 			}
-			if value != "" {
+			if !blank {
 				name = value
 			}
 		}
 
-		command, ok := groupMap["command"].(string)
-		if !ok || strings.TrimSpace(command) == "" {
+		rawCommand, exists := groupMap["command"]
+		command, blank, ok := presentString(rawCommand)
+		if !exists || !ok || blank {
 			return Config{}, fmt.Errorf("groups[%d] requires a non-empty 'command' string", index)
 		}
 
@@ -341,7 +342,8 @@ func parseTools(raw map[string]any, loc string) ([]Tool, error) {
 		if err != nil {
 			return nil, err
 		}
-		command, err := optionalCommand(item, entryLoc)
+		version = strings.TrimSpace(version)
+		command, err := optionalText(item, "command", entryLoc)
 		if err != nil {
 			return nil, err
 		}
@@ -363,9 +365,12 @@ func parseGroupTools(groupMap map[string]any, loc string, declared map[string]st
 	seen := make(map[string]struct{}, len(entries))
 	for i, entry := range entries {
 		refLoc := fmt.Sprintf("%s.tools[%d]", loc, i)
-		text, ok := entry.(string)
+		text, blank, ok := presentString(entry)
 		if !ok {
 			return nil, fmt.Errorf("%s must be a string", refLoc)
+		}
+		if blank {
+			return nil, fmt.Errorf("%s requires a non-empty name", refLoc)
 		}
 		name, err := refToken(text, refLoc)
 		if err != nil {
@@ -384,10 +389,7 @@ func parseGroupTools(groupMap map[string]any, loc string, declared map[string]st
 }
 
 func toolEntries(value any, loc string) ([]any, error) {
-	if value == nil {
-		return nil, fmt.Errorf("%s requires a non-empty 'tools' list", loc)
-	}
-	entries, ok := value.([]any)
+	entries, ok := presentList(value)
 	if !ok {
 		return nil, fmt.Errorf("%s 'tools' must be a list", loc)
 	}
@@ -399,17 +401,17 @@ func toolEntries(value any, loc string) ([]any, error) {
 
 func toolName(m map[string]any, loc string) (string, error) {
 	raw, ok := m["name"]
-	if !ok || raw == nil {
+	if !ok {
 		return "", fmt.Errorf("%s requires a non-empty 'name' string", loc)
 	}
-	text, ok := raw.(string)
+	text, blank, ok := presentString(raw)
 	if !ok {
 		return "", fmt.Errorf("%s.name must be a string", loc)
 	}
-	text = strings.TrimSpace(text)
-	if text == "" {
+	if blank {
 		return "", fmt.Errorf("%s requires a non-empty 'name' string", loc)
 	}
+	text = strings.TrimSpace(text)
 	if strings.ContainsFunc(text, unicode.IsSpace) {
 		return "", fmt.Errorf("%s.name must be a single token", loc)
 	}
@@ -418,42 +420,45 @@ func toolName(m map[string]any, loc string) (string, error) {
 
 func refToken(text, loc string) (string, error) {
 	text = strings.TrimSpace(text)
-	if text == "" {
-		return "", fmt.Errorf("%s requires a non-empty name", loc)
-	}
 	if strings.ContainsFunc(text, unicode.IsSpace) {
 		return "", fmt.Errorf("%s must be a single token", loc)
 	}
 	return text, nil
 }
 
-func optionalText(m map[string]any, key, loc string) (string, error) {
-	value, ok := m[key]
+func presentString(value any) (text string, blank, ok bool) {
+	if value == nil {
+		return "", true, true
+	}
+	text, ok = value.(string)
 	if !ok {
-		return "", nil
-	}
-	text, ok := value.(string)
-	if !ok || value == nil {
-		return "", fmt.Errorf("%s.%s must be a string", loc, key)
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return "", fmt.Errorf("%s requires a non-empty '%s' string", loc, key)
-	}
-	return text, nil
-}
-
-func optionalCommand(m map[string]any, loc string) (string, error) {
-	value, ok := m["command"]
-	if !ok {
-		return "", nil
-	}
-	text, ok := value.(string)
-	if !ok || value == nil {
-		return "", fmt.Errorf("%s.command must be a string", loc)
+		return "", false, false
 	}
 	if strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("%s requires a non-empty 'command' string", loc)
+		return "", true, true
+	}
+	return text, false, true
+}
+
+func presentList(value any) (entries []any, ok bool) {
+	if value == nil {
+		return []any{}, true
+	}
+	entries, ok = value.([]any)
+	return entries, ok
+}
+
+func optionalText(m map[string]any, key, loc string) (string, error) {
+	value, exists := m[key]
+	if !exists {
+		return "", nil
+	}
+	text, blank, ok := presentString(value)
+	if !ok {
+		return "", fmt.Errorf("%s.%s must be a string", loc, key)
+	}
+	if blank {
+		return "", fmt.Errorf("%s requires a non-empty '%s' string", loc, key)
 	}
 	return text, nil
 }
@@ -478,7 +483,7 @@ func rejectUnknownKeys(m map[string]any, known []string, loc string) error {
 
 func requiredPaths(m map[string]any, key, loc string) ([]string, error) {
 	raw, ok := m[key]
-	if !ok || raw == nil {
+	if !ok {
 		return nil, fmt.Errorf("%s requires a non-empty '%s' list", loc, key)
 	}
 	return pathsFrom(raw, key, loc)
@@ -489,14 +494,11 @@ func optionalPaths(m map[string]any, key, loc string) ([]string, error) {
 	if !ok {
 		return nil, nil
 	}
-	if raw == nil {
-		return nil, fmt.Errorf("%s requires a non-empty '%s' list", loc, key)
-	}
 	return pathsFrom(raw, key, loc)
 }
 
 func pathsFrom(raw any, key, loc string) ([]string, error) {
-	entries, ok := raw.([]any)
+	entries, ok := presentList(raw)
 	if !ok {
 		return nil, fmt.Errorf("%s '%s' must be a list", loc, key)
 	}
@@ -505,22 +507,19 @@ func pathsFrom(raw any, key, loc string) ([]string, error) {
 	}
 	paths := make([]string, 0, len(entries))
 	for i, entry := range entries {
-		value, ok := entry.(string)
+		value, blank, ok := presentString(entry)
 		if !ok {
 			return nil, fmt.Errorf("%s.%s[%d] must be a string", loc, key, i)
 		}
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
+		if blank {
+			return nil, fmt.Errorf("%s.%s[%d] must be a non-empty string", loc, key, i)
 		}
+		value = strings.TrimSpace(value)
 		// clean treats each entry as a path. Git magic such as :(exclude) would not protect it.
 		if strings.HasPrefix(value, ":") {
 			return nil, fmt.Errorf("%s.%s[%d]: pathspec magic is not supported: %q", loc, key, i, value)
 		}
 		paths = append(paths, value)
-	}
-	if len(paths) == 0 {
-		return nil, fmt.Errorf("%s '%s' has no usable paths", loc, key)
 	}
 	return paths, nil
 }
@@ -554,14 +553,21 @@ type durationOpt struct {
 
 func optionalDuration(m map[string]any, key, loc string) (durationOpt, error) {
 	value, ok := m[key]
-	if !ok || value == nil {
+	if !ok {
 		return durationOpt{}, nil
+	}
+	if value == nil {
+		return durationOpt{}, fmt.Errorf("%s must be a Go duration", loc)
 	}
 	text, ok := value.(string)
 	if !ok {
 		return durationOpt{}, fmt.Errorf("%s must be a duration string", loc)
 	}
-	d, err := time.ParseDuration(strings.TrimSpace(text))
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return durationOpt{}, fmt.Errorf("%s must be a Go duration", loc)
+	}
+	d, err := time.ParseDuration(text)
 	if err != nil {
 		return durationOpt{}, fmt.Errorf("%s must be a Go duration", loc)
 	}
@@ -573,8 +579,11 @@ func optionalDuration(m map[string]any, key, loc string) (durationOpt, error) {
 
 func optionalBool(m map[string]any, key, loc string) (boolOpt, error) {
 	value, ok := m[key]
-	if !ok || value == nil {
+	if !ok {
 		return boolOpt{}, nil
+	}
+	if value == nil {
+		return boolOpt{}, fmt.Errorf("%s must be a boolean", loc)
 	}
 	b, ok := value.(bool)
 	if !ok {

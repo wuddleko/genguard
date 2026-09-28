@@ -26,3 +26,12 @@ A group lists those names under its own `tools` key. A name that is not declared
 Under Tool-specific configs, add this and do not copy the field list:
 
 Pin a generator version with the `tools` key. The fields are in the [README](../README.md#tools). A mismatch fails the group before `clean` and before the generator runs.
+
+## Null and empty
+
+A missing key stays the default. A present null and a present empty value take the same branch.
+
+- A tool `version` or `command` that is null, `""`, or whitespace requires a non-empty string. Omitting the key leaves it unset.
+- `clean: ~` is a boolean error. `timeout: ~` is a duration error. Omitting either key leaves it unset.
+- A null or blank entry in `outputs` or `inputs` must be a non-empty string.
+- A group `name` that is null, empty, or whitespace uses `groups[0]`, `groups[1]`, and so on.

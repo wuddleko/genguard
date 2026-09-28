@@ -112,7 +112,6 @@ func TestLoadConfigInputs(t *testing.T) {
 		"    inputs:\n" +
 		"      - queries/\n" +
 		"      - sqlc.yaml\n" +
-		"      - '   '\n" +
 		"    outputs:\n" +
 		"      - internal/db/\n"
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
@@ -148,19 +147,25 @@ func TestLoadConfigAcceptsGenguardYml(t *testing.T) {
 
 func TestLoadConfigDefaultGroupName(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	configPath := filepath.Join(root, "genguard.yaml")
-	content := "groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n"
-	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
+	contents := []string{
+		"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n",
+		"groups:\n  - name:\n    command: python3 scripts/gen.py\n    outputs:\n      - generated/\n",
+		"groups:\n  - name: \"\"\n    command: python3 scripts/gen.py\n    outputs:\n      - generated/\n",
+		"groups:\n  - name: \"  \"\n    command: python3 scripts/gen.py\n    outputs:\n      - generated/\n",
 	}
-
-	cfg, err := config.LoadConfig(configPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Groups[0].Name != "groups[0]" {
-		t.Fatalf("name = %q", cfg.Groups[0].Name)
+	for _, content := range contents {
+		root := t.TempDir()
+		configPath := filepath.Join(root, "genguard.yaml")
+		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := config.LoadConfig(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Groups[0].Name != "groups[0]" {
+			t.Fatalf("name = %q", cfg.Groups[0].Name)
+		}
 	}
 }
 
@@ -233,7 +238,7 @@ func TestLoadConfigRootIsConfigParent(t *testing.T) {
 	}
 }
 
-func TestLoadConfigFiltersBlankOutputEntries(t *testing.T) {
+func TestLoadConfigRejectsBlankOutputEntry(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	configPath := filepath.Join(root, "genguard.yaml")
@@ -247,12 +252,13 @@ func TestLoadConfigFiltersBlankOutputEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := config.LoadConfig(configPath)
-	if err != nil {
-		t.Fatal(err)
+	_, err := config.LoadConfig(configPath)
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if len(cfg.Groups[0].Outputs) != 1 || cfg.Groups[0].Outputs[0] != "generated/hello.txt" {
-		t.Fatalf("outputs = %v", cfg.Groups[0].Outputs)
+	want := "groups[0].outputs[1] must be a non-empty string"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error = %q, want substring %q", err, want)
 	}
 }
 
@@ -302,7 +308,11 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 		{"groups:\n  - name: greeting\n    command: python3 scripts/gen.py\n    outputs: []\n", "outputs"},
 		{
 			"groups:\n  - name: greeting\n    command: python3 scripts/gen.py\n    outputs:\n      - '  '\n",
-			"no usable paths",
+			"groups[0].outputs[0] must be a non-empty string",
+		},
+		{
+			"groups:\n  - name: greeting\n    command: python3 scripts/gen.py\n    outputs:\n      - ''\n",
+			"groups[0].outputs[0] must be a non-empty string",
 		},
 		{
 			"groups:\n  - command: python3 scripts/gen.py\n    outputs: generated/\n",
@@ -310,7 +320,7 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 		},
 		{
 			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n      - null\n",
-			"groups[0].outputs[1] must be a string",
+			"groups[0].outputs[1] must be a non-empty string",
 		},
 		{
 			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - 1\n",
@@ -325,12 +335,28 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 			"groups[0].name must be a string",
 		},
 		{
+			"groups:\n  - command:\n    outputs:\n      - generated/\n",
+			"groups[0] requires a non-empty 'command' string",
+		},
+		{
+			"clean:\ngroups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n",
+			"clean must be a boolean",
+		},
+		{
+			"clean: \"\"\ngroups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n",
+			"clean must be a boolean",
+		},
+		{
 			"clean: 1\ngroups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n",
 			"clean must be a boolean",
 		},
 		{
 			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    clean: 1\n",
 			"groups[0].clean",
+		},
+		{
+			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    clean:\n",
+			"groups[0].clean must be a boolean",
 		},
 		{
 			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    inputs: []\n",
@@ -342,7 +368,11 @@ func TestLoadConfigValidationErrors(t *testing.T) {
 		},
 		{
 			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    inputs:\n      - '  '\n",
-			"no usable paths",
+			"groups[0].inputs[0] must be a non-empty string",
+		},
+		{
+			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    inputs:\n      - null\n",
+			"groups[0].inputs[0] must be a non-empty string",
 		},
 		{
 			"groups:\n  - command: python3 scripts/gen.py\n    outputs:\n      - generated/\n    inputs: queries/\n",
@@ -473,6 +503,21 @@ func TestLoadConfigTimeoutRejectsBadValues(t *testing.T) {
 			"timeout must be a Go duration",
 		},
 		{
+			"null",
+			"timeout:\ngroups:\n  - command: \"true\"\n    outputs:\n      - a.txt\n",
+			"timeout must be a Go duration",
+		},
+		{
+			"empty",
+			"timeout: \"\"\ngroups:\n  - command: \"true\"\n    outputs:\n      - a.txt\n",
+			"timeout must be a Go duration",
+		},
+		{
+			"group null",
+			"groups:\n  - command: \"true\"\n    timeout:\n    outputs:\n      - a.txt\n",
+			"groups[0].timeout must be a Go duration",
+		},
+		{
 			"group bad string",
 			"groups:\n  - command: \"true\"\n    timeout: 1min\n    outputs:\n      - a.txt\n",
 			"groups[0].timeout must be a Go duration",
@@ -566,13 +611,16 @@ func TestLoadConfigToolErrors(t *testing.T) {
 		{"not a mapping", "tools: [buf]\n" + group, "tools[0] must be a mapping"},
 		{"missing name", "tools:\n  - version: 1.32.0\n" + group, "tools[0] requires a non-empty 'name' string"},
 		{"blank name", "tools:\n  - name: '  '\n" + group, "tools[0] requires a non-empty 'name' string"},
+		{"null name", "tools:\n  - name:\n" + group, "tools[0] requires a non-empty 'name' string"},
 		{"name not a string", "tools:\n  - name: 1\n" + group, "tools[0].name must be a string"},
 		{"name has whitespace", "tools:\n  - name: buf gen\n" + group, "tools[0].name must be a single token"},
 		{"duplicate name", "tools:\n  - name: buf\n  - name: \" buf \"\n" + group, `duplicate name "buf"`},
 		{"blank version", "tools:\n  - name: buf\n    version: ''\n" + group, "tools[0] requires a non-empty 'version' string"},
+		{"whitespace version", "tools:\n  - name: buf\n    version: '  '\n" + group, "tools[0] requires a non-empty 'version' string"},
 		{"version not a string", "tools:\n  - name: buf\n    version: 1\n" + group, "tools[0].version must be a string"},
-		{"null version", "tools:\n  - name: buf\n    version:\n" + group, "tools[0].version must be a string"},
+		{"null version", "tools:\n  - name: buf\n    version:\n" + group, "tools[0] requires a non-empty 'version' string"},
 		{"blank command", "tools:\n  - name: buf\n    command: ''\n" + group, "tools[0] requires a non-empty 'command' string"},
+		{"null command", "tools:\n  - name: buf\n    command:\n" + group, "tools[0] requires a non-empty 'command' string"},
 		{"command not a string", "tools:\n  - name: buf\n    command: 1\n" + group, "tools[0].command must be a string"},
 		{"unknown key", "tools:\n  - name: buf\n    bin: buf\n" + group, `unknown key "bin"`},
 		{"empty group list", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: []\n", 1), "groups[0] requires a non-empty 'tools' list"},
@@ -582,6 +630,7 @@ func TestLoadConfigToolErrors(t *testing.T) {
 		{"no declarations", strings.Replace(group, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: [buf]\n", 1), `unknown name "buf"`},
 		{"duplicate group name", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: [buf, buf]\n", 1), `duplicate name "buf"`},
 		{"group tool not a string", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: [1]\n", 1), "groups[0].tools[0] must be a string"},
+		{"null group tool", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: [null]\n", 1), "groups[0].tools[0] requires a non-empty name"},
 		{"blank group tool", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: ['  ']\n", 1), "groups[0].tools[0] requires a non-empty name"},
 		{"group tool has whitespace", strings.Replace(withBuf, "outputs:\n      - gen/\n", "outputs:\n      - gen/\n    tools: ['buf gen']\n", 1), "groups[0].tools[0] must be a single token"},
 	}
