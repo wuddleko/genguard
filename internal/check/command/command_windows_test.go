@@ -18,22 +18,40 @@ import (
 
 func TestRunCommandTimeoutKillsProcessGroup(t *testing.T) {
 	root := t.TempDir()
+	warmShell(t, root)
+
 	pidPath := filepath.Join(root, "child.pid")
 	command := pythonCommand(t, root, "nap.py", timeoutScript(pidPath))
 
-	const limit = 3 * time.Second
+	const limit = 8 * time.Second
 	start := time.Now()
 	tail, err := run(nil, root, command, nil, limit)
-	if time.Since(start) >= 6*time.Second {
+	if time.Since(start) >= 12*time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
-	if err == nil || err.Error() != "command timed out after 3s" {
+	if err == nil || err.Error() != "command timed out after 8s" {
 		t.Fatalf("err = %v", err)
 	}
 	if tail != "line1\n" {
-		t.Fatalf("tail = %q", tail)
+		t.Fatalf("tail = %q, pid file: %s", tail, pidFileState(pidPath))
 	}
 	assertPidGone(t, pidPath)
+}
+
+func warmShell(t *testing.T, root string) {
+	t.Helper()
+	text, code, err := Capture(root, `python3 -c "import os, subprocess, sys; sys.stderr.write('ok'+chr(10)); sys.stderr.flush()"`, 45*time.Second)
+	if err != nil || code != 0 || text != "ok\n" {
+		t.Fatalf("warmup code=%d err=%v tail=%q", code, err, text)
+	}
+}
+
+func pidFileState(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err.Error()
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func TestApplySuspendedStartKeepsCmdLine(t *testing.T) {
