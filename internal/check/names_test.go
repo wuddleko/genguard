@@ -3,6 +3,8 @@ package check
 import (
 	"reflect"
 	"testing"
+
+	"github.com/wuddleko/genguard/internal/gitx"
 )
 
 func TestConfigRelativeGitPath(t *testing.T) {
@@ -52,9 +54,9 @@ func TestParseGitNameList(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseGitNameList(tc.in)
+			got := gitx.ParseNameList(tc.in)
 			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("parseGitNameList(%q) = %q, want %q", tc.in, got, tc.want)
+				t.Fatalf("ParseNameList(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}

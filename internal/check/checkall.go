@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/wuddleko/genguard/internal/config"
+	"github.com/wuddleko/genguard/internal/gitx"
 )
 
 type CheckAllOptions struct {
@@ -115,10 +116,10 @@ func findCommittedConfigs(log commandLog, repoRoot string) ([]string, error) {
 		return nil, err
 	}
 	if code != 0 {
-		return nil, newGenguardError("%s", gitDetail(out, "git ls-tree failed"))
+		return nil, newGenguardError("%s", gitx.Detail(out, "git ls-tree failed"))
 	}
 	found := make([]string, 0)
-	for _, name := range parseGitNameList(out) {
+	for _, name := range gitx.ParseNameList(out) {
 		if !committedConfig(name) {
 			continue
 		}

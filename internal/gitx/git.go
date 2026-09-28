@@ -1,57 +1,24 @@
-package clean
+package gitx
 
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os/exec"
 	"strings"
 
 	"github.com/wuddleko/genguard/internal/check/command"
 )
 
-func gitNames(ctx context.Context, root string, args ...string) ([]string, error) {
-	out, code, err := git(ctx, root, args...)
-	if err != nil {
-		return nil, err
-	}
-	if code != 0 {
-		return nil, fmt.Errorf("%s", gitDetail(out, "git failed"))
-	}
-	return parseGitNameList(out), nil
-}
-
-func parseGitNameList(out string) []string {
-	if out == "" {
-		return nil
-	}
-	parts := strings.Split(out, "\x00")
-	names := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part != "" {
-			names = append(names, part)
-		}
-	}
-	return names
-}
-
-func gitDetail(out, fallback string) string {
-	detail := strings.TrimSpace(out)
-	if detail == "" {
-		return fallback
-	}
-	return detail
-}
-
-func git(ctx context.Context, root string, args ...string) (string, int, error) {
+// Run runs git in root. A canceled command returns command.ErrInterrupted.
+func Run(ctx context.Context, root string, args ...string) (string, int, error) {
 	stdout, stderr, err := command.Output(ctx, "git", append([]string{"-C", root}, args...)...)
 	if errors.Is(err, command.ErrInterrupted) {
 		return "", 0, err
 	}
-	return gitResult(stdout, stderr, err)
+	return Result(stdout, stderr, err)
 }
 
-func gitResult(stdout, stderr string, err error) (string, int, error) {
+func Result(stdout, stderr string, err error) (string, int, error) {
 	if err == nil {
 		return stdout, 0, nil
 	}
@@ -74,6 +41,28 @@ func gitResult(stdout, stderr string, err error) (string, int, error) {
 		return stderr, -1, err
 	}
 	return stdout, -1, err
+}
+
+func ParseNameList(out string) []string {
+	if out == "" {
+		return nil
+	}
+	parts := strings.Split(out, "\x00")
+	names := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			names = append(names, part)
+		}
+	}
+	return names
+}
+
+func Detail(out, fallback string) string {
+	detail := strings.TrimSpace(out)
+	if detail == "" {
+		return fallback
+	}
+	return detail
 }
 
 func errorsAsExit(err error, target **exec.ExitError) bool {

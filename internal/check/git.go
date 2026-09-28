@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/wuddleko/genguard/internal/check/command"
+	"github.com/wuddleko/genguard/internal/gitx"
 )
 
 func RequireGitRepo(root string) error {
@@ -88,7 +89,7 @@ func verifyCommit(log commandLog, root, since string) (string, error) {
 		return "", err
 	}
 	if code != 0 {
-		return "", newGenguardError("bad --since ref: %s", gitDetail(out, "git rev-parse failed"))
+		return "", newGenguardError("bad --since ref: %s", gitx.Detail(out, "git rev-parse failed"))
 	}
 	rev := strings.TrimSpace(out)
 	if rev == "" {
@@ -111,7 +112,7 @@ func mergeBase(log commandLog, root, since string) (string, error) {
 		return "", err
 	}
 	if code != 0 {
-		return "", newGenguardError("bad --since ref: %s", gitDetail(out, "git merge-base failed"))
+		return "", newGenguardError("bad --since ref: %s", gitx.Detail(out, "git merge-base failed"))
 	}
 	base := strings.TrimSpace(out)
 	if base == "" {
@@ -137,7 +138,7 @@ func gitDiffText(root string, args ...string) (string, error) {
 		return "", err
 	}
 	if code != 0 && code != 1 {
-		return "", newGenguardError("%s", gitDetail(out, "git diff failed"))
+		return "", newGenguardError("%s", gitx.Detail(out, "git diff failed"))
 	}
 	return out, nil
 }
@@ -148,9 +149,9 @@ func gitNames(log commandLog, root string, args ...string) ([]string, error) {
 		return nil, err
 	}
 	if code != 0 {
-		return nil, newGenguardError("%s", gitDetail(out, "git failed"))
+		return nil, newGenguardError("%s", gitx.Detail(out, "git failed"))
 	}
-	return parseGitNameList(out), nil
+	return gitx.ParseNameList(out), nil
 }
 
 func gitPrefix(log commandLog, root string) (string, error) {
@@ -159,7 +160,7 @@ func gitPrefix(log commandLog, root string) (string, error) {
 		return "", err
 	}
 	if code != 0 {
-		return "", newGenguardError("%s", gitDetail(out, "git rev-parse --show-prefix failed"))
+		return "", newGenguardError("%s", gitx.Detail(out, "git rev-parse --show-prefix failed"))
 	}
 	return strings.TrimSpace(out), nil
 }
@@ -176,63 +177,16 @@ func configRelativeGitPath(prefix, gitPath string) (string, error) {
 	return filepath.ToSlash(rel), nil
 }
 
-func parseGitNameList(out string) []string {
-	if out == "" {
-		return nil
-	}
-	parts := strings.Split(out, "\x00")
-	names := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if part != "" {
-			names = append(names, part)
-		}
-	}
-	return names
-}
-
-func gitDetail(out, fallback string) string {
-	detail := strings.TrimSpace(out)
-	if detail == "" {
-		return fallback
-	}
-	return detail
-}
-
 func git(root string, args ...string) (string, int, error) {
 	return commandLog{}.git(root, args...)
 }
 
 func (c commandLog) git(root string, args ...string) (string, int, error) {
-	stdout, stderr, err := command.Output(c.ctx, "git", append([]string{"-C", root}, args...)...)
+	out, code, err := gitx.Run(c.ctx, root, args...)
 	if errors.Is(err, command.ErrInterrupted) {
 		return "", 0, errInterrupted
 	}
-	return gitResult(stdout, stderr, err)
-}
-
-func gitResult(stdout, stderr string, err error) (string, int, error) {
-	if err == nil {
-		return stdout, 0, nil
-	}
-	var exitErr *exec.ExitError
-	if errorsAsExit(err, &exitErr) {
-		code := exitErr.ExitCode()
-		// Exit 1 with a patch is a diff. A CRLF warning on stderr must not join it.
-		if code == 1 {
-			if strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) != "" {
-				return stderr, code, nil
-			}
-			return stdout, code, nil
-		}
-		if strings.TrimSpace(stderr) != "" {
-			return stderr, code, nil
-		}
-		return stdout, code, nil
-	}
-	if strings.TrimSpace(stderr) != "" {
-		return stderr, -1, err
-	}
-	return stdout, -1, err
+	return out, code, err
 }
 
 func errorsAsExit(err error, target **exec.ExitError) bool {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/wuddleko/genguard/internal/check/command"
 	"github.com/wuddleko/genguard/internal/config"
+	"github.com/wuddleko/genguard/internal/gitx"
 )
 
 const globChars = "*?[]"
@@ -130,6 +131,17 @@ func validateGlobSpec(spec string) error {
 		}
 	}
 	return nil
+}
+
+func gitNames(ctx context.Context, root string, args ...string) ([]string, error) {
+	out, code, err := gitx.Run(ctx, root, args...)
+	if err != nil {
+		return nil, err
+	}
+	if code != 0 {
+		return nil, fmt.Errorf("%s", gitx.Detail(out, "git failed"))
+	}
+	return gitx.ParseNameList(out), nil
 }
 
 func globCleanFiles(ctx context.Context, root, spec string) ([]string, error) {

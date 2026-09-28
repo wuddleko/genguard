@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/wuddleko/genguard/internal/config"
+	"github.com/wuddleko/genguard/internal/gitx"
 	"github.com/wuddleko/genguard/tests/testutil"
 )
 
@@ -311,11 +312,11 @@ func TestWithIsolatedCheckMapPathOutsideLexicalRoot(t *testing.T) {
 }
 
 func TestGitResultKeepsStderrWhenStartFails(t *testing.T) {
-	out, code, err := gitResult("patch", "fatal: boom", errors.New("exec: git failed"))
+	out, code, err := gitx.Result("patch", "fatal: boom", errors.New("exec: git failed"))
 	if err == nil || out != "fatal: boom" || code != -1 {
 		t.Fatalf("out=%q code=%d err=%v", out, code, err)
 	}
-	out, code, err = gitResult("stdout", "", errors.New("exec: git failed"))
+	out, code, err = gitx.Result("stdout", "", errors.New("exec: git failed"))
 	if err == nil || out != "stdout" || code != -1 {
 		t.Fatalf("out=%q code=%d err=%v", out, code, err)
 	}
