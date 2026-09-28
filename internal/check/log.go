@@ -2,15 +2,13 @@ package check
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/wuddleko/genguard/internal/actions"
 	"github.com/wuddleko/genguard/internal/check/command"
 )
 
@@ -21,6 +19,7 @@ type commandLog struct {
 	quiet     bool
 	ctx       context.Context
 	toolCache *toolCache
+	env       actions.Env
 }
 
 func (c commandLog) withToolCache() commandLog {
@@ -43,31 +42,23 @@ func (c commandLog) label(name string) string {
 }
 
 func (c commandLog) groupTitle(name string) string {
-	text := name
-	if c.prefix != "" {
-		text = c.prefix + name
+	if c.prefix == "" {
+		return name
 	}
-	// ##[group] decodes %0A, so a raw break is folded before escapeData.
-	text = strings.Map(func(r rune) rune {
-		if r == '\n' || r == '\r' {
-			return ' '
-		}
-		return r
-	}, text)
-	return escapeData(text)
+	return c.prefix + name
 }
 
 func (c commandLog) groups() bool {
-	return c.w != nil && os.Getenv("GITHUB_ACTIONS") == "true"
+	return c.w != nil && c.env.Actions
 }
 
 func (c commandLog) beginGroup(name string) func() {
 	if !c.groups() {
 		return func() {}
 	}
-	fmt.Fprintf(c.w, "::group::%s\n", c.groupTitle(name))
+	actions.OpenGroup(c.w, c.groupTitle(name))
 	return func() {
-		fmt.Fprintf(c.w, "::endgroup::\n")
+		actions.CloseGroup(c.w)
 	}
 }
 
@@ -80,24 +71,17 @@ func (c commandLog) writeGroupedTail(name, tail string) {
 		body.WriteByte('\n')
 	}
 	text := body.String()
-	token, err := workflowStopToken()
+	token, err := actions.Token()
 	if err != nil {
 		fmt.Fprint(c.w, text)
 		fmt.Fprint(c.w, "\n")
 		return
 	}
-	fmt.Fprintf(c.w, "::stop-commands::%s\n", token)
+	bracket := actions.Bracket{W: c.w, Token: token}
+	bracket.Open()
 	fmt.Fprint(c.w, text)
-	fmt.Fprintf(c.w, "::%s::\n", token)
+	bracket.Close()
 	fmt.Fprint(c.w, "\n")
-}
-
-func workflowStopToken() (string, error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b[:]), nil
 }
 
 type commandStream struct {
@@ -110,10 +94,10 @@ type commandStream struct {
 	active      bool
 }
 
-func newCommandStream(w io.Writer, header string) *commandStream {
+func newCommandStream(w io.Writer, header string, env actions.Env) *commandStream {
 	s := &commandStream{w: w, header: header, active: w != nil}
-	if s.active && os.Getenv("GITHUB_ACTIONS") == "true" {
-		token, err := workflowStopToken()
+	if s.active && env.Actions {
+		token, err := actions.Token()
 		if err != nil {
 			s.active = false
 			return s
@@ -128,7 +112,7 @@ func (s *commandStream) onLine(line string) {
 		return
 	}
 	if s.token != "" && !s.paused {
-		n, werr := fmt.Fprintf(s.w, "::stop-commands::%s\n", s.token)
+		n, werr := (actions.Bracket{W: s.w, Token: s.token}).Open()
 		if n > 0 {
 			s.paused = true
 		}
@@ -151,7 +135,7 @@ func (s *commandStream) onLine(line string) {
 
 func (s *commandStream) finish() {
 	if s.paused {
-		fmt.Fprintf(s.w, "::%s::\n", s.token)
+		actions.Bracket{W: s.w, Token: s.token}.Close()
 	}
 	if s.headerWrote {
 		io.WriteString(s.w, "\n")
@@ -167,11 +151,11 @@ func RunCommand(root, commandText string) (string, error) {
 }
 
 func runCommand(root, commandText string, log io.Writer, header string, timeout time.Duration) (string, error) {
-	return runCommandContext(nil, root, commandText, log, header, timeout)
+	return runCommandContext(nil, root, commandText, log, header, timeout, actions.Env{})
 }
 
-func runCommandContext(ctx context.Context, root, commandText string, log io.Writer, header string, timeout time.Duration) (string, error) {
-	stream := newCommandStream(log, header)
+func runCommandContext(ctx context.Context, root, commandText string, log io.Writer, header string, timeout time.Duration, env actions.Env) (string, error) {
+	stream := newCommandStream(log, header, env)
 	defer stream.finish()
 	var onLine func(string)
 	if stream.active {

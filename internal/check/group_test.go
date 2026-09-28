@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wuddleko/genguard/internal/actions"
 	"github.com/wuddleko/genguard/internal/config"
 )
 
 func TestWorkflowGroupWrapsEachRun(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := gitRepo(t)
 	writeTracked(t, root, "queries/q.sql", "select 1;\n")
 	writeTracked(t, root, "left.txt", "ok\n")
@@ -35,7 +35,7 @@ func TestWorkflowGroupWrapsEachRun(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "HEAD", nil, commandLog{w: &buf})
+	result, err := checkConfig(cfg, "HEAD", nil, commandLog{w: &buf, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,6 @@ func TestWorkflowGroupWrapsEachRun(t *testing.T) {
 }
 
 func TestWorkflowGroupUsesCallerPath(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := gitRepo(t)
 	writeTracked(t, root, "out.txt", "ok\n")
 	cfg := config.Config{
@@ -64,7 +63,7 @@ func TestWorkflowGroupUsesCallerPath(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	_, err := checkConfig(cfg, "", nil, commandLog{w: &buf, prefix: "services/%0A/genguard.yaml: "})
+	_, err := checkConfig(cfg, "", nil, commandLog{w: &buf, prefix: "services/%0A/genguard.yaml: ", env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +74,6 @@ func TestWorkflowGroupUsesCallerPath(t *testing.T) {
 }
 
 func TestWorkflowGroupTitleIsOneLine(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := gitRepo(t)
 	writeTracked(t, root, "out.txt", "ok\n")
 	cfg := config.Config{
@@ -87,7 +85,7 @@ func TestWorkflowGroupTitleIsOneLine(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	_, err := checkConfig(cfg, "", nil, commandLog{w: &buf})
+	_, err := checkConfig(cfg, "", nil, commandLog{w: &buf, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +96,6 @@ func TestWorkflowGroupTitleIsOneLine(t *testing.T) {
 }
 
 func TestWorkflowGroupClosesAfterCleanFailure(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := gitRepo(t)
 	writeTracked(t, root, "right.txt", "ok\n")
 	cfg := config.Config{
@@ -114,7 +111,7 @@ func TestWorkflowGroupClosesAfterCleanFailure(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf})
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,8 +150,7 @@ func TestWorkflowGroupStaysQuietWithoutActions(t *testing.T) {
 		t.Fatalf("log = %q", buf.String())
 	}
 
-	t.Setenv("GITHUB_ACTIONS", "true")
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", nil, commandLog{env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +160,6 @@ func TestWorkflowGroupStaysQuietWithoutActions(t *testing.T) {
 }
 
 func TestWorkflowGroupQuietFailureKeepsTailInside(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := gitRepo(t)
 	writeTracked(t, root, "out.txt", "ok\n")
 	cfg := config.Config{
@@ -176,7 +171,7 @@ func TestWorkflowGroupQuietFailureKeepsTailInside(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true})
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +196,6 @@ func TestWorkflowGroupQuietFailureKeepsTailInside(t *testing.T) {
 }
 
 func TestWorkflowGroupQuietErrorStaysInsidePause(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := gitRepo(t)
 	writeTracked(t, root, "out.txt", "ok\n")
 	cfg := config.Config{
@@ -213,7 +207,7 @@ func TestWorkflowGroupQuietErrorStaysInsidePause(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, prefix: "services/api/genguard.yaml: ", quiet: true})
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, prefix: "services/api/genguard.yaml: ", quiet: true, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +225,6 @@ func TestWorkflowGroupQuietErrorStaysInsidePause(t *testing.T) {
 }
 
 func TestWorkflowGroupVerboseFailureStreamsOnce(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := gitRepo(t)
 	writeTracked(t, root, "out.txt", "ok\n")
 	cfg := config.Config{
@@ -243,7 +236,7 @@ func TestWorkflowGroupVerboseFailureStreamsOnce(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf})
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +261,6 @@ func TestWorkflowGroupVerboseFailureStreamsOnce(t *testing.T) {
 }
 
 func TestWorkflowGroupQuietSuccessIsEmpty(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := gitRepo(t)
 	writeTracked(t, root, "out.txt", "ok\n")
 	cfg := config.Config{
@@ -280,7 +272,7 @@ func TestWorkflowGroupQuietSuccessIsEmpty(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true})
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +285,6 @@ func TestWorkflowGroupQuietSuccessIsEmpty(t *testing.T) {
 }
 
 func TestWorkflowGroupQuietNoOutputIsEmpty(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := gitRepo(t)
 	writeTracked(t, root, "out.txt", "ok\n")
 	cfg := config.Config{
@@ -305,7 +296,7 @@ func TestWorkflowGroupQuietNoOutputIsEmpty(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true})
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +313,6 @@ func TestWorkflowGroupQuietNoOutputIsEmpty(t *testing.T) {
 }
 
 func TestWorkflowGroupQuietTimeoutKeepsTailInside(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := gitRepo(t)
 	writeTracked(t, root, "out.txt", "ok\n")
 	cfg := config.Config{
@@ -335,7 +325,7 @@ func TestWorkflowGroupQuietTimeoutKeepsTailInside(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	start := time.Now()
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true, timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true, timeout: 200 * time.Millisecond, env: actions.Env{Actions: true}})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}

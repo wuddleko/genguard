@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/wuddleko/genguard/internal/actions"
 	"github.com/wuddleko/genguard/internal/config"
 	"github.com/wuddleko/genguard/internal/pathx"
 )
@@ -17,12 +18,12 @@ func CheckSinceIsolated(path, since string) (ConfigResult, error) {
 	return executeIsolated(path, Options{Mode: ModeCheck, Since: since})
 }
 
-func CheckSinceIsolatedLog(ctx context.Context, path, since string, log io.Writer, quiet bool) (ConfigResult, error) {
-	return executeIsolated(path, Options{Mode: ModeCheck, Since: since, Log: log, Quiet: quiet, Context: ctx})
+func CheckSinceIsolatedLog(ctx context.Context, path, since string, log io.Writer, quiet bool, env actions.Env) (ConfigResult, error) {
+	return executeIsolated(path, Options{Mode: ModeCheck, Since: since, Log: log, Quiet: quiet, Context: ctx, Env: env})
 }
 
 func executeIsolated(path string, opts Options) (ConfigResult, error) {
-	return checkSinceIsolated(path, opts.Since, commandLog{w: opts.Log, quiet: opts.Quiet, ctx: opts.Context})
+	return checkSinceIsolated(path, opts.Since, commandLog{w: opts.Log, quiet: opts.Quiet, ctx: opts.Context, env: opts.Env})
 }
 
 func checkSinceIsolated(path, since string, log commandLog) (ConfigResult, error) {

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/wuddleko/genguard/internal/actions"
 )
 
 func TestFormatAnnotationsDriftFile(t *testing.T) {
@@ -23,7 +25,7 @@ func TestFormatAnnotationsDriftFile(t *testing.T) {
 			}},
 		}},
 	}
-	text := FormatAnnotations(run)
+	text := FormatAnnotations(run, actions.Env{})
 	want := "::error file=api/gen/a.go,title=protobuf::modified\n" +
 		"::error file=api/gen/a%2Cb.go,title=protobuf::missing\n"
 	if text != want {
@@ -46,7 +48,7 @@ func TestFormatAnnotationsErrorAndCleanup(t *testing.T) {
 			{Path: filepath.Join(root, "genguard.yaml"), Result: result},
 			{Path: filepath.Join(root, "api", "genguard.yaml"), Err: errors.New("parse failed")},
 		},
-	})
+	}, actions.Env{})
 	for _, line := range []string{
 		"::error file=genguard.yaml,title=protobuf::command failed (exit 1): line1 line2",
 		"::error file=gen/a.go,title=protobuf::modified",
@@ -71,7 +73,7 @@ func TestFormatAnnotationsEscapesPropertiesOnly(t *testing.T) {
 				Err:    errors.New("100% failed: no,pe"),
 			}}},
 		}},
-	})
+	}, actions.Env{})
 	want := "::error file=genguard.yaml,title=a%3Ab%2Cc::100%25 failed: no,pe\n"
 	if text != want {
 		t.Fatalf("annotations = %q", text)
@@ -96,22 +98,19 @@ func TestFormatAnnotationsWorkspacePrefix(t *testing.T) {
 		}},
 	}
 
-	t.Setenv("GITHUB_WORKSPACE", parent)
-	text := FormatAnnotations(run)
+	text := FormatAnnotations(run, actions.Env{Workspace: parent})
 	want := "::error file=src/api/gen/a.go,title=protobuf::modified\n"
 	if text != want {
 		t.Fatalf("annotations = %q", text)
 	}
 
-	t.Setenv("GITHUB_WORKSPACE", root)
-	text = FormatAnnotations(run)
+	text = FormatAnnotations(run, actions.Env{Workspace: root})
 	want = "::error file=api/gen/a.go,title=protobuf::modified\n"
 	if text != want {
 		t.Fatalf("repo root annotations = %q", text)
 	}
 
-	t.Setenv("GITHUB_WORKSPACE", filepath.Join(parent, "other"))
-	text = FormatAnnotations(run)
+	text = FormatAnnotations(run, actions.Env{Workspace: filepath.Join(parent, "other")})
 	if text != want {
 		t.Fatalf("outside workspace annotations = %q", text)
 	}
@@ -124,7 +123,7 @@ func TestFormatAnnotationsSkipsOK(t *testing.T) {
 			{Name: "sqlc", Status: GroupSkipped},
 			{Name: "plain", Status: GroupOK},
 		}},
-	}}})
+	}}}, actions.Env{})
 	if text != "" {
 		t.Fatalf("annotations = %q", text)
 	}

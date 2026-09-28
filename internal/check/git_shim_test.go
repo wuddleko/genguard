@@ -21,7 +21,7 @@ func TestMain(m *testing.M) {
 		fmt.Println("EXTERNAL DIFF TOOL RAN")
 		os.Exit(0)
 	}
-	// CI sets GITHUB_ACTIONS on the test process. Pause tests opt in with t.Setenv.
+	// CI sets GITHUB_ACTIONS on the test process. This package passes actions.Env.
 	os.Unsetenv("GITHUB_ACTIONS")
 	os.Unsetenv("GITHUB_WORKSPACE")
 	os.Exit(m.Run())

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/wuddleko/genguard/internal/actions"
 	"github.com/wuddleko/genguard/internal/check/clean"
 	"github.com/wuddleko/genguard/internal/check/command"
 	"github.com/wuddleko/genguard/internal/config"
@@ -39,12 +40,12 @@ func CheckSince(cfg config.Config, since string) (ConfigResult, error) {
 	return executeConfig(cfg, Options{Mode: ModeCheck, Since: since})
 }
 
-func CheckSinceLog(ctx context.Context, cfg config.Config, since string, log io.Writer, quiet bool) (ConfigResult, error) {
-	return executeConfig(cfg, Options{Mode: ModeCheck, Since: since, Log: log, Quiet: quiet, Context: ctx})
+func CheckSinceLog(ctx context.Context, cfg config.Config, since string, log io.Writer, quiet bool, env actions.Env) (ConfigResult, error) {
+	return executeConfig(cfg, Options{Mode: ModeCheck, Since: since, Log: log, Quiet: quiet, Context: ctx, Env: env})
 }
 
 func executeConfig(cfg config.Config, opts Options) (ConfigResult, error) {
-	log := commandLog{w: opts.Log, quiet: opts.Quiet, ctx: opts.Context}
+	log := commandLog{w: opts.Log, quiet: opts.Quiet, ctx: opts.Context, env: opts.Env}
 	return sinceConfig(cfg, opts.Since, log, opts.Mode)
 }
 
@@ -222,7 +223,7 @@ func runPreparedGroup(root string, group config.Group, tools []config.Tool, base
 	if stream != nil {
 		header = log.label(group.Name)
 	}
-	tail, err := runCommandContext(log.ctx, root, group.Command, stream, header, limit)
+	tail, err := runCommandContext(log.ctx, root, group.Command, stream, header, limit, log.env)
 	if log.quiet && log.groups() && tail != "" {
 		log.writeGroupedTail(group.Name, tail)
 		tail = ""

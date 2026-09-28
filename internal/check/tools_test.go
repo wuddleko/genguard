@@ -326,7 +326,6 @@ func TestSkippedGroupDoesNotProbe(t *testing.T) {
 }
 
 func TestToolProbeStaysOffVerboseLog(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "false")
 	root := gitRepo(t)
 	writeTracked(t, root, "gen/out.txt", "keep\n")
 	cfg := config.Config{

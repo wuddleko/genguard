@@ -8,26 +8,25 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wuddleko/genguard/internal/actions"
 	"github.com/wuddleko/genguard/internal/check"
 	"github.com/wuddleko/genguard/tests/testutil"
 )
 
 func TestFinishConfigJSONWithoutRepo(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "")
 	var out, errBuf bytes.Buffer
 	path := filepath.Join(t.TempDir(), "genguard.yaml")
-	code := finishConfig(&out, &errBuf, check.ConfigResult{}, path, t.TempDir(), "ok", true)
+	code := finishConfig(&out, &errBuf, check.ConfigResult{}, path, t.TempDir(), "ok", true, actions.Env{})
 	if code != 2 || out.Len() != 0 || !strings.Contains(errBuf.String(), "not a git work tree") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errBuf.String())
 	}
 }
 
 func TestFinishConfigAnnotationWithoutRepo(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
-	t.Setenv("GENGUARD_ANNOTATIONS", "")
 	var out, errBuf bytes.Buffer
 	path := filepath.Join(t.TempDir(), "genguard.yaml")
-	code := finishConfig(&out, &errBuf, check.ConfigResult{}, path, t.TempDir(), "Generated files match the generators.", false)
+	env := actions.Env{Actions: true, Annotations: true}
+	code := finishConfig(&out, &errBuf, check.ConfigResult{}, path, t.TempDir(), "Generated files match the generators.", false, env)
 	if code != 0 {
 		t.Fatalf("code = %d, stderr = %q", code, errBuf.String())
 	}
@@ -40,9 +39,8 @@ func TestFinishConfigAnnotationWithoutRepo(t *testing.T) {
 }
 
 func TestStopCommandsAddsTrailingNewline(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	var buf bytes.Buffer
-	withoutWorkflowCommands(&buf, func(w io.Writer) {
+	withoutWorkflowCommands(&buf, actions.Env{Actions: true}, func(w io.Writer) {
 		fmt.Fprint(w, "::not-a-command")
 	})
 	text := buf.String()
@@ -55,10 +53,9 @@ func TestStopCommandsAddsTrailingNewline(t *testing.T) {
 }
 
 func TestFinishConfigJSONRelativePathWithoutCwd(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "")
 	testutil.WithoutWorkingDirectory(t)
 	var out, errBuf bytes.Buffer
-	code := finishConfig(&out, &errBuf, check.ConfigResult{}, "genguard.yaml", t.TempDir(), "ok", true)
+	code := finishConfig(&out, &errBuf, check.ConfigResult{}, "genguard.yaml", t.TempDir(), "ok", true, actions.Env{})
 	if code != 2 || out.Len() != 0 || !strings.Contains(errBuf.String(), "error:") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, out.String(), errBuf.String())
 	}

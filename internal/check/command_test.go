@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wuddleko/genguard/internal/actions"
 	"github.com/wuddleko/genguard/internal/check/command"
 )
 
@@ -101,11 +102,10 @@ func TestRunCommandCopiesWorkflowLinesWithCR(t *testing.T) {
 }
 
 func TestRunCommandPausesWorkflowCommands(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := t.TempDir()
 	var buf bytes.Buffer
 	command := `python3 -c "import sys; sys.stderr.write('::error file=evil.go::hijacked'+chr(10)+'note'+chr(13)+'::stop-commands::hijack'+chr(10)); sys.exit(1)"`
-	tail, err := runCommand(root, command, &buf, "", 0)
+	tail, err := runCommandContext(nil, root, command, &buf, "", 0, actions.Env{Actions: true})
 	if err == nil || err.Error() != "command failed (exit 1)" {
 		t.Fatalf("err = %v", err)
 	}
@@ -119,10 +119,9 @@ func TestRunCommandPausesWorkflowCommands(t *testing.T) {
 }
 
 func TestRunCommandPauseSkipsQuietCommand(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := t.TempDir()
 	var buf bytes.Buffer
-	tail, err := runCommand(root, "exit 4", &buf, "", 0)
+	tail, err := runCommandContext(nil, root, "exit 4", &buf, "", 0, actions.Env{Actions: true})
 	if err == nil || err.Error() != "command failed (exit 4): no output" {
 		t.Fatalf("err = %v", err)
 	}
@@ -231,11 +230,10 @@ func TestRunCommandHeaderSkipsQuietCommand(t *testing.T) {
 }
 
 func TestRunCommandHeaderFollowsStopCommands(t *testing.T) {
-	t.Setenv("GITHUB_ACTIONS", "true")
 	root := t.TempDir()
 	var buf bytes.Buffer
 	header := "::error file=evil.go::hijacked\n::stop-commands::fixed"
-	tail, err := runCommand(root, `python3 -c "import sys; sys.stderr.write('hello'+chr(10)); sys.exit(1)"`, &buf, header, 0)
+	tail, err := runCommandContext(nil, root, `python3 -c "import sys; sys.stderr.write('hello'+chr(10)); sys.exit(1)"`, &buf, header, 0, actions.Env{Actions: true})
 	if err == nil || err.Error() != "command failed (exit 1)" {
 		t.Fatalf("err = %v", err)
 	}

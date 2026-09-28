@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wuddleko/genguard/internal/actions"
 	"github.com/wuddleko/genguard/internal/config"
 	"github.com/wuddleko/genguard/internal/gitx"
 	"github.com/wuddleko/genguard/tests/testutil"
@@ -324,12 +325,12 @@ func TestGitResultKeepsStderrWhenStartFails(t *testing.T) {
 
 func TestAnnotationPathsWhenLookupFails(t *testing.T) {
 	outside := filepath.Join(t.TempDir(), "genguard.yaml")
-	text := FormatErrorAnnotation(outside, "boom")
+	text := FormatErrorAnnotation(outside, "boom", actions.Env{})
 	abs, err := filepath.Abs(outside)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "::error file=" + escapeProperty(filepath.ToSlash(abs)) + "::boom\n"
+	want := "::error file=" + actions.EscapeProperty(filepath.ToSlash(abs)) + "::boom\n"
 	if text != want {
 		t.Fatalf("outside = %q", text)
 	}
@@ -337,17 +338,15 @@ func TestAnnotationPathsWhenLookupFails(t *testing.T) {
 	root := t.TempDir()
 	testutil.WithoutWorkingDirectory(t)
 
-	text = FormatErrorAnnotation("genguard.yaml", "boom")
+	text = FormatErrorAnnotation("genguard.yaml", "boom", actions.Env{})
 	if text != "::error file=genguard.yaml::boom\n" {
 		t.Fatalf("relative = %q", text)
 	}
 
-	t.Setenv("GITHUB_WORKSPACE", root)
-	if got := workspaceFile("rel-root", "gen/a.go"); got != "gen/a.go" {
+	if got := actions.WorkspaceFile(root, "rel-root", "gen/a.go"); got != "gen/a.go" {
 		t.Fatalf("repo abs = %q", got)
 	}
-	t.Setenv("GITHUB_WORKSPACE", "rel-workspace")
-	if got := workspaceFile(root, "gen/a.go"); got != "gen/a.go" {
+	if got := actions.WorkspaceFile("rel-workspace", root, "gen/a.go"); got != "gen/a.go" {
 		t.Fatalf("workspace abs = %q", got)
 	}
 }

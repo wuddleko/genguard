@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/wuddleko/genguard/internal/actions"
 	"github.com/wuddleko/genguard/internal/config"
 	"github.com/wuddleko/genguard/internal/gitx"
 )
@@ -20,6 +21,7 @@ type CheckAllOptions struct {
 	Log      io.Writer
 	Quiet    bool
 	Context  context.Context
+	Env      actions.Env
 }
 
 type Mode int
@@ -38,6 +40,7 @@ type Options struct {
 	Log      io.Writer
 	Quiet    bool
 	Context  context.Context
+	Env      actions.Env
 }
 
 func optionsFrom(opts CheckAllOptions, mode Mode) Options {
@@ -50,6 +53,7 @@ func optionsFrom(opts CheckAllOptions, mode Mode) Options {
 		Log:      opts.Log,
 		Quiet:    opts.Quiet,
 		Context:  opts.Context,
+		Env:      opts.Env,
 	}
 }
 
@@ -78,7 +82,7 @@ func executeAll(opts Options) (RunResult, error) {
 		if stop, err := canceledStop(opts.Context, run.ExitCode(), func(interrupt error) { noteInterruptedDrift(&run, interrupt) }); stop {
 			return run, err
 		}
-		log := streamFor(repoRoot, configPath, opts.Log, opts.Quiet)
+		log := streamFor(repoRoot, configPath, opts.Log, opts.Quiet, opts.Env)
 		log.ctx = opts.Context
 		log.toolCache = cache
 		run.Configs = append(run.Configs, configRun(opts, configPath, base, damage, log))
@@ -96,11 +100,11 @@ func configRun(opts Options, path, base string, damage map[string]pathSnap, log 
 	return runOne(path, base, log)
 }
 
-func streamFor(repoRoot, configPath string, log io.Writer, quiet bool) commandLog {
+func streamFor(repoRoot, configPath string, log io.Writer, quiet bool, env actions.Env) commandLog {
 	if log == nil {
-		return commandLog{}
+		return commandLog{env: env}
 	}
-	return commandLog{w: log, prefix: displayConfigPath(repoRoot, configPath) + ": ", quiet: quiet}
+	return commandLog{w: log, prefix: displayConfigPath(repoRoot, configPath) + ": ", quiet: quiet, env: env}
 }
 
 func discoverConfigs(opts Options) (repoRoot string, paths []string, base string, err error) {
