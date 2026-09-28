@@ -35,3 +35,7 @@ A missing key stays the default. A present null and a present empty value take t
 - `clean: ~` is a boolean error. `timeout: ~` is a duration error. Omitting either key leaves it unset.
 - A null or blank entry in `outputs` or `inputs` must be a non-empty string.
 - A group `name` that is null, empty, or whitespace uses `groups[0]`, `groups[1]`, and so on.
+
+## Config discovery
+
+`check --all` lists configs with `git ls-files`: the index, plus untracked files that are not ignored. `check --all --isolated` lists HEAD with `git ls-tree`, so a staged config is absent and a committed config removed from the index is still listed. A gitignored untracked config is in neither list. A config under `vendor` or `node_modules` is skipped. If git cannot open a directory that can hold a config, discovery fails.

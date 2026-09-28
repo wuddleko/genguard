@@ -3,14 +3,12 @@ package check
 import (
 	"context"
 	"io"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/wuddleko/genguard/internal/actions"
 	"github.com/wuddleko/genguard/internal/config"
-	"github.com/wuddleko/genguard/internal/gitx"
 )
 
 type CheckAllOptions struct {
@@ -115,16 +113,10 @@ func discoverConfigs(opts Options) (repoRoot string, paths []string, base string
 
 	paths = opts.Paths
 	if len(paths) == 0 {
-		var found []string
-		if opts.Isolated {
-			found, err = findCommittedConfigs(commandLog{ctx: opts.Context}, repoRoot)
-		} else {
-			found, err = config.FindAll(repoRoot)
-		}
+		paths, err = config.FindAll(opts.Context, repoRoot, opts.Isolated)
 		if err != nil {
 			return "", nil, "", err
 		}
-		paths = found
 	}
 
 	paths, err = normalizeConfigPaths(paths)
@@ -151,44 +143,6 @@ func isolatedRun(configPath string, result ConfigResult, err error) ConfigRun {
 		run.Err = err
 	}
 	return run
-}
-
-func findCommittedConfigs(log commandLog, repoRoot string) ([]string, error) {
-	out, code, err := log.git(repoRoot, "ls-tree", "-r", "-z", "--name-only", "HEAD")
-	if err != nil {
-		return nil, err
-	}
-	if code != 0 {
-		return nil, newGenguardError("%s", gitx.Detail(out, "git ls-tree failed"))
-	}
-	found := make([]string, 0)
-	for _, name := range gitx.ParseNameList(out) {
-		if !committedConfig(name) {
-			continue
-		}
-		found = append(found, filepath.Join(repoRoot, filepath.FromSlash(name)))
-	}
-	sort.Strings(found)
-	if err := config.RejectBothConfigNames(found); err != nil {
-		return nil, err
-	}
-	return found, nil
-}
-
-func committedConfig(rel string) bool {
-	if !config.IsConfigName(path.Base(rel)) {
-		return false
-	}
-	dir := path.Dir(rel)
-	if dir == "." {
-		return true
-	}
-	for _, part := range strings.Split(dir, "/") {
-		if config.SkipDir(part) {
-			return false
-		}
-	}
-	return true
 }
 
 func checkOne(path, base string, damage map[string]pathSnap, log commandLog) ConfigRun {

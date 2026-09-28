@@ -10,12 +10,16 @@ import (
 )
 
 // Run runs git in root. A canceled command returns command.ErrInterrupted.
-func Run(ctx context.Context, root string, args ...string) (string, int, error) {
+func Run(ctx context.Context, root string, args ...string) (out, stderr string, code int, err error) {
 	stdout, stderr, err := command.Output(ctx, "git", append([]string{"-C", root}, args...)...)
 	if errors.Is(err, command.ErrInterrupted) {
-		return "", 0, err
+		return "", "", 0, err
 	}
-	return Result(stdout, stderr, err)
+	out, code, err = Result(stdout, stderr, err)
+	if err != nil || code != 0 {
+		return out, "", code, err
+	}
+	return stdout, stderr, 0, nil
 }
 
 func Result(stdout, stderr string, err error) (string, int, error) {

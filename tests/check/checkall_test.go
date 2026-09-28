@@ -706,7 +706,7 @@ func TestCheckAllCleanFailureDoesNotBlameLaterConfig(t *testing.T) {
 	}
 }
 
-func TestCheckAllDiscoveryWalkError(t *testing.T) {
+func TestCheckAllUnreadableDirectoryFailsDiscovery(t *testing.T) {
 	root := initMonorepo(t)
 	blocked := filepath.Join(root, "blocked")
 	if err := os.Mkdir(blocked, 0); err != nil {
@@ -721,8 +721,8 @@ func TestCheckAllDiscoveryWalkError(t *testing.T) {
 	}
 
 	_, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
-	if err == nil {
-		t.Fatal("expected discovery error")
+	if err == nil || !strings.Contains(err.Error(), "could not open directory") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -1719,14 +1719,14 @@ func TestRunAllUntrackedConfigRuns(t *testing.T) {
 	}
 }
 
-func TestRunAllIgnoredDirectoryStillRuns(t *testing.T) {
+func TestRunAllSkipsGitignoredConfig(t *testing.T) {
 	root := initMonorepo(t)
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored/\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
 	commitAll(t, root)
-	ignored := writeMiniConfig(t, filepath.Join(root, "ignored"), "ignored", `python3 -c "open('ignored-ran','w').close()"`)
+	writeMiniConfig(t, filepath.Join(root, "ignored"), "ignored", `python3 -c "open('ignored-ran','w').close()"`)
 
 	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
 	if err != nil {
@@ -1735,9 +1735,9 @@ func TestRunAllIgnoredDirectoryStillRuns(t *testing.T) {
 	if run.ExitCode() != 0 {
 		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
 	}
-	assertConfigPaths(t, run, api, ignored)
-	if !markerExists(filepath.Join(root, "ignored"), "ignored-ran") {
-		t.Fatal("ignored directory did not run")
+	assertConfigPaths(t, run, api)
+	if markerExists(filepath.Join(root, "ignored"), "ignored-ran") {
+		t.Fatal("ignored directory ran")
 	}
 }
 
@@ -1971,7 +1971,7 @@ func TestRunAllExplicitRepoRootMustBeGit(t *testing.T) {
 	}
 }
 
-func TestRunAllDiscoveryWalkError(t *testing.T) {
+func TestRunAllUnreadableDirectoryFailsDiscovery(t *testing.T) {
 	root := initMonorepo(t)
 	blocked := filepath.Join(root, "blocked")
 	if err := os.Mkdir(blocked, 0); err != nil {
@@ -1986,8 +1986,8 @@ func TestRunAllDiscoveryWalkError(t *testing.T) {
 	}
 
 	_, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
-	if err == nil {
-		t.Fatal("expected discovery error")
+	if err == nil || !strings.Contains(err.Error(), "could not open directory") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

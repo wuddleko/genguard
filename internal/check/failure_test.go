@@ -1,6 +1,7 @@
 package check
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -213,13 +214,13 @@ func TestRelInsideRepoFailurePaths(t *testing.T) {
 	}
 }
 
-func TestFindCommittedConfigsGitFailures(t *testing.T) {
+func TestListConfigsGitFailures(t *testing.T) {
 	root := gitRepo(t)
 	writeTracked(t, root, "genguard.yaml", "groups: []\n")
 
 	t.Run("quiet", func(t *testing.T) {
 		installGitShim(t, "ls-tree-quiet")
-		_, err := findCommittedConfigs(commandLog{}, root)
+		_, err := config.FindAll(context.Background(), root, true)
 		if err == nil || !strings.Contains(err.Error(), "git ls-tree failed") {
 			t.Fatalf("error = %v", err)
 		}
@@ -229,7 +230,7 @@ func TestFindCommittedConfigsGitFailures(t *testing.T) {
 		if _, _, err := git(root, "rev-parse", "--is-inside-work-tree"); err != nil {
 			t.Fatal(err)
 		}
-		_, err := findCommittedConfigs(commandLog{}, root)
+		_, err := config.FindAll(context.Background(), root, true)
 		if err == nil {
 			t.Fatal("git still on PATH after the shim removed itself")
 		}

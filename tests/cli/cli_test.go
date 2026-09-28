@@ -2060,7 +2060,7 @@ func TestCLIRunAllUntrackedConfigRuns(t *testing.T) {
 	}
 }
 
-func TestCLIRunAllIgnoredDirectoryStillRuns(t *testing.T) {
+func TestCLIRunAllSkipsGitignoredConfig(t *testing.T) {
 	root := initCLIRepo(t)
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored/\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -2070,12 +2070,9 @@ func TestCLIRunAllIgnoredDirectoryStillRuns(t *testing.T) {
 	writeCLIConfig(t, filepath.Join(root, "ignored"), "ignored", `python3 -c "open('ignored-ran','w').close()"`)
 
 	stdout, stderr, code := cliRunAll(t, root)
-	requireRunAllSuccess(t, stdout, stderr, code,
-		filepath.Join("api", "genguard.yaml"),
-		filepath.Join("ignored", "genguard.yaml"),
-	)
-	if _, err := os.Stat(filepath.Join(root, "ignored", "ignored-ran")); err != nil {
-		t.Fatal(err)
+	requireRunAllSuccess(t, stdout, stderr, code, filepath.Join("api", "genguard.yaml"))
+	if _, err := os.Stat(filepath.Join(root, "ignored", "ignored-ran")); !os.IsNotExist(err) {
+		t.Fatal("ignored directory ran")
 	}
 }
 
@@ -2207,11 +2204,11 @@ func TestCLIRunAllDiscoveryErrorExit2(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q", stdout)
 	}
-	if !strings.Contains(stderr, "error:") {
+	if !strings.Contains(stderr, "could not open directory") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 	if strings.Contains(stderr, "no genguard.yaml or genguard.yml found") {
-		t.Fatalf("walk error treated as empty discovery:\n%s", stderr)
+		t.Fatalf("listing error treated as empty discovery:\n%s", stderr)
 	}
 }
 
@@ -3580,11 +3577,11 @@ func TestCLICheckAllDiscoveryErrorExit2(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q", stdout)
 	}
-	if !strings.Contains(stderr, "error:") {
+	if !strings.Contains(stderr, "could not open directory") {
 		t.Fatalf("stderr = %q", stderr)
 	}
 	if strings.Contains(stderr, "no genguard.yaml or genguard.yml found") {
-		t.Fatalf("walk error treated as empty discovery:\n%s", stderr)
+		t.Fatalf("listing error treated as empty discovery:\n%s", stderr)
 	}
 }
 

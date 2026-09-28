@@ -182,7 +182,7 @@ func git(root string, args ...string) (string, int, error) {
 }
 
 func (c commandLog) git(root string, args ...string) (string, int, error) {
-	out, code, err := gitx.Run(c.ctx, root, args...)
+	out, _, code, err := gitx.Run(c.ctx, root, args...)
 	if errors.Is(err, command.ErrInterrupted) {
 		return "", 0, errInterrupted
 	}

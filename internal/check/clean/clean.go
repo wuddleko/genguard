@@ -133,7 +133,7 @@ func validateGlobSpec(spec string) error {
 }
 
 func gitNames(ctx context.Context, root string, args ...string) ([]string, error) {
-	out, code, err := gitx.Run(ctx, root, args...)
+	out, _, code, err := gitx.Run(ctx, root, args...)
 	if err != nil {
 		return nil, err
 	}
