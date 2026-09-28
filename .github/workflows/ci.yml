@@ -89,8 +89,7 @@ jobs:
               exit "$code"
             fi
           }
-          for target in FuzzParseGitNameList FuzzConfigRelativeGitPath; do
-            fuzz "$target" ./internal/check
-          done
+          fuzz FuzzParseGitNameList ./internal/gitx
+          fuzz FuzzConfigRelativeGitPath ./internal/check
           fuzz FuzzResolveCleanPath ./internal/check/clean
           fuzz FuzzParseConfig ./internal/config
