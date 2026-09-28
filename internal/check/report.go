@@ -7,35 +7,27 @@ import (
 )
 
 func FormatFailureReport(result ConfigResult, root string) (string, error) {
-	var b strings.Builder
-	b.WriteString(FormatCommandTails(result))
-	b.WriteString("Summary\n")
-	for _, line := range result.SummaryLines() {
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-
-	drifts := result.AllDrifts()
-	if len(drifts) > 0 {
-		b.WriteString("\nDrift\n")
-		if err := writeDriftBody(&b, result, newDriftBase(root, ""), drifts); err != nil {
-			return b.String(), err
-		}
-	}
-
-	if line := result.FinalErrorLine(); line != "" {
-		b.WriteString("\n")
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
-	return b.String(), nil
+	return renderFailureReport(RunResult{
+		Configs: []ConfigRun{{
+			Path:   filepath.Join(root, "genguard.yaml"),
+			Result: result,
+		}},
+	}, true)
 }
 
 func FormatRunFailureReport(run RunResult) (string, error) {
+	return renderFailureReport(run, false)
+}
+
+func renderFailureReport(run RunResult, singleConfig bool) (string, error) {
 	var b strings.Builder
-	b.WriteString(FormatRunCommandTails(run))
+	if singleConfig {
+		b.WriteString(singleCommandTails(run))
+	} else {
+		b.WriteString(FormatRunCommandTails(run))
+	}
 	b.WriteString("Summary\n")
-	for _, line := range run.SummaryLines() {
+	for _, line := range failureSummaryLines(run, singleConfig) {
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
@@ -55,19 +47,53 @@ func FormatRunFailureReport(run RunResult) (string, error) {
 		} else {
 			b.WriteString("\n")
 		}
-		b.WriteString(displayConfigPath(run.RepoRoot, cfg.Path))
-		b.WriteString("\n")
-		if err := writeDriftBody(&b, cfg.Result, newDriftBase(filepath.Dir(cfg.Path), run.RepoRoot), drifts); err != nil {
+		repoRoot := run.RepoRoot
+		configDir := filepath.Dir(cfg.Path)
+		if singleConfig {
+			repoRoot = ""
+		} else {
+			b.WriteString(displayConfigPath(run.RepoRoot, cfg.Path))
+			b.WriteString("\n")
+		}
+		if err := writeDriftBody(&b, cfg.Result, newDriftBase(configDir, repoRoot), drifts); err != nil {
 			return b.String(), err
 		}
 	}
 
-	if line := run.FinalErrorLine(); line != "" {
+	line := run.FinalErrorLine()
+	if singleConfig {
+		line = singleFinalErrorLine(run)
+	}
+	if line != "" {
 		b.WriteString("\n")
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
 	return b.String(), nil
+}
+
+func singleCommandTails(run RunResult) string {
+	if len(run.Configs) != 1 || run.Configs[0].Err != nil {
+		return ""
+	}
+	return FormatCommandTails(run.Configs[0].Result)
+}
+
+func failureSummaryLines(run RunResult, singleConfig bool) []string {
+	if !singleConfig {
+		return run.SummaryLines()
+	}
+	if len(run.Configs) != 1 || run.Configs[0].Err != nil {
+		return nil
+	}
+	return run.Configs[0].Result.SummaryLines()
+}
+
+func singleFinalErrorLine(run RunResult) string {
+	if len(run.Configs) != 1 || run.Configs[0].Err != nil {
+		return run.FinalErrorLine()
+	}
+	return run.Configs[0].Result.FinalErrorLine()
 }
 
 func FormatCommandTails(result ConfigResult) string {

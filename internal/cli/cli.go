@@ -107,7 +107,7 @@ func runAll(stdout, stderr io.Writer, opts check.CheckAllOptions, asJSON bool, s
 	if len(result.Configs) == 0 {
 		return errorExit(stderr, "", "no genguard.yaml or genguard.yml found under repository root")
 	}
-	return finishRun(stdout, stderr, result, success, asJSON)
+	return finish(stdout, stderr, result, success, false, asJSON)
 }
 
 func runRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -223,62 +223,46 @@ func resolveConfigPath(stderr io.Writer, flags commandFlags) (path string, useAl
 }
 
 func finishConfig(stdout, stderr io.Writer, result check.ConfigResult, path, root, success string, asJSON bool) int {
-	if asJSON {
-		run, err := check.SingleConfigRun(path, result)
-		if err != nil {
+	run, err := check.SingleConfigRun(path, result)
+	if err != nil {
+		if asJSON {
 			return errorExit(stderr, path, err.Error())
 		}
-		writeCommandTail(stderr, check.FormatCommandTails(result))
-		code := writeJSON(stdout, stderr, run)
-		maybeAnnotate(stderr, run)
+		code := renderFinish(stdout, stderr, check.RunResult{
+			Configs: []check.ConfigRun{{
+				Path:   filepath.Join(root, "genguard.yaml"),
+				Result: result,
+			}},
+		}, success, true, false)
+		if annotationsOn() {
+			writeError(stderr, path, err.Error())
+		}
 		return code
 	}
-	code := result.ExitCode()
-	if code == 0 {
-		var buf strings.Builder
-		fmt.Fprintln(&buf, success)
-		if result.Skipped() > 0 {
-			for _, line := range result.SummaryLines() {
-				fmt.Fprintln(&buf, line)
-			}
-		}
-		writePlain(stdout, buf.String())
-	} else {
-		withoutWorkflowCommands(stderr, func(w io.Writer) {
-			report, err := check.FormatFailureReport(result, root)
-			fmt.Fprint(w, report)
-			if err != nil {
-				fmt.Fprintf(w, "error: %v\n", err)
-				code = 2
-			}
-		})
-	}
-	if annotationsOn() {
-		run, err := check.SingleConfigRun(path, result)
-		if err != nil {
-			writeError(stderr, path, err.Error())
-		} else {
-			maybeAnnotate(stderr, run)
-		}
-	}
+	return finish(stdout, stderr, run, success, true, asJSON)
+}
+
+func finish(stdout, stderr io.Writer, run check.RunResult, success string, singleConfig, asJSON bool) int {
+	code := renderFinish(stdout, stderr, run, success, singleConfig, asJSON)
+	maybeAnnotate(stderr, run)
 	return code
 }
 
-func finishRun(stdout, stderr io.Writer, run check.RunResult, success string, asJSON bool) int {
+func renderFinish(stdout, stderr io.Writer, run check.RunResult, success string, singleConfig, asJSON bool) int {
 	var code int
 	if asJSON {
-		writeCommandTail(stderr, check.FormatRunCommandTails(run))
+		writeCommandTail(stderr, commandTails(run, singleConfig))
 		code = writeJSON(stdout, stderr, run)
 	} else if run.ExitCode() == 0 {
 		var buf strings.Builder
 		fmt.Fprintln(&buf, success)
-		for _, line := range run.SuccessLines() {
+		for _, line := range successLines(run, singleConfig) {
 			fmt.Fprintln(&buf, line)
 		}
 		writePlain(stdout, buf.String())
 	} else {
 		withoutWorkflowCommands(stderr, func(w io.Writer) {
-			report, err := check.FormatRunFailureReport(run)
+			report, err := failureReport(run, singleConfig)
 			fmt.Fprint(w, report)
 			if err != nil {
 				fmt.Fprintf(w, "error: %v\n", err)
@@ -288,8 +272,37 @@ func finishRun(stdout, stderr io.Writer, run check.RunResult, success string, as
 			}
 		})
 	}
-	maybeAnnotate(stderr, run)
 	return code
+}
+
+func successLines(run check.RunResult, singleConfig bool) []string {
+	if !singleConfig {
+		return run.SuccessLines()
+	}
+	if len(run.Configs) != 1 || run.Configs[0].Err != nil || run.Configs[0].Result.Skipped() == 0 {
+		return nil
+	}
+	return run.Configs[0].Result.SummaryLines()
+}
+
+func commandTails(run check.RunResult, singleConfig bool) string {
+	if singleConfig && len(run.Configs) == 1 && run.Configs[0].Err == nil {
+		return check.FormatCommandTails(run.Configs[0].Result)
+	}
+	if singleConfig {
+		return ""
+	}
+	return check.FormatRunCommandTails(run)
+}
+
+func failureReport(run check.RunResult, singleConfig bool) (string, error) {
+	if !singleConfig {
+		return check.FormatRunFailureReport(run)
+	}
+	if len(run.Configs) != 1 || run.Configs[0].Err != nil {
+		return "", nil
+	}
+	return check.FormatFailureReport(run.Configs[0].Result, filepath.Dir(run.Configs[0].Path))
 }
 
 func writeCommandTail(stderr io.Writer, tails string) {
