@@ -378,6 +378,12 @@ func releaseWorktrees(t *testing.T, repo string) {
 		if err := os.RemoveAll(path); err != nil {
 			t.Errorf("remove %s: %v", path, err)
 		}
+		if filepath.Base(abs) == "wt" {
+			parent := filepath.Dir(abs)
+			if err := os.RemoveAll(parent); err != nil {
+				t.Errorf("remove %s: %v", parent, err)
+			}
+		}
 	}
 	_, _, _ = git(repo, "worktree", "prune")
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -56,6 +57,64 @@ func TestWithIsolatedWorktreeOmitsDirtyFiles(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestIsolatedWorktreeUsesPrivateParent(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "tracked.txt", "ok\n")
+	logPath := filepath.Join(t.TempDir(), "git-args")
+	installGitShim(t, "record")
+	t.Setenv("GENGUARD_GIT_ARGS", logPath)
+
+	var parent string
+	err := withIsolatedWorktree(commandLog{}, root, func(wt isolatedWorktree) error {
+		worktree, hooks := isolatedAddPaths(t, recordedGitArgs(t, logPath))
+		if filepath.Base(wt.root) != "wt" || filepath.Base(hooks) != "no-hooks" {
+			t.Fatalf("worktree = %s, hooks = %s", wt.root, hooks)
+		}
+		if _, err := os.Stat(wt.root); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(hooks); !os.IsNotExist(err) {
+			t.Fatalf("hooks path = %v", err)
+		}
+		parent = filepath.Dir(wt.root)
+		if !samePath(parent, filepath.Dir(hooks)) || !samePath(wt.root, worktree) {
+			t.Fatalf("worktree %s parent %s, hooks %s", wt.root, parent, hooks)
+		}
+		info, err := os.Stat(parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+			t.Fatalf("parent mode = %o", info.Mode().Perm())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(parent); !os.IsNotExist(err) {
+		t.Fatalf("parent still exists: %v", err)
+	}
+}
+
+func TestIsolatedWorktreeAddFailureRemovesParent(t *testing.T) {
+	root := gitRepo(t)
+	logPath := filepath.Join(t.TempDir(), "git-args")
+	installGitShim(t, "record")
+	t.Setenv("GENGUARD_GIT_ARGS", logPath)
+
+	err := withIsolatedWorktree(commandLog{}, root, func(isolatedWorktree) error {
+		t.Fatal("fn ran")
+		return nil
+	})
+	assertIsolateGenguardError(t, err, "git worktree add:")
+	_, hooks := isolatedAddPaths(t, recordedGitArgs(t, logPath))
+	parent := filepath.Dir(hooks)
+	if _, statErr := os.Stat(parent); !os.IsNotExist(statErr) {
+		t.Fatalf("parent = %v", statErr)
 	}
 }
 
@@ -184,6 +243,40 @@ func assertWorktreeGone(t *testing.T, repo, wtRoot string) {
 	if strings.Contains(listed, wtRoot) || strings.Contains(listed, filepath.ToSlash(wtRoot)) {
 		t.Fatalf("git still lists %s:\n%s", wtRoot, listed)
 	}
+}
+
+func isolatedAddPaths(t *testing.T, invocations [][]string) (worktree, hooks string) {
+	t.Helper()
+	for _, args := range invocations {
+		if !containsArg(args, "worktree") || !containsArg(args, "add") {
+			continue
+		}
+		for i, arg := range args {
+			if arg == "--detach" && i+1 < len(args) {
+				worktree = args[i+1]
+			}
+			const prefix = "core.hooksPath="
+			if strings.HasPrefix(arg, prefix) {
+				hooks = strings.TrimPrefix(arg, prefix)
+			}
+		}
+	}
+	if worktree == "" || hooks == "" {
+		t.Fatalf("worktree add args = %#v", invocations)
+	}
+	return worktree, hooks
+}
+
+func samePath(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ai, err1 := os.Stat(a)
+	bi, err2 := os.Stat(b)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	return os.SameFile(ai, bi)
 }
 
 func gitWorktreeList(repo string) (string, error) {

@@ -100,8 +100,9 @@ func callerPathError(err error, mapped, path string) error {
 }
 
 type isolatedWorktree struct {
-	repo string
-	root string
+	repo   string
+	parent string
+	root   string
 }
 
 func withIsolatedWorktree(log commandLog, repoRoot string, fn func(isolatedWorktree) error) (err error) {
@@ -123,19 +124,21 @@ func addIsolatedWorktree(log commandLog, repoRoot string) (isolatedWorktree, err
 	if err != nil {
 		return isolatedWorktree{}, err
 	}
-	dir, err := os.MkdirTemp("", "genguard-")
+	parent, err := os.MkdirTemp("", "genguard-")
 	if err != nil {
 		return isolatedWorktree{}, err
 	}
-	// git worktree add refuses a path that already exists.
-	if err := os.Remove(dir); err != nil {
+	if err := os.Chmod(parent, 0o700); err != nil {
+		_ = os.RemoveAll(parent)
 		return isolatedWorktree{}, err
 	}
+	// parent/wt does not exist yet. git worktree add creates it.
 	// A missing hooks directory skips post-checkout, which would edit the new tree.
-	hooks := dir + "-hooks"
+	dir := filepath.Join(parent, "wt")
+	hooks := filepath.Join(parent, "no-hooks")
 	out, code, err := log.git(repo, "-c", "core.hooksPath="+hooks, "worktree", "add", "--detach", dir, "HEAD")
 	if err != nil || code != 0 {
-		_ = os.RemoveAll(dir)
+		_ = os.RemoveAll(parent)
 		_, _, _ = git(repo, "worktree", "prune")
 		if isInterrupt(err) {
 			return isolatedWorktree{}, err
@@ -145,7 +148,10 @@ func addIsolatedWorktree(log commandLog, repoRoot string) (isolatedWorktree, err
 	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 		dir = resolved
 	}
-	return isolatedWorktree{repo: repo, root: dir}, nil
+	if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+		parent = resolved
+	}
+	return isolatedWorktree{repo: repo, parent: parent, root: dir}, nil
 }
 
 func (w isolatedWorktree) close() error {
@@ -153,15 +159,22 @@ func (w isolatedWorktree) close() error {
 		return nil
 	}
 	out, code, err := git(w.repo, "worktree", "remove", "--force", w.root)
-	if err == nil && code == 0 {
+	if err != nil || code != 0 {
+		_ = os.RemoveAll(w.root)
+		_, _, _ = git(w.repo, "worktree", "prune")
+		if _, statErr := os.Stat(w.root); !os.IsNotExist(statErr) {
+			return isolateGitError("remove", out, err)
+		}
+	}
+	if w.parent == "" {
 		return nil
 	}
-	_ = os.RemoveAll(w.root)
-	_, _, _ = git(w.repo, "worktree", "prune")
-	if _, statErr := os.Stat(w.root); os.IsNotExist(statErr) {
-		return nil
+	if rmErr := os.RemoveAll(w.parent); rmErr != nil {
+		if _, statErr := os.Stat(w.parent); !os.IsNotExist(statErr) {
+			return rmErr
+		}
 	}
-	return isolateGitError("remove", out, err)
+	return nil
 }
 
 func (w isolatedWorktree) mapPath(path string) (string, error) {
