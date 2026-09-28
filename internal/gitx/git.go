@@ -23,7 +23,7 @@ func Result(stdout, stderr string, err error) (string, int, error) {
 		return stdout, 0, nil
 	}
 	var exitErr *exec.ExitError
-	if errorsAsExit(err, &exitErr) {
+	if errors.As(err, &exitErr) {
 		code := exitErr.ExitCode()
 		// Exit 1 with a patch is a diff. A CRLF warning on stderr must not join it.
 		if code == 1 {
@@ -63,13 +63,4 @@ func Detail(out, fallback string) string {
 		return fallback
 	}
 	return detail
-}
-
-func errorsAsExit(err error, target **exec.ExitError) bool {
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok {
-		return false
-	}
-	*target = exitErr
-	return true
 }

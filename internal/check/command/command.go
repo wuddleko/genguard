@@ -74,7 +74,7 @@ func execute(ctx context.Context, root, command string, onLine func(string), tim
 
 	exitCode := 1
 	var exitErr *exec.ExitError
-	if errorsAsExit(err, &exitErr) {
+	if errors.As(err, &exitErr) {
 		exitCode = exitErr.ExitCode()
 	}
 	tail := ring.String()
@@ -205,13 +205,4 @@ func (e *StartError) Error() string {
 
 func (e *StartError) Unwrap() error {
 	return e.err
-}
-
-func errorsAsExit(err error, target **exec.ExitError) bool {
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok {
-		return false
-	}
-	*target = exitErr
-	return true
 }

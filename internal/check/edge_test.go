@@ -1,9 +1,7 @@
 package check
 
 import (
-	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -12,16 +10,6 @@ import (
 	"github.com/wuddleko/genguard/internal/config"
 	"github.com/wuddleko/genguard/tests/testutil"
 )
-
-func TestErrorsAsExitRejectsOtherErrors(t *testing.T) {
-	var target *exec.ExitError
-	if errorsAsExit(errors.New("boom"), &target) {
-		t.Fatal("non-exit error reported as ExitError")
-	}
-	if target != nil {
-		t.Fatalf("target = %v", target)
-	}
-}
 
 func TestCheckSinceRejectsNonRepo(t *testing.T) {
 	dir := t.TempDir()

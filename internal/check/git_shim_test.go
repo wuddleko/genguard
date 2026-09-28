@@ -1,6 +1,7 @@
 package check
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -245,7 +246,7 @@ func execRealGit(args []string) int {
 		return 0
 	}
 	var exitErr *exec.ExitError
-	if errorsAsExit(err, &exitErr) {
+	if errors.As(err, &exitErr) {
 		return exitErr.ExitCode()
 	}
 	fmt.Fprintln(os.Stderr, err.Error())

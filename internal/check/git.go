@@ -3,7 +3,6 @@ package check
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -188,13 +187,4 @@ func (c commandLog) git(root string, args ...string) (string, int, error) {
 		return "", 0, errInterrupted
 	}
 	return out, code, err
-}
-
-func errorsAsExit(err error, target **exec.ExitError) bool {
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok {
-		return false
-	}
-	*target = exitErr
-	return true
 }
