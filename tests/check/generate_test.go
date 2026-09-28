@@ -138,7 +138,7 @@ func TestRunCommandFailureExit2(t *testing.T) {
 func TestRunContinuesAfterCommandFailure(t *testing.T) {
 	groups := []testutil.GroupSpec{
 		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}},
-		{Name: "ok", Command: `python3 -c "open('ran','w').close()"`, Outputs: []string{"generated/hello.txt"}},
+		{Name: "ok", Command: `python3 -c "open('ran','w').close()"`, Outputs: []string{"ran"}},
 	}
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
 	if err != nil {
@@ -847,7 +847,7 @@ func TestRunCommandFailureLeavesRewriteWithoutDrift(t *testing.T) {
 func TestRunTwoCommandFailures(t *testing.T) {
 	groups := []testutil.GroupSpec{
 		{Name: "first", Command: "exit 3", Outputs: []string{"generated/hello.txt"}},
-		{Name: "second", Command: `python3 -c "open('second-ran','w').close(); raise SystemExit(4)"`, Outputs: []string{"generated/hello.txt"}},
+		{Name: "second", Command: `python3 -c "open('second-ran','w').close(); raise SystemExit(4)"`, Outputs: []string{"second-ran"}},
 	}
 	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
 	if err != nil {

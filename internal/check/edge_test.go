@@ -38,7 +38,7 @@ func TestCheckConfigNilDamage(t *testing.T) {
 			Outputs: []string{"generated/hello.txt"},
 		}},
 	}
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestCheckGroupAffectedGitError(t *testing.T) {
 			Outputs: []string{"out.txt"},
 		}},
 	}
-	result, err := checkConfig(cfg, "not-a-real-ref", map[string]pathSnap{}, commandLog{})
+	result, err := checkConfig(cfg, "not-a-real-ref", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestCheckCommandFailureThenDriftError(t *testing.T) {
 			Outputs: []string{"generated/hello.txt"},
 		}},
 	}
-	result, err := checkConfig(cfg, "", map[string]pathSnap{}, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestPostCleanListingFailureSkipsCommand(t *testing.T) {
 			Outputs: []string{"generated/hello.txt"},
 		}},
 	}
-	result, err := checkConfig(cfg, "", map[string]pathSnap{}, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,7 +15,7 @@ import (
 func TestCheckRunsAllGroupsAfterCommandFailure(t *testing.T) {
 	groups := []testutil.GroupSpec{
 		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}},
-		{Name: "greeting", Command: "python3 scripts/gen.py", Outputs: []string{"generated/hello.txt"}},
+		{Name: "greeting", Command: "python3 scripts/gen.py", Outputs: []string{"generated/other.txt"}},
 	}
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
 	if err != nil {

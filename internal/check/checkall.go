@@ -72,10 +72,6 @@ func executeAll(opts Options) (RunResult, error) {
 		Configs:  make([]ConfigRun, 0, len(paths)),
 	}
 	cache := &toolCache{}
-	var damage map[string]pathSnap
-	if opts.Mode == ModeCheck && !opts.Isolated {
-		damage = map[string]pathSnap{}
-	}
 	for _, configPath := range paths {
 		if stop, err := canceledStop(opts.Context, run.ExitCode(), func(interrupt error) { noteInterruptedDrift(&run, interrupt) }); stop {
 			return run, err
@@ -83,17 +79,17 @@ func executeAll(opts Options) (RunResult, error) {
 		log := streamFor(repoRoot, configPath, opts.Log, opts.Quiet, opts.Env)
 		log.ctx = opts.Context
 		log.toolCache = cache
-		run.Configs = append(run.Configs, configRun(opts, configPath, base, damage, log))
+		run.Configs = append(run.Configs, configRun(opts, configPath, base, log))
 	}
 	return run, nil
 }
 
-func configRun(opts Options, path, base string, damage map[string]pathSnap, log commandLog) ConfigRun {
+func configRun(opts Options, path, base string, log commandLog) ConfigRun {
 	if opts.Mode == ModeCheck && opts.Isolated {
 		return checkOneIsolated(path, base, log)
 	}
 	if opts.Mode == ModeCheck {
-		return checkOne(path, base, damage, log)
+		return checkOne(path, base, log)
 	}
 	return runOne(path, base, log)
 }
@@ -103,6 +99,13 @@ func streamFor(repoRoot, configPath string, log io.Writer, quiet bool, env actio
 		return commandLog{env: env}
 	}
 	return commandLog{w: log, prefix: displayConfigPath(repoRoot, configPath) + ": ", quiet: quiet, env: env}
+}
+
+func rejectDiscoveredOverlaps(opts Options, repoRoot string, paths []string) error {
+	if opts.Isolated {
+		return config.RejectCommittedOutputOverlaps(opts.Context, repoRoot, paths)
+	}
+	return config.RejectOutputOverlaps(paths)
 }
 
 func discoverConfigs(opts Options) (repoRoot string, paths []string, base string, err error) {
@@ -121,6 +124,9 @@ func discoverConfigs(opts Options) (repoRoot string, paths []string, base string
 
 	paths, err = normalizeConfigPaths(paths)
 	if err != nil {
+		return "", nil, "", err
+	}
+	if err := rejectDiscoveredOverlaps(opts, repoRoot, paths); err != nil {
 		return "", nil, "", err
 	}
 	if strings.TrimSpace(opts.Since) != "" {
@@ -145,9 +151,9 @@ func isolatedRun(configPath string, result ConfigResult, err error) ConfigRun {
 	return run
 }
 
-func checkOne(path, base string, damage map[string]pathSnap, log commandLog) ConfigRun {
+func checkOne(path, base string, log commandLog) ConfigRun {
 	return loadConfigRun(path, func(cfg config.Config) (ConfigResult, error) {
-		return checkConfig(cfg, base, damage, log)
+		return checkConfig(cfg, base, log)
 	})
 }
 

@@ -16,7 +16,7 @@ import (
 func TestInterruptSkipsLaterClean(t *testing.T) {
 	t.Run("check", func(t *testing.T) {
 		assertLaterCleanSkipped(t, func(cfg config.Config, log commandLog) (ConfigResult, error) {
-			return checkConfig(cfg, "", nil, log)
+			return checkConfig(cfg, "", log)
 		})
 	})
 	t.Run("run", func(t *testing.T) {
@@ -98,7 +98,7 @@ func TestCanceledContextDoesNotClean(t *testing.T) {
 			var result ConfigResult
 			var err error
 			if name == "check" {
-				result, err = checkConfig(cfg, "", nil, commandLog{ctx: ctx})
+				result, err = checkConfig(cfg, "", commandLog{ctx: ctx})
 			} else {
 				result, err = runConfig(cfg, "", commandLog{ctx: ctx})
 			}
@@ -209,7 +209,7 @@ func TestInterruptCleanReportsWipe(t *testing.T) {
 				var result ConfigResult
 				var err error
 				if name == "check" {
-					result, err = checkConfig(cfg, "", nil, commandLog{ctx: ctx})
+					result, err = checkConfig(cfg, "", commandLog{ctx: ctx})
 				} else {
 					result, err = runConfig(cfg, "", commandLog{ctx: ctx})
 				}
@@ -251,7 +251,7 @@ func TestInterruptStillDiffs(t *testing.T) {
 	t.Cleanup(cancel)
 	ch := make(chan gotResult, 1)
 	go func() {
-		result, err := checkConfig(cfg, "", nil, commandLog{ctx: ctx})
+		result, err := checkConfig(cfg, "", commandLog{ctx: ctx})
 		ch <- gotResult{result, err}
 	}()
 	cancelWhenContains(t, filepath.Join(root, "generated", "hello.txt"), "new\n", cancel)
@@ -288,7 +288,7 @@ func TestInterruptBetweenGroupsKeepsDrift(t *testing.T) {
 		},
 	}
 	ctx := &errGate{Context: context.Background(), path: filepath.Join(root, "left.txt")}
-	result, err := checkConfig(cfg, "", nil, commandLog{ctx: ctx})
+	result, err := checkConfig(cfg, "", commandLog{ctx: ctx})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +489,7 @@ func TestCancelDuringDiffDoesNotExitZero(t *testing.T) {
 	t.Cleanup(cancel)
 	ch := make(chan gotResult, 1)
 	go func() {
-		result, err := checkConfig(cfg, "", nil, commandLog{ctx: ctx})
+		result, err := checkConfig(cfg, "", commandLog{ctx: ctx})
 		ch <- gotResult{result, err}
 	}()
 	cancelWhenReady(t, ready, cancel)
@@ -526,7 +526,7 @@ func TestCancelDuringAffectedCheckSkipsCommand(t *testing.T) {
 	t.Cleanup(cancel)
 	ch := make(chan gotResult, 1)
 	go func() {
-		result, err := checkConfig(cfg, "HEAD", nil, commandLog{ctx: ctx})
+		result, err := checkConfig(cfg, "HEAD", commandLog{ctx: ctx})
 		ch <- gotResult{result, err}
 	}()
 	cancelWhenReady(t, ready, cancel)

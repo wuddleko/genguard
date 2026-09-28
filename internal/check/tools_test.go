@@ -39,7 +39,7 @@ func TestToolMismatchSkipsCleanAndRunsNextGroup(t *testing.T) {
 		},
 	}
 
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestToolMatchCleansAndRuns(t *testing.T) {
 		}},
 	}
 
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestOmittedCommandUsesNameVersion(t *testing.T) {
 		}},
 	}
 
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestToolProbeFailuresLeaveTheTree(t *testing.T) {
 					Tools:   []string{tc.tool.Name},
 				}},
 			}
-			result, err := checkConfig(cfg, "", nil, commandLog{})
+			result, err := checkConfig(cfg, "", commandLog{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -273,7 +273,7 @@ func TestToolProbesContinueAfterMismatch(t *testing.T) {
 		}},
 	}
 
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestSkippedGroupDoesNotProbe(t *testing.T) {
 		}},
 	}
 
-	result, err := checkConfig(cfg, "HEAD", nil, commandLog{})
+	result, err := checkConfig(cfg, "HEAD", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +343,7 @@ func TestToolProbeStaysOffVerboseLog(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf})
+	result, err := checkConfig(cfg, "", commandLog{w: &buf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,7 +383,7 @@ func TestToolTimeoutLeavesOutputs(t *testing.T) {
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "", nil, commandLog{timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "", commandLog{timeout: 200 * time.Millisecond})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -461,7 +461,7 @@ func TestDifferentTimeoutsProbeSeparately(t *testing.T) {
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if time.Since(start) >= 3*time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -513,7 +513,7 @@ func TestShorterTimeoutDoesNotReuseALongerProbe(t *testing.T) {
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if time.Since(start) >= 3*time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -552,7 +552,7 @@ func TestSameToolProbesOnceAcrossGroups(t *testing.T) {
 		},
 	}
 
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +594,7 @@ func TestCachedMismatchDoesNotCleanTheNextGroup(t *testing.T) {
 		Groups: []config.Group{group("one", "a/"), group("two", "b/")},
 	}
 
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +629,7 @@ func TestDifferentPinsBothProbe(t *testing.T) {
 		},
 	}
 
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,7 +663,7 @@ func TestNormalizedPinSharesOneProbe(t *testing.T) {
 		}},
 	}
 
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -701,7 +701,7 @@ func TestCachedMismatchUsesTheNextToolName(t *testing.T) {
 		},
 	}
 
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +736,8 @@ func TestCheckAllProbesOncePerDirectory(t *testing.T) {
 			command, probes := countingProbe(t, "1.32.0")
 			for _, dir := range []string{"api", "web"} {
 				writeTracked(t, root, dir+"/out.txt", "ok\n")
-				body := fmt.Sprintf("tools:\n  - name: buf\n    version: 1.32.0\n    command: %q\ngroups:\n  - name: one\n    command: \"true\"\n    outputs:\n      - out.txt\n    tools: [buf]\n  - name: two\n    command: \"true\"\n    outputs:\n      - out.txt\n    tools: [buf]\n", command)
+				writeTracked(t, root, dir+"/right.txt", "ok\n")
+				body := fmt.Sprintf("tools:\n  - name: buf\n    version: 1.32.0\n    command: %q\ngroups:\n  - name: one\n    command: \"true\"\n    outputs:\n      - out.txt\n    tools: [buf]\n  - name: two\n    command: \"true\"\n    outputs:\n      - right.txt\n    tools: [buf]\n", command)
 				writeTracked(t, root, dir+"/genguard.yaml", body)
 			}
 
@@ -859,7 +860,7 @@ func checkToolReport(t *testing.T, pin, printed, generate string) ConfigResult {
 			Tools:   []string{"buf"},
 		}},
 	}
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}

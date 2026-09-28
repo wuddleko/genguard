@@ -269,9 +269,9 @@ func TestLoadConfigAcceptsLiteralPathsAndGlobs(t *testing.T) {
 	content := "groups:\n" +
 		"  - command: \"true\"\n" +
 		"    outputs:\n" +
-		"      - gen/\n" +
 		"      - gen/a.txt\n" +
-		"      - \"*.pb.go\"\n" +
+		"      - other/\n" +
+		"      - \"pb/*.pb.go\"\n" +
 		"    inputs:\n" +
 		"      - proto/\n"
 	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
@@ -283,11 +283,51 @@ func TestLoadConfigAcceptsLiteralPathsAndGlobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := cfg.Groups[0]
-	if strings.Join(got.Outputs, ",") != "gen/,gen/a.txt,*.pb.go" {
+	if strings.Join(got.Outputs, ",") != "gen/a.txt,other/,pb/*.pb.go" {
 		t.Fatalf("outputs = %v", got.Outputs)
 	}
 	if len(got.Inputs) != 1 || got.Inputs[0] != "proto/" {
 		t.Fatalf("inputs = %v", got.Inputs)
+	}
+}
+
+func TestLoadConfigRejectsOverlappingOutputs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		content string
+		match   string
+	}{
+		{
+			"directory and file",
+			"groups:\n  - name: dir\n    command: \"true\"\n    outputs:\n      - gen/\n  - name: file\n    command: \"true\"\n    outputs:\n      - gen/out.go\n",
+			`outputs overlap: group "dir" "gen/" and group "file" "gen/out.go"`,
+		},
+		{
+			"same group",
+			"groups:\n  - name: dir\n    command: \"true\"\n    outputs:\n      - gen/\n      - gen/out.go\n",
+			`outputs overlap: group "dir" "gen/" and group "dir" "gen/out.go"`,
+		},
+		{
+			"glob prefix",
+			"groups:\n  - name: glob\n    command: \"true\"\n    outputs:\n      - gen/*.txt\n  - name: file\n    command: \"true\"\n    outputs:\n      - gen/out.go\n",
+			`group "glob" "gen/*.txt" and group "file" "gen/out.go"`,
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			path := filepath.Join(root, "genguard.yaml")
+			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := config.LoadConfig(path)
+			if err == nil || !strings.Contains(err.Error(), tc.match) {
+				t.Fatalf("error = %v, want substring %q", err, tc.match)
+			}
+		})
 	}
 }
 

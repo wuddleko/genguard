@@ -683,26 +683,12 @@ func TestCheckAllCleanFailureDoesNotBlameLaterConfig(t *testing.T) {
 		t.Fatalf("discovery error = %v", err)
 	}
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Paths: []string{yamlPath, ymlPath}})
-	if err != nil {
-		t.Fatal(err)
+	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root, Paths: []string{yamlPath, ymlPath}})
+	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), yamlPath) || !strings.Contains(err.Error(), ymlPath) {
+		t.Fatalf("error = %v", err)
 	}
-	if run.ExitCode() != 2 {
-		t.Fatalf("exit = %d, want 2", run.ExitCode())
-	}
-	yamlRun := configByPath(t, run, yamlPath)
-	if yamlRun.Result.Groups[0].Status != check.GroupError {
-		t.Fatalf("yaml status = %+v", yamlRun.Result.Groups[0])
-	}
-	if yamlRun.Result.Groups[0].Err == nil || !strings.Contains(yamlRun.Result.Groups[0].Err.Error(), "after cleaning outputs") {
-		t.Fatalf("yaml error = %v", yamlRun.Result.Groups[0].Err)
-	}
-	ymlRun := configByPath(t, run, ymlPath)
-	if ymlRun.Result.Groups[0].Status != check.GroupOK {
-		t.Fatalf("yml status = %+v", ymlRun.Result.Groups[0])
-	}
-	if _, statErr := os.Stat(filepath.Join(dir, "out.txt")); !os.IsNotExist(statErr) {
-		t.Fatalf("out.txt should have been wiped: %v", statErr)
+	if _, statErr := os.Stat(filepath.Join(dir, "out.txt")); statErr != nil {
+		t.Fatalf("out.txt = %v", statErr)
 	}
 }
 
@@ -833,28 +819,16 @@ func TestCheckAllIsolatedOverlappingCleanDoesNotShareWipe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if run.ExitCode() != 2 {
-		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
-	}
-	assertConfigPaths(t, run, api, nested)
-	apiRun := configByPath(t, run, api)
-	if apiRun.Result.Groups[0].Status != check.GroupError {
-		t.Fatalf("api status = %+v", apiRun.Result.Groups[0])
-	}
-	nestedRun := configByPath(t, run, nested)
-	if nestedRun.Err != nil || nestedRun.Result.Groups[0].Status != check.GroupOK {
-		t.Fatalf("nested saw the other wipe: %+v", nestedRun)
+	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), nested) {
+		t.Fatalf("error = %v", err)
 	}
 	got, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != "dirty\n" {
-		t.Fatalf("user out.txt = %q, isolated --all wrote the checkout", got)
+		t.Fatalf("user out.txt = %q", got)
 	}
 }
 
@@ -985,6 +959,291 @@ func TestCheckAllIsolatedLoadErrorStillRunsOthers(t *testing.T) {
 	webRun := configByPath(t, run, web)
 	if webRun.Err != nil || webRun.Result.Groups[0].Status != check.GroupOK {
 		t.Fatalf("web did not run: %+v", webRun)
+	}
+}
+
+func TestCheckAllIsolatedOverlapUsesCommittedConfigs(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	webDir := filepath.Join(root, "web")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(webDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "api",
+		Command: `python3 -c "open('api-ran','w').close()"`,
+		Outputs: []string{"../web/out.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	web, err := testutil.WriteGenguardConfig(webDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "web",
+		Command: `python3 -c "open('web-ran','w').close()"`,
+		Outputs: []string{"out.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webDir, "out.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, root)
+
+	if _, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "api",
+		Command: "true",
+		Outputs: []string{"mine.txt"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), web) {
+		t.Fatalf("error = %v", err)
+	}
+	if markerExists(apiDir, "api-ran") || markerExists(webDir, "web-ran") {
+		t.Fatal("overlap ran a group")
+	}
+}
+
+func TestCheckAllIsolatedOverlapWhenCheckoutConfigIsGone(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	webDir := filepath.Join(root, "web")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(webDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "api",
+		Command: "true",
+		Outputs: []string{"../web/out.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	web, err := testutil.WriteGenguardConfig(webDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "web",
+		Command: "true",
+		Outputs: []string{"out.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webDir, "out.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, root)
+	if err := os.Remove(api); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), web) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCheckAllIsolatedIgnoresCheckoutOverlap(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	webDir := filepath.Join(root, "web")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(webDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "api",
+		Command: "true",
+		Outputs: []string{"mine.txt"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apiDir, "mine.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testutil.WriteGenguardConfig(webDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "web",
+		Command: "true",
+		Outputs: []string{"out.txt"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webDir, "out.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, root)
+	if _, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "api",
+		Command: "true",
+		Outputs: []string{"../web/out.txt"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 0 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+}
+
+func TestCheckAllOverlapIncludesConfigThatFailsToLoad(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	webDir := filepath.Join(root, "web")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(webDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{
+		{
+			Name:    "dir",
+			Command: `python3 -c "open('api-ran','w').close()"`,
+			Outputs: []string{"gen/"},
+		},
+		{
+			Name:    "file",
+			Command: "true",
+			Outputs: []string{"gen/out.go"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	web, err := testutil.WriteGenguardConfig(webDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "web",
+		Command: `python3 -c "open('web-ran','w').close()"`,
+		Outputs: []string{"../api/gen/out.go"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, root)
+
+	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), web) {
+		t.Fatalf("error = %v", err)
+	}
+	if markerExists(apiDir, "api-ran") || markerExists(webDir, "web-ran") {
+		t.Fatal("overlap ran a group")
+	}
+}
+
+func TestCheckAllOverlapIncludesDuplicateGroupNames(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	webDir := filepath.Join(root, "web")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(webDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{
+		{
+			Name:    "one",
+			Command: `python3 -c "open('api-ran','w').close()"`,
+			Outputs: []string{"shared.txt"},
+		},
+		{
+			Name:    "one",
+			Command: "true",
+			Outputs: []string{"other.txt"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	web, err := testutil.WriteGenguardConfig(webDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "web",
+		Command: `python3 -c "open('web-ran','w').close()"`,
+		Outputs: []string{"../api/shared.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, root)
+
+	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), web) {
+		t.Fatalf("error = %v", err)
+	}
+	if markerExists(apiDir, "api-ran") || markerExists(webDir, "web-ran") {
+		t.Fatal("overlap ran a group")
+	}
+}
+
+func TestCheckAllWithinFileOverlapRunsOtherConfig(t *testing.T) {
+	root := initMonorepo(t)
+	apiDir := filepath.Join(root, "api")
+	webDir := filepath.Join(root, "web")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(webDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{
+		{
+			Name:    "dir",
+			Command: `python3 -c "open('api-ran','w').close()"`,
+			Outputs: []string{"gen/"},
+		},
+		{
+			Name:    "file",
+			Command: "true",
+			Outputs: []string{"gen/out.go"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	web, err := testutil.WriteGenguardConfig(webDir, "", "", "", []testutil.GroupSpec{{
+		Name:    "web",
+		Command: `python3 -c "open('web-ran','w').close()"`,
+		Outputs: []string{"other.txt"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(webDir, "other.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, root)
+
+	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
+	}
+	apiRun := configByPath(t, run, api)
+	if apiRun.Err == nil || !strings.Contains(apiRun.Err.Error(), `group "dir" "gen/"`) || !strings.Contains(apiRun.Err.Error(), `group "file" "gen/out.go"`) {
+		t.Fatalf("api error = %v", apiRun.Err)
+	}
+	webRun := configByPath(t, run, web)
+	if webRun.Err != nil || webRun.Result.Groups[0].Status != check.GroupOK {
+		t.Fatalf("web did not run: %+v", webRun)
+	}
+	if markerExists(apiDir, "api-ran") {
+		t.Fatal("api group ran")
+	}
+	if !markerExists(webDir, "web-ran") {
+		t.Fatal("web group did not run")
 	}
 }
 
@@ -1225,22 +1484,12 @@ func TestRunAllOverlappingCleanSharesTree(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
-	if err != nil {
-		t.Fatal(err)
+	_, err = check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), nested) {
+		t.Fatalf("error = %v", err)
 	}
-	if run.ExitCode() != 2 {
-		t.Fatalf("exit = %d, want 2", run.ExitCode())
-	}
-	assertConfigPaths(t, run, api, nested)
-	if configByPath(t, run, api).Result.Groups[0].Status != check.GroupError {
-		t.Fatal("api clean command should fail")
-	}
-	if configByPath(t, run, nested).Result.Groups[0].Status != check.GroupOK {
-		t.Fatal("nested command should still run")
-	}
-	if _, err := os.Stat(out); !os.IsNotExist(err) {
-		t.Fatalf("shared tree kept %s: %v", out, err)
+	if _, statErr := os.Stat(out); statErr != nil {
+		t.Fatalf("out.txt = %v", statErr)
 	}
 }
 
@@ -1322,22 +1571,12 @@ func TestRunAllCleanSuccessLaterCommandSeesWipe(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
-	if err != nil {
-		t.Fatal(err)
+	_, err = check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), nested) {
+		t.Fatalf("error = %v", err)
 	}
-	if run.ExitCode() != 0 {
-		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
-	}
-	assertConfigPaths(t, run, api, nested)
-	if configByPath(t, run, api).Result.Groups[0].Status != check.GroupOK {
-		t.Fatal("api clean should succeed")
-	}
-	if configByPath(t, run, nested).Result.Groups[0].Status != check.GroupOK {
-		t.Fatalf("nested did not see the wipe: %+v", configByPath(t, run, nested).Result.Groups[0])
-	}
-	if _, err := os.Stat(out); !os.IsNotExist(err) {
-		t.Fatalf("shared tree kept %s: %v", out, err)
+	if _, statErr := os.Stat(out); statErr != nil {
+		t.Fatalf("out.txt = %v", statErr)
 	}
 }
 
@@ -1371,22 +1610,15 @@ func TestRunAllLaterCommandSeesEarlierWrite(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if run.ExitCode() != 0 {
-		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
-	}
-	assertConfigPaths(t, run, api, nested)
-	if configByPath(t, run, nested).Result.Groups[0].Status != check.GroupOK {
-		t.Fatalf("nested did not see the earlier write: %+v", configByPath(t, run, nested).Result.Groups[0])
+	_, err = check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), nested) {
+		t.Fatalf("error = %v", err)
 	}
 	got, err := os.ReadFile(note)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "from-api\n" {
+	if string(got) != "old\n" {
 		t.Fatalf("note.txt = %q", got)
 	}
 }
@@ -1439,22 +1671,15 @@ func TestRunAllSinceCleanedLiteralOutputRunsLaterConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base"})
-	if err != nil {
+	_, err = check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base"})
+	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), nested) {
+		t.Fatalf("error = %v", err)
+	}
+	if markerExists(nestedDir, "ran") {
+		t.Fatal("overlap ran the later group")
+	}
+	if _, err := os.Stat(out); err != nil {
 		t.Fatal(err)
-	}
-	if run.ExitCode() != 0 {
-		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
-	}
-	assertConfigPaths(t, run, api, nested)
-	if configByPath(t, run, api).Result.Groups[0].Status != check.GroupOK {
-		t.Fatalf("api = %+v", configByPath(t, run, api).Result.Groups[0])
-	}
-	if groupInRun(t, run, "nested").Status != check.GroupOK || !markerExists(nestedDir, "ran") {
-		t.Fatalf("deleted literal output did not run nested: %+v", groupInRun(t, run, "nested"))
-	}
-	if _, err := os.Stat(out); !os.IsNotExist(err) {
-		t.Fatalf("out.txt = %v", err)
 	}
 }
 
@@ -1476,13 +1701,12 @@ func TestRunAllSinceCleanedTrackedOutputRunsDirectoryAndGlob(t *testing.T) {
 	if err := os.WriteFile(kept, []byte("ok\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+	if _, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
 		Name:    "api",
 		Command: "true",
 		Outputs: []string{"nested/gen/kept.txt"},
 		Clean:   true,
-	}})
-	if err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	nested, err := testutil.WriteGenguardConfig(nestedDir, "", "", "", []testutil.GroupSpec{
@@ -1504,33 +1728,19 @@ func TestRunAllSinceCleanedTrackedOutputRunsDirectoryAndGlob(t *testing.T) {
 	}
 	commitBase(t, root)
 
-	alone, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base", Paths: []string{nested}})
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base", Paths: []string{nested}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if alone.ExitCode() != 0 || groupInRun(t, alone, "dir").Status != check.GroupSkipped || groupInRun(t, alone, "glob").Status != check.GroupSkipped {
-		t.Fatalf("unchanged nested = %+v", alone.Configs)
+	cfg := configByPath(t, run, nested)
+	if cfg.Err == nil || !strings.Contains(cfg.Err.Error(), "outputs overlap") || !strings.Contains(cfg.Err.Error(), `group "dir" "gen/"`) || !strings.Contains(cfg.Err.Error(), `group "glob" "gen/*.txt"`) {
+		t.Fatalf("error = %v", cfg.Err)
 	}
-	if markerExists(nestedDir, "dir-ran") || markerExists(nestedDir, "glob-ran") {
-		t.Fatal("unchanged nested ran")
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d", run.ExitCode())
 	}
-
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base"})
-	if err != nil {
+	if _, err := os.Stat(kept); err != nil {
 		t.Fatal(err)
-	}
-	if run.ExitCode() != 0 {
-		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
-	}
-	assertConfigPaths(t, run, api, nested)
-	if groupInRun(t, run, "dir").Status != check.GroupOK || groupInRun(t, run, "glob").Status != check.GroupOK {
-		t.Fatalf("dir=%+v glob=%+v", groupInRun(t, run, "dir"), groupInRun(t, run, "glob"))
-	}
-	if !markerExists(nestedDir, "dir-ran") || !markerExists(nestedDir, "glob-ran") {
-		t.Fatal("tracked deletion did not run the later groups")
-	}
-	if _, err := os.Stat(kept); !os.IsNotExist(err) {
-		t.Fatalf("kept.txt = %v", err)
 	}
 }
 
@@ -1544,13 +1754,12 @@ func TestRunAllSinceCleanedUntrackedFileLeavesDirectoryAndGlobSkipped(t *testing
 	if err := os.WriteFile(filepath.Join(nestedDir, "src", "a.txt"), []byte("a\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	api, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
+	if _, err := testutil.WriteGenguardConfig(apiDir, "", "", "", []testutil.GroupSpec{{
 		Name:    "api",
 		Command: "true",
 		Outputs: []string{"nested/gen/extra.txt"},
 		Clean:   true,
-	}})
-	if err != nil {
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	nested, err := testutil.WriteGenguardConfig(nestedDir, "", "", "", []testutil.GroupSpec{
@@ -1572,41 +1781,16 @@ func TestRunAllSinceCleanedUntrackedFileLeavesDirectoryAndGlobSkipped(t *testing
 	}
 	commitBase(t, root)
 
-	alone, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base", Paths: []string{nested}})
+	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base", Paths: []string{nested}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if alone.ExitCode() != 0 || groupInRun(t, alone, "dir").Status != check.GroupSkipped || groupInRun(t, alone, "glob").Status != check.GroupSkipped {
-		t.Fatalf("unchanged nested = %+v", alone.Configs)
+	cfg := configByPath(t, run, nested)
+	if cfg.Err == nil || !strings.Contains(cfg.Err.Error(), "outputs overlap") || !strings.Contains(cfg.Err.Error(), `group "dir" "gen/"`) || !strings.Contains(cfg.Err.Error(), `group "glob" "gen/*.txt"`) {
+		t.Fatalf("error = %v", cfg.Err)
 	}
-
-	extra := filepath.Join(nestedDir, "gen", "extra.txt")
-	if err := os.MkdirAll(filepath.Dir(extra), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(extra, []byte("x\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if run.ExitCode() != 0 {
-		t.Fatalf("exit = %d, configs = %+v", run.ExitCode(), run.Configs)
-	}
-	assertConfigPaths(t, run, api, nested)
-	if configByPath(t, run, api).Result.Groups[0].Status != check.GroupOK {
-		t.Fatalf("api = %+v", configByPath(t, run, api).Result.Groups[0])
-	}
-	if groupInRun(t, run, "dir").Status != check.GroupSkipped || groupInRun(t, run, "glob").Status != check.GroupSkipped {
-		t.Fatalf("dir=%+v glob=%+v", groupInRun(t, run, "dir"), groupInRun(t, run, "glob"))
-	}
-	if markerExists(nestedDir, "dir-ran") || markerExists(nestedDir, "glob-ran") {
-		t.Fatal("untracked deletion ran a later group")
-	}
-	if _, err := os.Stat(extra); !os.IsNotExist(err) {
-		t.Fatalf("extra.txt = %v", err)
+	if run.ExitCode() != 2 {
+		t.Fatalf("exit = %d", run.ExitCode())
 	}
 }
 

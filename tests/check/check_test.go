@@ -406,7 +406,7 @@ func TestCheckMultipleGroupsOnlyOneDrifts(t *testing.T) {
 	}
 }
 
-func TestCheckOverlappingOutputsBothReportDrift(t *testing.T) {
+func TestCheckOverlappingOutputsFailAtLoad(t *testing.T) {
 	groups := []testutil.GroupSpec{
 		{Name: "greeting", Command: "python3 scripts/gen.py", Outputs: []string{"generated/hello.txt"}},
 		{Name: "noop", Command: "true", Outputs: []string{"generated/hello.txt"}},
@@ -415,18 +415,49 @@ func TestCheckOverlappingOutputsBothReportDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitNameChange(t, root)
 
-	result := mustCheckConfig(t, root)
-	drifts := result.AllDrifts()
-	if len(drifts) != 2 {
-		t.Fatalf("drifts = %v", drifts)
+	_, err = config.LoadConfig(filepath.Join(root, "genguard.yaml"))
+	if err == nil || !strings.Contains(err.Error(), `outputs overlap: group "greeting" "generated/hello.txt" and group "noop" "generated/hello.txt"`) {
+		t.Fatalf("error = %v", err)
 	}
-	if drifts[0].Group != "greeting" || drifts[0].Path != "generated/hello.txt" {
-		t.Fatalf("first drift = %v", drifts[0])
+}
+
+func TestCheckDirectoryPrefixOverlapExitsBeforeDrift(t *testing.T) {
+	groups := []testutil.GroupSpec{
+		{Name: "dir", Command: "printf 'new\\n' > gen/out.go", Outputs: []string{"gen/"}},
+		{Name: "file", Command: "true", Outputs: []string{"gen/out.go"}},
 	}
-	if drifts[1].Group != "noop" || drifts[1].Path != "generated/hello.txt" {
-		t.Fatalf("second drift = %v", drifts[1])
+	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "gen"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "gen", "out.go"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "gen/out.go"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "gen"); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
+	if code != 2 {
+		t.Fatalf("code = %d, want 2; stdout = %q stderr = %q", code, stdout, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if strings.Contains(stderr, "Drift") || strings.Contains(stderr, "[modified]") || strings.Contains(stderr, "[missing]") {
+		t.Fatalf("stderr reported drift:\n%s", stderr)
+	}
+	for _, want := range []string{`group "dir" "gen/"`, `group "file" "gen/out.go"`} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("stderr = %q, missing %q", stderr, want)
+		}
 	}
 }
 
@@ -627,10 +658,22 @@ func TestRunStoresCommandTail(t *testing.T) {
 func TestCheckMultipleGroupsAllPass(t *testing.T) {
 	groups := []testutil.GroupSpec{
 		{Name: "one", Command: "python3 scripts/gen.py", Outputs: []string{"generated/hello.txt"}},
-		{Name: "two", Command: "true", Outputs: []string{"generated/hello.txt"}},
+		{Name: "two", Command: "true", Outputs: []string{"other/out.txt"}},
 	}
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other", "out.txt"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "other/out.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "commit", "-m", "second output"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1689,42 +1732,10 @@ func TestCheckFailedCleanRewriteVisibleAndLaterGroupOmitsWipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitPath(t, root, "generated/other.txt", "other\n")
 
-	result := mustCheckConfig(t, root)
-	if len(result.Groups) != 2 {
-		t.Fatalf("groups = %d, want 2", len(result.Groups))
-	}
-	if result.Groups[0].Status != check.GroupError {
-		t.Fatalf("broken status = %q", result.Groups[0].Status)
-	}
-	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "after cleaning outputs") {
-		t.Fatalf("broken err = %v", result.Groups[0].Err)
-	}
-	if len(result.Groups[0].Drifts) != 1 || result.Groups[0].Drifts[0].Kind != "modified" || result.Groups[0].Drifts[0].Path != "generated/hello.txt" {
-		t.Fatalf("broken drifts = %v", result.Groups[0].Drifts)
-	}
-	if result.Groups[1].Status != check.GroupOK {
-		t.Fatalf("later status = %q, err = %v, drifts = %v", result.Groups[1].Status, result.Groups[1].Err, result.Groups[1].Drifts)
-	}
-	if len(result.Groups[1].Drifts) != 0 {
-		t.Fatalf("later drifts = %v", result.Groups[1].Drifts)
-	}
-	if result.ExitCode() != 2 {
-		t.Fatalf("exit = %d, want 2", result.ExitCode())
-	}
-	report, err := check.FormatFailureReport(result, root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(report, "\nDrift\n") || !strings.Contains(report, "[modified] broken: generated/hello.txt") {
-		t.Fatalf("report = %s", report)
-	}
-	if strings.Contains(report, "generated/other.txt") {
-		t.Fatalf("wipe residue listed: %s", report)
-	}
-	if _, statErr := os.Stat(filepath.Join(root, "generated", "other.txt")); !os.IsNotExist(statErr) {
-		t.Fatalf("other.txt should have been wiped: %v", statErr)
+	_, err = config.LoadConfig(filepath.Join(root, "genguard.yaml"))
+	if err == nil || !strings.Contains(err.Error(), `group "broken" "generated/other.txt" and group "later" "generated/other.txt"`) {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -1792,21 +1803,9 @@ func TestCheckCleanFailureDoesNotBlameOverlappingGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := mustCheckConfig(t, root)
-	if result.Groups[0].Status != check.GroupError {
-		t.Fatalf("broken status = %q", result.Groups[0].Status)
-	}
-	if result.Groups[1].Status != check.GroupOK {
-		t.Fatalf("other status = %q, err = %v, drifts = %v", result.Groups[1].Status, result.Groups[1].Err, result.Groups[1].Drifts)
-	}
-	if len(result.Groups[1].Drifts) != 0 {
-		t.Fatalf("other drifts = %v", result.Groups[1].Drifts)
-	}
-	if _, statErr := os.Stat(filepath.Join(root, "generated", "hello.txt")); !os.IsNotExist(statErr) {
-		t.Fatalf("hello.txt should have been wiped: %v", statErr)
-	}
-	if result.ExitCode() != 2 {
-		t.Fatalf("exit = %d, want 2", result.ExitCode())
+	_, err = config.LoadConfig(filepath.Join(root, "genguard.yaml"))
+	if err == nil || !strings.Contains(err.Error(), `group "broken" "generated/hello.txt" and group "other" "generated/hello.txt"`) {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -1820,30 +1819,9 @@ func TestCheckCleanFailureDoesNotBlameLaterCommandFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := mustCheckConfig(t, root)
-	if result.Groups[0].Status != check.GroupError {
-		t.Fatalf("broken status = %q", result.Groups[0].Status)
-	}
-	if len(result.Groups[0].Drifts) != 0 {
-		t.Fatalf("broken drifts = %v", result.Groups[0].Drifts)
-	}
-	if result.Groups[1].Status != check.GroupError {
-		t.Fatalf("other status = %q, err = %v, drifts = %v", result.Groups[1].Status, result.Groups[1].Err, result.Groups[1].Drifts)
-	}
-	if result.Groups[1].Err == nil || !strings.Contains(result.Groups[1].Err.Error(), "command failed (exit 1)") {
-		t.Fatalf("other err = %v", result.Groups[1].Err)
-	}
-	if strings.Contains(result.Groups[1].Err.Error(), "after cleaning outputs") {
-		t.Fatalf("other err = %v", result.Groups[1].Err)
-	}
-	if len(result.Groups[1].Drifts) != 0 {
-		t.Fatalf("other drifts = %v", result.Groups[1].Drifts)
-	}
-	if _, statErr := os.Stat(filepath.Join(root, "generated", "hello.txt")); !os.IsNotExist(statErr) {
-		t.Fatalf("hello.txt should have been wiped: %v", statErr)
-	}
-	if result.ExitCode() != 2 {
-		t.Fatalf("exit = %d, want 2", result.ExitCode())
+	_, err = config.LoadConfig(filepath.Join(root, "genguard.yaml"))
+	if err == nil || !strings.Contains(err.Error(), `group "broken" "generated/hello.txt" and group "other" "generated/hello.txt"`) {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -1857,15 +1835,9 @@ func TestCheckCleanFailureStillReportsLaterRewrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := mustCheckConfig(t, root)
-	if result.Groups[0].Status != check.GroupError {
-		t.Fatalf("broken status = %q", result.Groups[0].Status)
-	}
-	if result.Groups[1].Status != check.GroupDrift {
-		t.Fatalf("other status = %q, err = %v, drifts = %v", result.Groups[1].Status, result.Groups[1].Err, result.Groups[1].Drifts)
-	}
-	if len(result.Groups[1].Drifts) != 1 || result.Groups[1].Drifts[0].Kind != "modified" || result.Groups[1].Drifts[0].Path != "generated/hello.txt" {
-		t.Fatalf("other drifts = %v", result.Groups[1].Drifts)
+	_, err = config.LoadConfig(filepath.Join(root, "genguard.yaml"))
+	if err == nil || !strings.Contains(err.Error(), `group "broken" "generated/hello.txt" and group "other" "generated/hello.txt"`) {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -1880,25 +1852,16 @@ func TestCheckCleanFailureRestoreThenLaterWipe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := mustCheckConfig(t, root)
-	if result.Groups[0].Status != check.GroupError {
-		t.Fatalf("broken status = %q", result.Groups[0].Status)
-	}
-	if result.Groups[1].Status != check.GroupOK {
-		t.Fatalf("restore status = %q, err = %v, drifts = %v", result.Groups[1].Status, result.Groups[1].Err, result.Groups[1].Drifts)
-	}
-	if result.Groups[2].Status != check.GroupDrift {
-		t.Fatalf("wiper status = %q, err = %v, drifts = %v", result.Groups[2].Status, result.Groups[2].Err, result.Groups[2].Drifts)
-	}
-	if len(result.Groups[2].Drifts) != 1 || result.Groups[2].Drifts[0].Kind != "missing" || result.Groups[2].Drifts[0].Path != "generated/hello.txt" {
-		t.Fatalf("wiper drifts = %v", result.Groups[2].Drifts)
+	_, err = config.LoadConfig(filepath.Join(root, "genguard.yaml"))
+	if err == nil || !strings.Contains(err.Error(), `group "broken" "generated/hello.txt" and group "restore" "generated/hello.txt"`) {
+		t.Fatalf("error = %v", err)
 	}
 }
 
 func TestCheckCleanFailureKeepsUnrelatedLaterDrift(t *testing.T) {
 	groups := []testutil.GroupSpec{
 		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}, Clean: true},
-		{Name: "other", Command: "true", Outputs: []string{"generated/hello.txt", "other/out.txt"}},
+		{Name: "other", Command: "true", Outputs: []string{"other/out.txt"}},
 	}
 	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
 	if err != nil {
@@ -2018,7 +1981,7 @@ func TestCheckCleanGlobLeavesUnmatchedFile(t *testing.T) {
 	groups := []testutil.GroupSpec{{
 		Name:    "sqlc",
 		Command: "python3 scripts/gen.py && printf 'package q\\n' > generated/oidc_queries.sql.go",
-		Outputs: []string{"generated/hello.txt", "generated/*_queries.sql.go"},
+		Outputs: []string{"generated/*_queries.sql.go"},
 		Clean:   true,
 	}, {
 		Name:    "wrappers",
@@ -2112,12 +2075,12 @@ func TestCheckCleanGlobSqlcPackage(t *testing.T) {
 	session := "package db\n\ntype OidcSession struct{}\n"
 	groups := []testutil.GroupSpec{{
 		Name:    "sqlc",
-		Command: `python3 -c 'open("oidc_queries.sql.go","wb").write(b"package db\n\nfunc Queries() {}\n"); open("session_queries.sql.go","wb").write(b"package db\n\ntype OidcSession struct{}\n")'`,
-		Outputs: []string{"*_queries.sql.go"},
+		Command: `python3 -c 'import os; os.makedirs("query", exist_ok=True); open("query/oidc_queries.sql.go","wb").write(b"package db\n\nfunc Queries() {}\n"); open("query/session_queries.sql.go","wb").write(b"package db\n\ntype OidcSession struct{}\n")'`,
+		Outputs: []string{"query/*_queries.sql.go"},
 		Clean:   true,
 	}, {
 		Name:    "wrappers",
-		Command: "test -f db.go && test -f models.go && test -f oidc_queries.sql.go && test -f session_queries.sql.go",
+		Command: "test -f db.go && test -f models.go && test -f query/oidc_queries.sql.go && test -f query/session_queries.sql.go",
 		Outputs: []string{"wrapper.go"},
 	}}
 	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
@@ -2127,13 +2090,22 @@ func TestCheckCleanGlobSqlcPackage(t *testing.T) {
 	db := "package db\n\nfunc Queries() {}\n"
 	models := "package db\n\ntype OidcSession struct{}\n"
 	for name, body := range map[string]string{
-		"db.go":                  db,
-		"models.go":              models,
-		"oidc_queries.sql.go":    oidc,
-		"session_queries.sql.go": session,
-		"wrapper.go":             "package wrap\n",
+		"db.go":      db,
+		"models.go":  models,
+		"wrapper.go": "package wrap\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, "query"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"oidc_queries.sql.go":    oidc,
+		"session_queries.sql.go": session,
+	} {
+		if err := os.WriteFile(filepath.Join(root, "query", name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2215,7 +2187,7 @@ func TestCheckCleanGlobCommandFailureLeavesHandWrittenFiles(t *testing.T) {
 	groups := []testutil.GroupSpec{{
 		Name:    "sqlc",
 		Command: "exit 3",
-		Outputs: []string{"*_queries.sql.go"},
+		Outputs: []string{"query/*_queries.sql.go"},
 		Clean:   true,
 	}, {
 		Name:    "wrappers",
@@ -2227,16 +2199,21 @@ func TestCheckCleanGlobCommandFailureLeavesHandWrittenFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, body := range map[string]string{
-		"db.go":               "package db\n",
-		"models.go":           "package db\n",
-		"oidc_queries.sql.go": "package db\n",
-		"wrapper.go":          "package wrap\n",
+		"db.go":      "package db\n",
+		"models.go":  "package db\n",
+		"wrapper.go": "package wrap\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := testutil.Git(root, "add", "db.go", "models.go", "oidc_queries.sql.go", "wrapper.go"); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "query"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "query", "oidc_queries.sql.go"), []byte("package db\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := testutil.Git(root, "add", "db.go", "models.go", "query/oidc_queries.sql.go", "wrapper.go"); err != nil {
 		t.Fatal(err)
 	}
 	if err := testutil.Git(root, "commit", "-m", "package"); err != nil {
@@ -2250,7 +2227,7 @@ func TestCheckCleanGlobCommandFailureLeavesHandWrittenFiles(t *testing.T) {
 	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), "after cleaning outputs") || !strings.Contains(result.Groups[0].Err.Error(), "exit 3") {
 		t.Fatalf("sqlc err = %v", result.Groups[0].Err)
 	}
-	if _, err := os.Lstat(filepath.Join(root, "oidc_queries.sql.go")); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(root, "query", "oidc_queries.sql.go")); !os.IsNotExist(err) {
 		t.Fatalf("query file should be removed: %v", err)
 	}
 	for _, name := range []string{"db.go", "models.go"} {

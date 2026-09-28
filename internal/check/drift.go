@@ -129,15 +129,11 @@ func recordCleanDamage(log commandLog, damage map[string]pathSnap, root string, 
 	if err != nil {
 		return err
 	}
-	recordFoundDamage(damage, root, found)
-	return nil
-}
-
-func recordFoundDamage(damage map[string]pathSnap, root string, found []Drift) {
 	for _, item := range found {
 		abs := absDriftPath(root, item.Path)
 		damage[abs] = snapPath(abs)
 	}
+	return nil
 }
 
 func omitUnchangedDamage(root string, found []Drift, damage map[string]pathSnap) []Drift {
@@ -154,17 +150,6 @@ func omitUnchangedDamage(root string, found []Drift, damage map[string]pathSnap)
 		kept = append(kept, item)
 	}
 	return kept
-}
-
-func dropRepairedDamage(damage map[string]pathSnap) {
-	if len(damage) == 0 {
-		return
-	}
-	for abs, snap := range damage {
-		if !samePathSnap(abs, snap) {
-			delete(damage, abs)
-		}
-	}
 }
 
 func absDriftPath(root, rel string) string {

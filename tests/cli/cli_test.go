@@ -277,21 +277,18 @@ func TestCLIRunsAllGroupsAfterCommandFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
+	stdout, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
 	if code != 2 {
 		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
 	}
-	if !strings.Contains(stderr, "broken: error") {
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, `group "broken" "generated/hello.txt" and group "greeting" "generated/hello.txt"`) {
 		t.Fatalf("stderr = %q", stderr)
 	}
-	if !strings.Contains(stderr, "greeting: drift") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "2 groups: 0 ok, 1 drift, 1 error") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "error: 1 group failed; 1 group drifted") {
-		t.Fatalf("stderr = %q", stderr)
+	if strings.Contains(stderr, "Drift") || strings.Contains(stderr, "greeting: drift") {
+		t.Fatalf("stderr reported drift:\n%s", stderr)
 	}
 }
 
@@ -393,27 +390,18 @@ func TestCLIErrorOKAndDrift(t *testing.T) {
 	commitPath(t, root, "other/out.txt", "ok\n")
 	commitNameChange(t, root)
 
-	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
+	stdout, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
 	if code != 2 {
 		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
 	}
-	if !strings.Contains(stderr, "broken: error") {
+	if stdout != "" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stderr, `group "broken" "generated/hello.txt" and group "greeting" "generated/hello.txt"`) {
 		t.Fatalf("stderr = %q", stderr)
 	}
-	if !strings.Contains(stderr, "other: OK") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "greeting: drift") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "3 groups: 1 ok, 1 drift, 1 error") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "[modified] greeting: generated/hello.txt") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-	if !strings.Contains(stderr, "error: 1 group failed; 1 group drifted") {
-		t.Fatalf("stderr = %q", stderr)
+	if strings.Contains(stderr, "Drift") || strings.Contains(stderr, "[modified]") {
+		t.Fatalf("stderr reported drift:\n%s", stderr)
 	}
 }
 
@@ -2492,7 +2480,7 @@ func TestCLICheckShortConfig(t *testing.T) {
 func TestCLIRunContinuesAfterCommandFailure(t *testing.T) {
 	groups := []testutil.GroupSpec{
 		{Name: "broken", Command: "exit 3", Outputs: []string{"generated/hello.txt"}},
-		{Name: "ok", Command: `python3 -c "open('ran','w').close()"`, Outputs: []string{"generated/hello.txt"}},
+		{Name: "ok", Command: `python3 -c "open('ran','w').close()"`, Outputs: []string{"ran"}},
 	}
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", groups)
 	if err != nil {

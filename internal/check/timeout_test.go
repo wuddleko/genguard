@@ -31,7 +31,7 @@ func TestCheckTimeoutRunsLaterGroup(t *testing.T) {
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "", nil, commandLog{timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "", commandLog{timeout: 200 * time.Millisecond})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -70,7 +70,7 @@ func TestCheckTimeoutWriterDropsTail(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	start := time.Now()
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "", commandLog{w: &buf, timeout: 200 * time.Millisecond})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -105,7 +105,7 @@ func TestCheckTimeoutSkipDoesNotRun(t *testing.T) {
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "HEAD", nil, commandLog{timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "HEAD", commandLog{timeout: 200 * time.Millisecond})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -135,7 +135,7 @@ func TestCheckTimeoutCleanLeavesWipe(t *testing.T) {
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "", nil, commandLog{timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "", commandLog{timeout: 200 * time.Millisecond})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -165,7 +165,7 @@ func TestCheckTimeoutStillDiffs(t *testing.T) {
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "", nil, commandLog{timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "", commandLog{timeout: 200 * time.Millisecond})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -220,7 +220,7 @@ func TestCheckTimeoutFromConfig(t *testing.T) {
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "", nil, commandLog{})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if time.Since(start) >= 3*time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}

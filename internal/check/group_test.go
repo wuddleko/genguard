@@ -35,7 +35,7 @@ func TestWorkflowGroupWrapsEachRun(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "HEAD", nil, commandLog{w: &buf, env: actions.Env{Actions: true}})
+	result, err := checkConfig(cfg, "HEAD", commandLog{w: &buf, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestWorkflowGroupUsesCallerPath(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	_, err := checkConfig(cfg, "", nil, commandLog{w: &buf, prefix: "services/%0A/genguard.yaml: ", env: actions.Env{Actions: true}})
+	_, err := checkConfig(cfg, "", commandLog{w: &buf, prefix: "services/%0A/genguard.yaml: ", env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestWorkflowGroupTitleIsOneLine(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	_, err := checkConfig(cfg, "", nil, commandLog{w: &buf, env: actions.Env{Actions: true}})
+	_, err := checkConfig(cfg, "", commandLog{w: &buf, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestWorkflowGroupClosesAfterCleanFailure(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, env: actions.Env{Actions: true}})
+	result, err := checkConfig(cfg, "", commandLog{w: &buf, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,14 +143,14 @@ func TestWorkflowGroupStaysQuietWithoutActions(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	if _, err := checkConfig(cfg, "", nil, commandLog{w: &buf}); err != nil {
+	if _, err := checkConfig(cfg, "", commandLog{w: &buf}); err != nil {
 		t.Fatal(err)
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("log = %q", buf.String())
 	}
 
-	result, err := checkConfig(cfg, "", nil, commandLog{env: actions.Env{Actions: true}})
+	result, err := checkConfig(cfg, "", commandLog{env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestWorkflowGroupQuietFailureKeepsTailInside(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true, env: actions.Env{Actions: true}})
+	result, err := checkConfig(cfg, "", commandLog{w: &buf, quiet: true, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestWorkflowGroupQuietErrorStaysInsidePause(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, prefix: "services/api/genguard.yaml: ", quiet: true, env: actions.Env{Actions: true}})
+	result, err := checkConfig(cfg, "", commandLog{w: &buf, prefix: "services/api/genguard.yaml: ", quiet: true, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestWorkflowGroupVerboseFailureStreamsOnce(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, env: actions.Env{Actions: true}})
+	result, err := checkConfig(cfg, "", commandLog{w: &buf, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestWorkflowGroupQuietSuccessIsEmpty(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true, env: actions.Env{Actions: true}})
+	result, err := checkConfig(cfg, "", commandLog{w: &buf, quiet: true, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,7 +296,7 @@ func TestWorkflowGroupQuietNoOutputIsEmpty(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true, env: actions.Env{Actions: true}})
+	result, err := checkConfig(cfg, "", commandLog{w: &buf, quiet: true, env: actions.Env{Actions: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestWorkflowGroupQuietTimeoutKeepsTailInside(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	start := time.Now()
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true, timeout: 200 * time.Millisecond, env: actions.Env{Actions: true}})
+	result, err := checkConfig(cfg, "", commandLog{w: &buf, quiet: true, timeout: 200 * time.Millisecond, env: actions.Env{Actions: true}})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -361,7 +361,7 @@ func TestWorkflowGroupQuietTailStaysWithoutActions(t *testing.T) {
 		}},
 	}
 	var buf bytes.Buffer
-	result, err := checkConfig(cfg, "", nil, commandLog{w: &buf, quiet: true})
+	result, err := checkConfig(cfg, "", commandLog{w: &buf, quiet: true})
 	if err != nil {
 		t.Fatal(err)
 	}

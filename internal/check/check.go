@@ -62,12 +62,12 @@ func sinceConfig(cfg config.Config, since string, log commandLog, mode Mode) (Co
 		if mode == ModeRun {
 			return runConfig(cfg, "", log)
 		}
-		return checkConfig(cfg, "", map[string]pathSnap{}, log)
+		return checkConfig(cfg, "", log)
 	}
 	if mode == ModeRun {
-		return groups(cfg, base, nil, log, ModeRun)
+		return groups(cfg, base, log, ModeRun)
 	}
-	return groups(cfg, base, map[string]pathSnap{}, log, ModeCheck)
+	return groups(cfg, base, log, ModeCheck)
 }
 
 func sinceBase(log commandLog, cfg config.Config, since string) (string, error) {
@@ -80,24 +80,21 @@ func sinceBase(log commandLog, cfg config.Config, since string) (string, error) 
 	return mergeBase(log, cfg.Root(), since)
 }
 
-func checkConfig(cfg config.Config, base string, damage map[string]pathSnap, log commandLog) (ConfigResult, error) {
+func checkConfig(cfg config.Config, base string, log commandLog) (ConfigResult, error) {
 	if err := requireGitRepo(log, cfg.Root()); err != nil {
 		return ConfigResult{}, err
 	}
-	return groups(cfg, base, damage, log, ModeCheck)
+	return groups(cfg, base, log, ModeCheck)
 }
 
 func runConfig(cfg config.Config, base string, log commandLog) (ConfigResult, error) {
 	if err := requireGitRepo(log, cfg.Root()); err != nil {
 		return ConfigResult{}, err
 	}
-	return groups(cfg, base, nil, log, ModeRun)
+	return groups(cfg, base, log, ModeRun)
 }
 
-func groups(cfg config.Config, base string, damage map[string]pathSnap, log commandLog, mode Mode) (ConfigResult, error) {
-	if mode == ModeCheck && damage == nil {
-		damage = map[string]pathSnap{}
-	}
+func groups(cfg config.Config, base string, log commandLog, mode Mode) (ConfigResult, error) {
 	log = log.withToolCache()
 	root := cfg.Root()
 	result := ConfigResult{}
@@ -107,7 +104,7 @@ func groups(cfg config.Config, base string, damage map[string]pathSnap, log comm
 		}
 		var groupResult GroupResult
 		if mode == ModeCheck {
-			groupResult = checkGroup(root, group, cfg.Tools, damage, base, cfg.Path, log)
+			groupResult = checkGroup(root, group, cfg.Tools, base, cfg.Path, log)
 		} else {
 			groupResult = runPreparedGroup(root, group, cfg.Tools, base, cfg.Path, log, nil, nil)
 		}
@@ -119,9 +116,7 @@ func groups(cfg config.Config, base string, damage map[string]pathSnap, log comm
 	return result, nil
 }
 
-func checkGroup(root string, group config.Group, tools []config.Tool, damage map[string]pathSnap, base, configPath string, log commandLog) GroupResult {
-	defer dropRepairedDamage(damage)
-
+func checkGroup(root string, group config.Group, tools []config.Tool, base, configPath string, log commandLog) GroupResult {
 	var wipe map[string]pathSnap
 	result := runPreparedGroup(root, group, tools, base, configPath, log, func() error {
 		wipe = map[string]pathSnap{}
@@ -132,12 +127,7 @@ func checkGroup(root string, group config.Group, tools []config.Tool, damage map
 			result.Err = newGenguardError("%s: %s", result.Err.Error(), driftErr.Error())
 			return result
 		}
-		reported := omitUnchangedDamage(root, found, damage)
-		reported = omitUnchangedDamage(root, reported, wipe)
-		result.Drifts = reported
-		if group.Clean {
-			recordFoundDamage(damage, root, found)
-		}
+		result.Drifts = omitUnchangedDamage(root, found, wipe)
 		return result
 	})
 	if result.Status != GroupOK {
@@ -150,7 +140,6 @@ func checkGroup(root string, group config.Group, tools []config.Tool, damage map
 		result.Err = err
 		return result
 	}
-	found = omitUnchangedDamage(root, found, damage)
 	if len(found) > 0 {
 		result.Status = GroupDrift
 		result.Drifts = found

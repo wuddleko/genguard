@@ -171,6 +171,20 @@ func LoadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	cfg, err := configFromBytes(path, data)
+	if err != nil {
+		return Config{}, err
+	}
+	if err := rejectDuplicateGroupNames(cfg.Groups); err != nil {
+		return Config{}, err
+	}
+	if err := rejectOutputOverlaps(cfg.Path, cfg.Groups); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func configFromBytes(path string, data []byte) (Config, error) {
 	cfg, err := parseConfig(path, data)
 	if err != nil {
 		return Config{}, err
@@ -290,9 +304,6 @@ func parseConfig(path string, data []byte) (Config, error) {
 			Tools:   toolRefs,
 			Timeout: timeout,
 		})
-	}
-	if err := rejectDuplicateGroupNames(groups); err != nil {
-		return Config{}, err
 	}
 
 	return Config{Path: path, Tools: tools, Groups: groups}, nil
