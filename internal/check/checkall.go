@@ -22,7 +22,45 @@ type CheckAllOptions struct {
 	Context  context.Context
 }
 
+type Mode int
+
+const (
+	ModeCheck Mode = iota
+	ModeRun
+)
+
+type Options struct {
+	Mode     Mode
+	RepoRoot string
+	Paths    []string
+	Since    string
+	Isolated bool
+	Log      io.Writer
+	Quiet    bool
+	Context  context.Context
+}
+
+func optionsFrom(opts CheckAllOptions, mode Mode) Options {
+	return Options{
+		Mode:     mode,
+		RepoRoot: opts.RepoRoot,
+		Paths:    opts.Paths,
+		Since:    opts.Since,
+		Isolated: opts.Isolated,
+		Log:      opts.Log,
+		Quiet:    opts.Quiet,
+		Context:  opts.Context,
+	}
+}
+
 func CheckAll(opts CheckAllOptions) (RunResult, error) {
+	return executeAll(optionsFrom(opts, ModeCheck))
+}
+
+func executeAll(opts Options) (RunResult, error) {
+	if opts.Mode == ModeRun && opts.Isolated {
+		return RunResult{}, newGenguardError("genguard run writes the checkout; --isolated is not valid")
+	}
 	repoRoot, paths, base, err := discoverConfigs(opts)
 	if err != nil {
 		return RunResult{}, err
@@ -32,19 +70,10 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 		Configs:  make([]ConfigRun, 0, len(paths)),
 	}
 	cache := &toolCache{}
-	if opts.Isolated {
-		for _, configPath := range paths {
-			if stop, err := canceledStop(opts.Context, run.ExitCode(), func(interrupt error) { noteInterruptedDrift(&run, interrupt) }); stop {
-				return run, err
-			}
-			log := streamFor(repoRoot, configPath, opts.Log, opts.Quiet)
-			log.ctx = opts.Context
-			log.toolCache = cache
-			run.Configs = append(run.Configs, checkOneIsolated(configPath, base, log))
-		}
-		return run, nil
+	var damage map[string]pathSnap
+	if opts.Mode == ModeCheck && !opts.Isolated {
+		damage = map[string]pathSnap{}
 	}
-	damage := map[string]pathSnap{}
 	for _, configPath := range paths {
 		if stop, err := canceledStop(opts.Context, run.ExitCode(), func(interrupt error) { noteInterruptedDrift(&run, interrupt) }); stop {
 			return run, err
@@ -52,9 +81,19 @@ func CheckAll(opts CheckAllOptions) (RunResult, error) {
 		log := streamFor(repoRoot, configPath, opts.Log, opts.Quiet)
 		log.ctx = opts.Context
 		log.toolCache = cache
-		run.Configs = append(run.Configs, checkOne(configPath, base, damage, log))
+		run.Configs = append(run.Configs, configRun(opts, configPath, base, damage, log))
 	}
 	return run, nil
+}
+
+func configRun(opts Options, path, base string, damage map[string]pathSnap, log commandLog) ConfigRun {
+	if opts.Mode == ModeCheck && opts.Isolated {
+		return checkOneIsolated(path, base, log)
+	}
+	if opts.Mode == ModeCheck {
+		return checkOne(path, base, damage, log)
+	}
+	return runOne(path, base, log)
 }
 
 func streamFor(repoRoot, configPath string, log io.Writer, quiet bool) commandLog {
@@ -64,7 +103,7 @@ func streamFor(repoRoot, configPath string, log io.Writer, quiet bool) commandLo
 	return commandLog{w: log, prefix: displayConfigPath(repoRoot, configPath) + ": ", quiet: quiet}
 }
 
-func discoverConfigs(opts CheckAllOptions) (repoRoot string, paths []string, base string, err error) {
+func discoverConfigs(opts Options) (repoRoot string, paths []string, base string, err error) {
 	repoRoot, err = gitRepoRoot(opts.RepoRoot)
 	if err != nil {
 		return "", nil, "", err
@@ -151,6 +190,12 @@ func committedConfig(rel string) bool {
 func checkOne(path, base string, damage map[string]pathSnap, log commandLog) ConfigRun {
 	return loadConfigRun(path, func(cfg config.Config) (ConfigResult, error) {
 		return checkConfig(cfg, base, damage, log)
+	})
+}
+
+func runOne(path, base string, log commandLog) ConfigRun {
+	return loadConfigRun(path, func(cfg config.Config) (ConfigResult, error) {
+		return runConfig(cfg, base, log)
 	})
 }
 

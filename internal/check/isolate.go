@@ -14,11 +14,15 @@ import (
 )
 
 func CheckSinceIsolated(path, since string) (ConfigResult, error) {
-	return checkSinceIsolated(path, since, commandLog{})
+	return executeIsolated(path, Options{Mode: ModeCheck, Since: since})
 }
 
 func CheckSinceIsolatedLog(ctx context.Context, path, since string, log io.Writer, quiet bool) (ConfigResult, error) {
-	return checkSinceIsolated(path, since, commandLog{w: log, quiet: quiet, ctx: ctx})
+	return executeIsolated(path, Options{Mode: ModeCheck, Since: since, Log: log, Quiet: quiet, Context: ctx})
+}
+
+func executeIsolated(path string, opts Options) (ConfigResult, error) {
+	return checkSinceIsolated(path, opts.Since, commandLog{w: opts.Log, quiet: opts.Quiet, ctx: opts.Context})
 }
 
 func checkSinceIsolated(path, since string, log commandLog) (ConfigResult, error) {

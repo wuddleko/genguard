@@ -32,26 +32,41 @@ func isInterrupt(err error) bool {
 }
 
 func CheckConfig(cfg config.Config) (ConfigResult, error) {
-	return checkConfig(cfg, "", map[string]pathSnap{}, commandLog{})
+	return executeConfig(cfg, Options{Mode: ModeCheck})
 }
 
 func CheckSince(cfg config.Config, since string) (ConfigResult, error) {
-	return checkSince(cfg, since, commandLog{})
+	return executeConfig(cfg, Options{Mode: ModeCheck, Since: since})
 }
 
 func CheckSinceLog(ctx context.Context, cfg config.Config, since string, log io.Writer, quiet bool) (ConfigResult, error) {
-	return checkSince(cfg, since, commandLog{w: log, quiet: quiet, ctx: ctx})
+	return executeConfig(cfg, Options{Mode: ModeCheck, Since: since, Log: log, Quiet: quiet, Context: ctx})
+}
+
+func executeConfig(cfg config.Config, opts Options) (ConfigResult, error) {
+	log := commandLog{w: opts.Log, quiet: opts.Quiet, ctx: opts.Context}
+	return sinceConfig(cfg, opts.Since, log, opts.Mode)
 }
 
 func checkSince(cfg config.Config, since string, log commandLog) (ConfigResult, error) {
+	return sinceConfig(cfg, since, log, ModeCheck)
+}
+
+func sinceConfig(cfg config.Config, since string, log commandLog, mode Mode) (ConfigResult, error) {
 	base, err := sinceBase(log, cfg, since)
 	if err != nil {
 		return ConfigResult{}, err
 	}
 	if base == "" {
+		if mode == ModeRun {
+			return runConfig(cfg, "", log)
+		}
 		return checkConfig(cfg, "", map[string]pathSnap{}, log)
 	}
-	return checkGroups(cfg, base, map[string]pathSnap{}, log)
+	if mode == ModeRun {
+		return groups(cfg, base, nil, log, ModeRun)
+	}
+	return groups(cfg, base, map[string]pathSnap{}, log, ModeCheck)
 }
 
 func sinceBase(log commandLog, cfg config.Config, since string) (string, error) {
@@ -68,11 +83,18 @@ func checkConfig(cfg config.Config, base string, damage map[string]pathSnap, log
 	if err := requireGitRepo(log, cfg.Root()); err != nil {
 		return ConfigResult{}, err
 	}
-	return checkGroups(cfg, base, damage, log)
+	return groups(cfg, base, damage, log, ModeCheck)
 }
 
-func checkGroups(cfg config.Config, base string, damage map[string]pathSnap, log commandLog) (ConfigResult, error) {
-	if damage == nil {
+func runConfig(cfg config.Config, base string, log commandLog) (ConfigResult, error) {
+	if err := requireGitRepo(log, cfg.Root()); err != nil {
+		return ConfigResult{}, err
+	}
+	return groups(cfg, base, nil, log, ModeRun)
+}
+
+func groups(cfg config.Config, base string, damage map[string]pathSnap, log commandLog, mode Mode) (ConfigResult, error) {
+	if mode == ModeCheck && damage == nil {
 		damage = map[string]pathSnap{}
 	}
 	log = log.withToolCache()
@@ -82,7 +104,13 @@ func checkGroups(cfg config.Config, base string, damage map[string]pathSnap, log
 		if stop, err := canceledStop(log.ctx, result.ExitCode(), result.noteCleanup); stop {
 			return result, err
 		}
-		result.Groups = append(result.Groups, checkGroup(root, group, cfg.Tools, damage, base, cfg.Path, log))
+		var groupResult GroupResult
+		if mode == ModeCheck {
+			groupResult = checkGroup(root, group, cfg.Tools, damage, base, cfg.Path, log)
+		} else {
+			groupResult = runPreparedGroup(root, group, cfg.Tools, base, cfg.Path, log, nil, nil)
+		}
+		result.Groups = append(result.Groups, groupResult)
 	}
 	if stop, err := canceledStop(log.ctx, result.ExitCode(), result.noteCleanup); stop {
 		return result, err
