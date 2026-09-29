@@ -318,6 +318,16 @@ func TestLoadConfigRejectsOverlappingOutputs(t *testing.T) {
 			"groups:\n  - name: protobuf\n    command: \"true\"\n    outputs:\n      - pkg/gen/\n  - name: templ\n    command: \"true\"\n    outputs:\n      - \"*_templ.go\"\n",
 			`group "protobuf" "pkg/gen/" and group "templ" "*_templ.go"`,
 		},
+		{
+			"glob reaches a subdirectory",
+			"groups:\n  - name: sub\n    command: \"true\"\n    outputs:\n      - gen/sub/\n  - name: txt\n    command: \"true\"\n    outputs:\n      - gen/*.txt\n",
+			`group "sub" "gen/sub/" and group "txt" "gen/*.txt"`,
+		},
+		{
+			"glob reaches a nested file",
+			"groups:\n  - name: glob\n    command: \"true\"\n    outputs:\n      - gen/*.go\n  - name: file\n    command: \"true\"\n    outputs:\n      - gen/sub/deep.go\n",
+			`group "glob" "gen/*.go" and group "file" "gen/sub/deep.go"`,
+		},
 	}
 	for _, tc := range cases {
 		tc := tc

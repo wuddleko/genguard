@@ -79,27 +79,57 @@ func FindAll(ctx context.Context, repoRoot string, isolated bool) ([]string, err
 	return found, nil
 }
 
-// Committed reads the HEAD copy of a config for config.RejectOutputOverlaps.
-// A config outside repoRoot or absent from HEAD is skipped.
-func Committed(ctx context.Context, repoRoot string) func(string) ([]byte, error) {
-	return func(configPath string) ([]byte, error) {
-		rel, ok := pathx.RelInsideResolved(repoRoot, configPath)
-		if !ok || rel == "." {
-			return nil, config.ErrSkipConfig
-		}
-		out, _, code, err := gitx.Run(ctx, repoRoot, "--no-pager", "show", "--no-textconv", "HEAD:"+filepath.ToSlash(rel))
-		if err != nil {
-			return nil, err
-		}
-		if code != 0 {
-			detail := gitx.Detail(out, "git show failed")
-			if strings.Contains(detail, "does not exist in") || strings.Contains(detail, "exists on disk, but not in") {
+// Committed is the HEAD tree for config.RejectOutputOverlaps: configs and
+// directories as committed. A config outside repoRoot or absent from HEAD is
+// skipped.
+func Committed(ctx context.Context, repoRoot string) config.Tree {
+	var dirs map[string]bool
+	return config.Tree{
+		ReadFile: func(configPath string) ([]byte, error) {
+			rel, ok := pathx.RelInsideResolved(repoRoot, configPath)
+			if !ok || rel == "." {
 				return nil, config.ErrSkipConfig
 			}
-			return nil, errors.New(detail)
-		}
-		return []byte(out), nil
+			out, _, code, err := gitx.Run(ctx, repoRoot, "--no-pager", "show", "--no-textconv", "HEAD:"+filepath.ToSlash(rel))
+			if err != nil {
+				return nil, err
+			}
+			if code != 0 {
+				detail := gitx.Detail(out, "git show failed")
+				if strings.Contains(detail, "does not exist in") || strings.Contains(detail, "exists on disk, but not in") {
+					return nil, config.ErrSkipConfig
+				}
+				return nil, errors.New(detail)
+			}
+			return []byte(out), nil
+		},
+		IsDir: func(path string) bool {
+			rel, ok := pathx.RelInsideResolved(repoRoot, path)
+			if !ok {
+				return false
+			}
+			if rel == "." {
+				return true
+			}
+			if dirs == nil {
+				dirs = committedDirs(ctx, repoRoot)
+			}
+			return dirs[filepath.ToSlash(rel)]
+		},
 	}
+}
+
+// committedDirs lists the trees in HEAD. A symlink or a submodule is not one.
+func committedDirs(ctx context.Context, repoRoot string) map[string]bool {
+	dirs := map[string]bool{}
+	out, _, code, err := gitx.Run(ctx, repoRoot, "ls-tree", "-r", "-d", "-z", "--name-only", "HEAD")
+	if err != nil || code != 0 {
+		return dirs
+	}
+	for _, name := range gitx.ParseNameList(out) {
+		dirs[name] = true
+	}
+	return dirs
 }
 
 func listingFailure(stderr string) error {

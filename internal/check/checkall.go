@@ -78,11 +78,11 @@ func discoverConfigs(log commandLog, opts Options) (repoRoot string, paths []str
 	if err != nil {
 		return "", nil, "", err
 	}
-	var read func(string) ([]byte, error)
+	var tree config.Tree
 	if opts.Isolated {
-		read = discover.Committed(opts.Context, repoRoot)
+		tree = discover.Committed(opts.Context, repoRoot)
 	}
-	if err := config.RejectOutputOverlaps(paths, read); err != nil {
+	if err := config.RejectOutputOverlaps(paths, tree); err != nil {
 		return "", nil, "", err
 	}
 	base, err = sinceBase(log, repoRoot, opts.Since)

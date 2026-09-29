@@ -765,7 +765,7 @@ func TestRunCleanRefusalSkipsCommand(t *testing.T) {
 
 func TestRunCleanRefusalLeavesLaterGroup(t *testing.T) {
 	groups := []testutil.GroupSpec{
-		{Name: "sqlc", Command: `python3 -c "open('ran','w').close()"`, Outputs: []string{"generated/hello.txt", ".."}, Clean: true},
+		{Name: "sqlc", Command: `python3 -c "open('ran','w').close()"`, Outputs: []string{"generated/hello.txt", "../outside.txt"}, Clean: true},
 		{Name: "wrappers", Command: "test -f generated/hello.txt", Outputs: []string{"other/store.go"}},
 	}
 	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
@@ -787,7 +787,7 @@ func TestRunCleanRefusalLeavesLaterGroup(t *testing.T) {
 
 	result := mustRunConfig(t, root)
 	assertGroupStatus(t, result, "sqlc", check.GroupError)
-	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), `clean refuses ".."`) {
+	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), `clean refuses "../outside.txt"`) {
 		t.Fatalf("sqlc err = %v", result.Groups[0].Err)
 	}
 	if markerExists(root, "ran") {

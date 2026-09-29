@@ -14,22 +14,33 @@ type outputUse struct {
 	pat    pattern
 }
 
-// ErrSkipConfig from a read function leaves that config out of the overlap
+// ErrSkipConfig from Tree.ReadFile leaves that config out of the overlap
 // check. The caller reports its load itself.
 var ErrSkipConfig = errors.New("config not available")
 
+// Tree is where RejectOutputOverlaps reads each config and asks whether an
+// output path is a directory. The zero Tree is the working tree.
+type Tree struct {
+	ReadFile func(path string) ([]byte, error)
+	IsDir    func(path string) bool
+}
+
 func rejectOutputOverlaps(configPath string, groups []Group) error {
-	return rejectUses(outputUses(configPath, groups), false)
+	return rejectUses(outputUses(configPath, groups, worktreeIsDir), false)
 }
 
 // RejectOutputOverlaps reports the first pair of output specs, across the
-// configs at paths, that can name the same path. read returns a config's
-// bytes; nil reads the working tree. A file that does not parse is left for
-// the caller. A file that parses is included even when its own outputs
-// overlap or its group names are duplicated.
-func RejectOutputOverlaps(paths []string, read func(path string) ([]byte, error)) error {
+// configs at paths, that can name the same path. A file that does not parse
+// is left for the caller. A file that parses is included even when its own
+// outputs overlap or its group names are duplicated.
+func RejectOutputOverlaps(paths []string, tree Tree) error {
+	read := tree.ReadFile
 	if read == nil {
 		read = readWorktreeConfig
+	}
+	isDir := tree.IsDir
+	if isDir == nil {
+		isDir = worktreeIsDir
 	}
 	var uses []outputUse
 	for _, path := range paths {
@@ -44,7 +55,7 @@ func RejectOutputOverlaps(paths []string, read func(path string) ([]byte, error)
 		if err != nil {
 			continue
 		}
-		uses = append(uses, outputUses(cfg.Path, cfg.Groups)...)
+		uses = append(uses, outputUses(cfg.Path, cfg.Groups, isDir)...)
 	}
 	return rejectUses(uses, true)
 }
@@ -57,7 +68,14 @@ func readWorktreeConfig(path string) ([]byte, error) {
 	return data, nil
 }
 
-func outputUses(configPath string, groups []Group) []outputUse {
+// worktreeIsDir does not follow a symlink: git does not read a pathspec
+// through one, and clean refuses it.
+func worktreeIsDir(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.IsDir()
+}
+
+func outputUses(configPath string, groups []Group, isDir func(string) bool) []outputUse {
 	dir := filepath.Dir(configPath)
 	uses := make([]outputUse, 0)
 	for _, group := range groups {
@@ -66,7 +84,7 @@ func outputUses(configPath string, groups []Group) []outputUse {
 				config: configPath,
 				group:  group.Name,
 				spec:   spec,
-				pat:    compileOutput(dir, spec),
+				pat:    compileOutput(dir, spec, isDir),
 			})
 		}
 	}

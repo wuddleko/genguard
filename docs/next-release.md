@@ -42,7 +42,15 @@ A missing key stays the default. A present null and a present empty value take t
 
 ## Overlapping outputs
 
-Two output specs that can name the same path are a load error. A trailing slash is the whole directory. A literal overlaps a glob only when that literal matches the glob, and two globs overlap only when one path could match both. Within one file the error names both groups and both specs. `check --all`, `run --all`, and `check --all --isolated` use the same check across configs and name both config paths. Isolated reads the committed files, including a config removed from the checkout. A file that does not parse is reported for that config. Outputs from a file that parses still count, so another config that names one of those paths does not run. The commands do not run, so neither path is reported as drift.
+Two output specs that can name the same path are a load error. A glob follows git: `*`, `?`, and `[...]` also match `/`, so `gen/*.go` overlaps `gen/sub/`. A trailing slash is the whole directory, and so is a listed directory without one. A literal overlaps a glob only when that literal matches the glob, and two globs overlap only when one path could match both. Within one file the error names both groups and both specs. `check --all`, `run --all`, and `check --all --isolated` use the same check across configs and name both config paths. Isolated reads the committed files and directories, including a config removed from the checkout. A file that does not parse is reported for that config. Outputs from a file that parses still count, so another config that names one of those paths does not run. The commands do not run, so neither path is reported as drift.
+
+## Arguments
+
+`check` and `run` take flags only. A positional argument exits 2 with `unexpected argument`. Before, it was ignored, and so was every flag after it: `genguard check svc/genguard.yaml --json` checked the config found from the working directory and printed text. Pass a config with `--config`.
+
+## JSON errors
+
+With `--json`, a run that stops before any config runs still prints a document on stdout: `{"exit": 2, "error": "...", "configs": []}`. That covers a config that does not load, no config found, a bad `--since` ref, and a bad flag combination. The `error:` line stays on stderr. A flag the parser does not know prints usage only.
 
 ## Interrupts
 

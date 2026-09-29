@@ -74,22 +74,27 @@ var commandUsages = map[check.Mode]commandUsage{
 
 func runCommand(ctx context.Context, mode check.Mode, args []string, stdout, stderr io.Writer, env actions.Env) int {
 	usage := commandUsages[mode]
-	flags, code, ok := parseCommandFlags(args, stderr, usage, env)
+	flags, code, ok := parseCommandFlags(args, stderr, usage)
 	if !ok {
 		return code
 	}
-	if mode == check.ModeRun && flags.isolated {
-		return errorExit(stderr, "", "genguard run writes the checkout; --isolated is not valid", env)
+	fail := func(file string, err error) int {
+		if flags.asJSON {
+			writeErrorJSON(stdout, err)
+		}
+		return errorExit(stderr, file, err.Error(), env)
 	}
-	path, repoRoot, useAll, code, ok := resolveConfigPath(stderr, flags, env)
-	if !ok {
-		return code
+	if err := flags.check(mode); err != nil {
+		return fail("", err)
+	}
+	path, repoRoot, useAll, err := resolveConfigPath(flags)
+	if err != nil {
+		return fail("", err)
 	}
 	log, quiet := commandWriter(stderr, flags.verbose, env)
 	opts := check.Options{Mode: mode, Context: ctx, Since: flags.since, Isolated: flags.isolated, Log: log, Quiet: quiet, Env: env, RepoRoot: repoRoot}
 
 	var run check.RunResult
-	var err error
 	if useAll {
 		run, err = check.ExecuteAll(opts)
 		if err == nil && len(run.Configs) == 0 {
@@ -99,7 +104,7 @@ func runCommand(ctx context.Context, mode check.Mode, args []string, stdout, std
 		run, err = check.Execute(opts, path)
 	}
 	if err != nil {
-		return errorExit(stderr, path, err.Error(), env)
+		return fail(path, err)
 	}
 	code = render(stdout, stderr, run, usage.success, flags.asJSON, env)
 	maybeAnnotate(stderr, run, env)
@@ -113,6 +118,23 @@ type commandFlags struct {
 	isolated bool
 	asJSON   bool
 	verbose  bool
+	// both -c and --config were given, with different paths
+	configConflict bool
+	extra          []string
+}
+
+func (f commandFlags) check(mode check.Mode) error {
+	switch {
+	case len(f.extra) > 0:
+		return fmt.Errorf("unexpected argument %q; pass a config with --config", f.extra[0])
+	case f.configConflict:
+		return errors.New("cannot use -c and --config with different paths")
+	case f.all && f.selected != "":
+		return errors.New("--all and --config are mutually exclusive")
+	case mode == check.ModeRun && f.isolated:
+		return errors.New("genguard run writes the checkout; --isolated is not valid")
+	}
+	return nil
 }
 
 type commandUsage struct {
@@ -122,7 +144,9 @@ type commandUsage struct {
 	success  string
 }
 
-func parseCommandFlags(args []string, stderr io.Writer, usage commandUsage, env actions.Env) (commandFlags, int, bool) {
+// parseCommandFlags reports ok false after the flag package printed its error
+// or the help text.
+func parseCommandFlags(args []string, stderr io.Writer, usage commandUsage) (commandFlags, int, bool) {
 	fs := flag.NewFlagSet(usage.name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	all := fs.Bool("all", false, usage.all)
@@ -138,20 +162,19 @@ func parseCommandFlags(args []string, stderr io.Writer, usage commandUsage, env 
 		}
 		return commandFlags{}, 2, false
 	}
-	if *configPath != "" && *configShort != "" && *configPath != *configShort {
-		return commandFlags{}, errorExit(stderr, "", "cannot use -c and --config with different paths", env), false
-	}
 	selected := *configPath
 	if selected == "" {
 		selected = *configShort
 	}
 	return commandFlags{
-		all:      *all,
-		selected: selected,
-		since:    *since,
-		isolated: *isolated,
-		asJSON:   *asJSON,
-		verbose:  *verbose,
+		all:            *all,
+		selected:       selected,
+		since:          *since,
+		isolated:       *isolated,
+		asJSON:         *asJSON,
+		verbose:        *verbose,
+		configConflict: *configPath != "" && *configShort != "" && *configPath != *configShort,
+		extra:          fs.Args(),
 	}, 0, true
 }
 
@@ -164,28 +187,25 @@ func commandWriter(stderr io.Writer, verbose bool, env actions.Env) (io.Writer, 
 
 // resolveConfigPath returns the repository root too when it found the config
 // by walking up from the working directory.
-func resolveConfigPath(stderr io.Writer, flags commandFlags, env actions.Env) (path, repoRoot string, useAll bool, code int, ok bool) {
-	if flags.all && flags.selected != "" {
-		return "", "", false, errorExit(stderr, "", "--all and --config are mutually exclusive", env), false
-	}
+func resolveConfigPath(flags commandFlags) (path, repoRoot string, useAll bool, err error) {
 	if flags.all {
-		return "", "", true, 0, true
+		return "", "", true, nil
 	}
 	if flags.selected != "" {
-		return flags.selected, "", false, 0, true
+		return flags.selected, "", false, nil
 	}
 	root, err := check.RepoRoot("")
 	if err != nil {
-		return "", "", false, errorExit(stderr, "", err.Error(), env), false
+		return "", "", false, err
 	}
 	found, err := config.FindConfig("", root)
 	if err != nil {
-		return "", "", false, errorExit(stderr, "", err.Error(), env), false
+		return "", "", false, err
 	}
 	if found == "" {
-		return "", "", false, errorExit(stderr, "", "no genguard.yaml or genguard.yml found (pass --config)", env), false
+		return "", "", false, errors.New("no genguard.yaml or genguard.yml found (pass --config)")
 	}
-	return found, root, false, 0, true
+	return found, root, false, nil
 }
 
 func render(stdout, stderr io.Writer, run check.RunResult, success string, asJSON bool, env actions.Env) int {
@@ -280,6 +300,12 @@ func writeJSON(stdout, stderr io.Writer, run check.RunResult, env actions.Env) i
 	}
 	fmt.Fprint(stdout, text)
 	return run.ExitCode()
+}
+
+func writeErrorJSON(stdout io.Writer, err error) {
+	if text, jsonErr := check.FormatErrorJSON(err); jsonErr == nil {
+		fmt.Fprint(stdout, text)
+	}
 }
 
 func printUsage(w io.Writer) {

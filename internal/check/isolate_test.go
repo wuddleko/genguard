@@ -176,6 +176,43 @@ func TestWithIsolatedWorktreeAddFailure(t *testing.T) {
 	})
 }
 
+func TestIsolatedAllOverlapReadsDirectoriesFromHead(t *testing.T) {
+	setup := func(t *testing.T, headDir bool) string {
+		root := gitRepo(t)
+		if headDir {
+			writeTracked(t, root, "api/gen/y.txt", "y\n")
+		} else {
+			writeTracked(t, root, "api/gen", "f\n")
+		}
+		writeTracked(t, root, "genguard.yaml", "groups:\n  - name: a\n    command: \"true\"\n    outputs: [api/gen]\n")
+		writeTracked(t, root, "api/genguard.yaml", "groups:\n  - name: b\n    command: \"true\"\n    outputs: [gen/x.go]\n")
+		return root
+	}
+	t.Run("directory removed from the checkout", func(t *testing.T) {
+		root := setup(t, true)
+		if err := os.RemoveAll(filepath.Join(root, "api", "gen")); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ExecuteAll(Options{RepoRoot: root, Isolated: true})
+		if err == nil || !strings.Contains(err.Error(), "outputs overlap") {
+			t.Fatalf("err = %v, want the overlap HEAD has", err)
+		}
+	})
+	t.Run("directory only in the checkout", func(t *testing.T) {
+		root := setup(t, false)
+		gen := filepath.Join(root, "api", "gen")
+		if err := os.Remove(gen); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(gen, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ExecuteAll(Options{RepoRoot: root, Isolated: true}); err != nil {
+			t.Fatalf("err = %v, want HEAD's file to overlap nothing", err)
+		}
+	})
+}
+
 func TestMapPathRefusesOutsideRepo(t *testing.T) {
 	root := gitRepo(t)
 	writeTracked(t, root, "tracked.txt", "ok\n")

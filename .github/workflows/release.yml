@@ -16,9 +16,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      # go.mod names the oldest Go that builds genguard. Release binaries use
+      # the newest, which still gets security fixes.
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: stable
           cache: true
 
       - uses: goreleaser/goreleaser-action@v6

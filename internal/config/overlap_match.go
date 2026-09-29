@@ -5,42 +5,38 @@ import (
 	"strings"
 )
 
-// A pattern is the set of paths one output spec can name, relative to the
-// config directory and then cleaned against that directory. A trailing slash
-// is the whole directory. A glob with no slash matches that name in any
-// directory under the config. Two patterns overlap when one path could match
-// both.
-type pattern struct {
-	parts []segment
-	dir   bool
-}
+// A pattern is the set of absolute paths one output spec names, the way git
+// reads a pathspec. A glob is one pattern over the whole path, and *, ? and
+// [...] also match "/". A literal names itself, and a directory also names
+// everything under it. Two patterns overlap when one path could match both.
+type pattern [][]atom
 
-type segment struct {
-	any  bool
-	glob string
-}
-
-func compileOutput(configDir, spec string) pattern {
+// A literal without a trailing slash is a directory when isDir says so.
+func compileOutput(configDir, spec string, isDir func(string) bool) pattern {
 	parsed := ParseSpec(spec)
 	rel := strings.TrimRight(filepath.ToSlash(spec), "/")
 	if rel == "" {
 		rel = "."
 	}
-	if parsed.Dir {
-		if parsed.Glob {
-			rel = globDir(parsed)
+	base := filepath.ToSlash(filepath.Clean(configDir))
+	if parsed.Glob && !parsed.Dir {
+		full := filepath.ToSlash(filepath.Clean(filepath.Join(configDir, filepath.FromSlash(rel))))
+		// The config directory stays literal even when its name holds glob characters.
+		literal := ""
+		if strings.HasPrefix(full, base+"/") {
+			literal = base + "/"
 		}
-		cleaned := filepath.ToSlash(filepath.Clean(filepath.Join(configDir, filepath.FromSlash(rel))))
-		return pattern{parts: splitPath(cleaned), dir: true}
+		return pattern{append(literalAtoms(literal), parseGlob(strings.TrimPrefix(full, literal))...)}
 	}
-	if parsed.Glob && !strings.Contains(rel, "/") && rel != "**" {
-		root := filepath.ToSlash(filepath.Clean(configDir))
-		parts := splitPath(root)
-		parts = append(parts, segment{any: true}, segment{glob: rel})
-		return pattern{parts: parts}
+	if parsed.Glob {
+		rel = globDir(parsed)
 	}
-	cleaned := filepath.ToSlash(filepath.Clean(filepath.Join(configDir, filepath.FromSlash(rel))))
-	return pattern{parts: expandTrailingAny(splitPath(cleaned))}
+	full := filepath.ToSlash(filepath.Clean(filepath.Join(configDir, filepath.FromSlash(rel))))
+	if !parsed.Dir && !isDir(filepath.FromSlash(full)) {
+		return pattern{literalAtoms(full)}
+	}
+	under := append(literalAtoms(strings.TrimSuffix(full, "/")+"/"), atom{kind: atomStar})
+	return pattern{literalAtoms(full), under}
 }
 
 func globDir(spec Spec) string {
@@ -51,106 +47,23 @@ func globDir(spec Spec) string {
 	return strings.Join(dir, "/")
 }
 
-func splitPath(cleaned string) []segment {
-	raw := strings.Split(cleaned, "/")
-	parts := make([]segment, 0, len(raw))
-	for _, part := range raw {
-		if part == "**" {
-			parts = append(parts, segment{any: true})
-			continue
-		}
-		parts = append(parts, segment{glob: part})
+func literalAtoms(s string) []atom {
+	out := make([]atom, 0, len(s))
+	for _, r := range s {
+		out = append(out, atom{kind: atomLit, lit: r})
 	}
-	return parts
-}
-
-// A trailing ** matches files inside, so it needs one segment and may continue.
-func expandTrailingAny(parts []segment) []segment {
-	if len(parts) == 0 || !parts[len(parts)-1].any {
-		return parts
-	}
-	out := append([]segment(nil), parts[:len(parts)-1]...)
-	out = append(out, segment{glob: "*"}, segment{any: true})
 	return out
 }
 
 func patternsOverlap(a, b pattern) bool {
-	type key struct{ i, j int }
-	memo := make(map[key]bool)
-	visiting := make(map[key]bool)
-	var walk func(i, j int) bool
-	walk = func(i, j int) bool {
-		k := key{i, j}
-		if v, ok := memo[k]; ok {
-			return v
+	for _, x := range a {
+		for _, y := range b {
+			if atomsOverlap(x, y) {
+				return true
+			}
 		}
-		if visiting[k] {
-			return false
-		}
-		visiting[k] = true
-		ok := overlapAt(a, b, i, j, walk)
-		visiting[k] = false
-		memo[k] = ok
-		return ok
-	}
-	return walk(0, 0)
-}
-
-func overlapAt(a, b pattern, i, j int, walk func(int, int) bool) bool {
-	aDone := i >= len(a.parts)
-	bDone := j >= len(b.parts)
-	if aDone && bDone {
-		return true
-	}
-	if !aDone && a.parts[i].any && bDone {
-		return walk(i+1, j)
-	}
-	if !bDone && b.parts[j].any && aDone {
-		return walk(i, j+1)
-	}
-	if aDone && a.dir {
-		return bDone || satisfiable(b.parts[j:])
-	}
-	if bDone && b.dir {
-		return satisfiable(a.parts[i:])
-	}
-	if aDone || bDone {
-		return false
-	}
-	if a.parts[i].any {
-		if walk(i+1, j) {
-			return true
-		}
-		if !b.parts[j].any && satisfiable(b.parts[j:j+1]) {
-			return walk(i, j+1)
-		}
-		return false
-	}
-	if b.parts[j].any {
-		if walk(i, j+1) {
-			return true
-		}
-		if satisfiable(a.parts[i : i+1]) {
-			return walk(i+1, j)
-		}
-		return false
-	}
-	if globsOverlap(a.parts[i].glob, b.parts[j].glob) {
-		return walk(i+1, j+1)
 	}
 	return false
-}
-
-func satisfiable(parts []segment) bool {
-	for _, part := range parts {
-		if part.any {
-			continue
-		}
-		if !globsOverlap(part.glob, "*") {
-			return false
-		}
-	}
-	return len(parts) > 0
 }
 
 type atomKind int

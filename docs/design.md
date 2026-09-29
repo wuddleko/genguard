@@ -67,7 +67,7 @@ After `clean`, paths that still match the post-wipe snapshot are omitted from th
 
 ### Overlap
 
-Two output specs that can name the same path fail at load. A trailing slash is the whole directory. A literal overlaps a glob only when that literal matches the glob, and two globs overlap only when one path could match both. `--all` uses the same check across config files. The commands do not run.
+Two output specs that can name the same path fail at load. Specs are read the way git reads a pathspec: a glob is one pattern over the whole path, and `*`, `?`, and `[...]` also match `/`, so `gen/*.go` covers `gen/sub/x.go`. A trailing slash is the whole directory, and so is a literal that is a directory, not a symlink, on disk. `--all --isolated` asks HEAD instead (`git ls-tree -d`), since that is the tree it checks. A literal overlaps a glob only when that literal matches the glob, and two globs overlap only when one path could match both. `--all` uses the same check across config files. The commands do not run.
 
 ## `--since`
 
@@ -134,7 +134,7 @@ Unknown YAML keys are errors. A present null is not “use the default”: `time
 
 Human failure output: command tails, a **Summary** (one line per group, then counts), **Drift** lines plus `git diff HEAD` (or `--no-index` against `/dev/null` for untracked files), a final `error:` line.
 
-`--json` prints `exit`, `configs`, `groups`, `drifts`, `tools` on stdout and keeps tails on stderr.
+`--json` prints `exit`, `configs`, `groups`, `drifts`, `tools` on stdout and keeps tails on stderr. When nothing ran, the document is `exit` 2, `error`, and an empty `configs`.
 
 A skipped group contributes nothing to the exit code. The run exit is the max of group exits; a 2 anywhere wins over a 1.
 

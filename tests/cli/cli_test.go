@@ -1516,7 +1516,7 @@ func TestCLICheckAllJSON(t *testing.T) {
 	}
 }
 
-func TestCLICheckJSONSetupErrorLeavesStdoutEmpty(t *testing.T) {
+func TestCLICheckJSONSetupErrorPrintsErrorDocument(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "genguard.yaml")
 	if err := os.WriteFile(configPath, []byte("groups: []\n"), 0o644); err != nil {
@@ -1526,11 +1526,63 @@ func TestCLICheckJSONSetupErrorLeavesStdoutEmpty(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("code = %d, want 2; stderr = %q", code, stderr)
 	}
-	if stdout != "" {
-		t.Fatalf("stdout = %q", stdout)
+	var doc struct {
+		Exit    int               `json:"exit"`
+		Error   string            `json:"error"`
+		Configs []json.RawMessage `json:"configs"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if doc.Exit != 2 || !strings.Contains(doc.Error, "non-empty 'groups' list") || doc.Configs == nil || len(doc.Configs) != 0 {
+		t.Fatalf("doc = %+v", doc)
 	}
 	if !strings.Contains(stderr, "error:") {
 		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestCLIJSONErrorBeforeAnyConfig(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	if err := testutil.InitGitRepo(root); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Chdir(t, root)
+	for _, args := range [][]string{
+		{"check", "--json"},
+		{"check", "--all", "--json"},
+		{"check", "--json", "extra"},
+	} {
+		stdout, _, code := runCLI(args)
+		if code != 2 {
+			t.Fatalf("%q: code = %d, want 2", args, code)
+		}
+		var doc struct {
+			Exit  int    `json:"exit"`
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &doc); err != nil || doc.Exit != 2 || doc.Error == "" {
+			t.Fatalf("%q: stdout = %q, err = %v", args, stdout, err)
+		}
+	}
+}
+
+func TestCLIRejectsPositionalArguments(t *testing.T) {
+	for _, args := range [][]string{
+		{"check", "genguard.yaml"},
+		{"check", "svc/genguard.yaml", "--json"},
+		{"run", "--since", "HEAD", "extra"},
+	} {
+		stdout, stderr, code := runCLI(args)
+		if code != 2 {
+			t.Fatalf("%q: code = %d, want 2; stderr = %q", args, code, stderr)
+		}
+		if !strings.Contains(stderr, "error: unexpected argument") {
+			t.Fatalf("%q: stderr = %q", args, stderr)
+		}
+		if strings.Contains(stdout, "Generated files") {
+			t.Fatalf("%q: ran anyway: %q", args, stdout)
+		}
 	}
 }
 

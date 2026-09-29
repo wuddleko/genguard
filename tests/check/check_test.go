@@ -1182,7 +1182,7 @@ func TestCheckCleanRefusesUnsafeOutputs(t *testing.T) {
 
 func TestCheckCleanRefusalLeavesLaterGroup(t *testing.T) {
 	groups := []testutil.GroupSpec{
-		{Name: "sqlc", Command: "python3 scripts/gen.py", Outputs: []string{"generated/hello.txt", ".."}, Clean: true},
+		{Name: "sqlc", Command: "python3 scripts/gen.py", Outputs: []string{"generated/hello.txt", "../outside.txt"}, Clean: true},
 		{Name: "wrappers", Command: "test -f generated/hello.txt", Outputs: []string{"other/store.go"}},
 	}
 	root, err := testutil.MakeRepo(t.TempDir(), "", "", groups)
@@ -1206,7 +1206,7 @@ func TestCheckCleanRefusalLeavesLaterGroup(t *testing.T) {
 	if result.Groups[0].Status != check.GroupError {
 		t.Fatalf("sqlc status = %q, err = %v", result.Groups[0].Status, result.Groups[0].Err)
 	}
-	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), `clean refuses ".."`) {
+	if result.Groups[0].Err == nil || !strings.Contains(result.Groups[0].Err.Error(), `clean refuses "../outside.txt"`) {
 		t.Fatalf("sqlc err = %v", result.Groups[0].Err)
 	}
 	got, err := os.ReadFile(filepath.Join(root, "generated", "hello.txt"))

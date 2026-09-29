@@ -6,7 +6,9 @@ import (
 )
 
 type jsonRun struct {
-	Exit    int          `json:"exit"`
+	Exit int `json:"exit"`
+	// Error is set when the run stopped before any config ran.
+	Error   string       `json:"error,omitempty"`
 	Configs []jsonConfig `json:"configs"`
 }
 
@@ -44,6 +46,16 @@ func FormatJSON(run RunResult) (string, error) {
 	for _, cfg := range run.Configs {
 		doc.Configs = append(doc.Configs, jsonConfigFrom(run.RepoRoot, cfg))
 	}
+	return encodeJSON(doc)
+}
+
+// FormatErrorJSON is the document for a run that stopped before any config
+// ran: a config that did not load, no config found, a bad --since ref.
+func FormatErrorJSON(err error) (string, error) {
+	return encodeJSON(jsonRun{Exit: 2, Error: oneLineError(err), Configs: []jsonConfig{}})
+}
+
+func encodeJSON(doc jsonRun) (string, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
