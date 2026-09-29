@@ -1,5 +1,8 @@
 name: genguard-check
 description: Fail if generated files don't match their generators
+branding:
+  icon: shield
+  color: blue
 inputs:
   all:
     description: Check every genguard.yaml or genguard.yml under the repository root
