@@ -58,7 +58,7 @@ Put `genguard.yaml` (or `genguard.yml`) next to the generated files, outside any
 With Go 1.22+:
 
 ```bash
-go install github.com/wuddleko/genguard/cmd/genguard@v0.6.0
+go install github.com/wuddleko/genguard/cmd/genguard@v0.7.0
 genguard check
 ```
 
@@ -131,7 +131,7 @@ An interrupt before any group has run prints `error: interrupted` and exits 2. A
 With Go 1.22+:
 
 ```bash
-go install github.com/wuddleko/genguard/cmd/genguard@v0.6.0
+go install github.com/wuddleko/genguard/cmd/genguard@v0.7.0
 ```
 
 `$(go env GOPATH)/bin` has to be on your `PATH`. From a checkout of this repository: `make install` or `go install ./cmd/genguard`.
