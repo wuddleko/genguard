@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/wuddleko/genguard/tests/testutil"
 )
 
 func scriptPath(t *testing.T) string {
@@ -198,13 +200,6 @@ func skipNonPOSIXPath(t *testing.T, elems ...string) {
 	}
 }
 
-func writeExe(t *testing.T, path, body string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func linkTool(t *testing.T, dir, name string) {
 	t.Helper()
 	src, err := exec.LookPath(name)
@@ -287,8 +282,8 @@ func TestPrintBindir(t *testing.T) {
 			if tc.sudoOK {
 				sudo = "#!/bin/sh\nif [ \"$1\" = \"-n\" ]; then shift; fi\nif [ \"$1\" = \"true\" ]; then exit 0; fi\nexec \"$@\"\n"
 			}
-			writeExe(t, filepath.Join(fake, "sudo"), sudo)
-			writeExe(t, filepath.Join(fake, "curl"), "#!/bin/sh\necho 'curl should not run' >&2\nexit 1\n")
+			testutil.WriteExe(t, filepath.Join(fake, "sudo"), sudo)
+			testutil.WriteExe(t, filepath.Join(fake, "curl"), "#!/bin/sh\necho 'curl should not run' >&2\nexit 1\n")
 
 			var elems []string
 			elems = append(elems, fake)
@@ -422,7 +417,7 @@ func TestChecksumMismatchDoesNotInstall(t *testing.T) {
 		}
 	}
 	writeRelease(t, rel, false)
-	writeExe(t, filepath.Join(fake, "curl"), fakeCurl(rel))
+	testutil.WriteExe(t, filepath.Join(fake, "curl"), fakeCurl(rel))
 	env := shellBase(t, strings.Join([]string{fake, bindir, os.Getenv("PATH")}, ":"), filepath.Join(root, "home"))
 	env = append(env, "BINDIR="+bindir, "GENGUARD_INSTALL_ROOT="+root)
 	out, code := runScriptEnv(t, []string{"v9.9.9"}, env)
@@ -446,7 +441,7 @@ func TestChecksumInstallsWhenBindirOnPath(t *testing.T) {
 		}
 	}
 	writeRelease(t, rel, true)
-	writeExe(t, filepath.Join(fake, "curl"), fakeCurl(rel))
+	testutil.WriteExe(t, filepath.Join(fake, "curl"), fakeCurl(rel))
 	env := shellBase(t, strings.Join([]string{fake, bindir, os.Getenv("PATH")}, ":"), filepath.Join(root, "home"))
 	env = append(env, "BINDIR="+bindir, "GENGUARD_INSTALL_ROOT="+root)
 	out, code := runScriptEnv(t, []string{"v9.9.9"}, env)
@@ -482,7 +477,7 @@ func TestMissingChecksumEntry(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rel, "checksums.txt"), []byte(other), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeExe(t, filepath.Join(fake, "curl"), fakeCurl(rel))
+	testutil.WriteExe(t, filepath.Join(fake, "curl"), fakeCurl(rel))
 	env := shellBase(t, strings.Join([]string{fake, bindir, os.Getenv("PATH")}, ":"), filepath.Join(root, "home"))
 	env = append(env, "BINDIR="+bindir, "GENGUARD_INSTALL_ROOT="+root)
 	out, code := runScriptEnv(t, []string{"v9.9.9"}, env)
@@ -509,7 +504,7 @@ func TestAwkRequired(t *testing.T) {
 		}
 	}
 	writeRelease(t, rel, true)
-	writeExe(t, filepath.Join(fake, "curl"), fakeCurl(rel))
+	testutil.WriteExe(t, filepath.Join(fake, "curl"), fakeCurl(rel))
 	linkTool(t, fake, "basename")
 	linkTool(t, fake, "cp")
 	linkTool(t, fake, "mktemp")

@@ -90,6 +90,5 @@ jobs:
             fi
           }
           fuzz FuzzParseGitNameList ./internal/gitx
-          fuzz FuzzConfigRelativeGitPath ./internal/check
           fuzz FuzzResolveCleanPath ./internal/check/clean
           fuzz FuzzParseConfig ./internal/config

@@ -64,7 +64,7 @@ func TestRunResultExitCode(t *testing.T) {
 		{name: "empty", run: check.RunResult{}, want: 0},
 		{
 			name: "all ok",
-			run: check.RunResult{Configs: []check.ConfigRun{
+			run: check.RunResult{All: true, Configs: []check.ConfigRun{
 				{Path: "a", Result: check.ConfigResult{Groups: []check.GroupResult{{Status: check.GroupOK}}}},
 				{Path: "b", Result: check.ConfigResult{Groups: []check.GroupResult{{Status: check.GroupOK}}}},
 			}},
@@ -72,7 +72,7 @@ func TestRunResultExitCode(t *testing.T) {
 		},
 		{
 			name: "drift among ok",
-			run: check.RunResult{Configs: []check.ConfigRun{
+			run: check.RunResult{All: true, Configs: []check.ConfigRun{
 				{Path: "a", Result: check.ConfigResult{Groups: []check.GroupResult{{Status: check.GroupOK}}}},
 				{Path: "b", Result: check.ConfigResult{Groups: []check.GroupResult{
 					{Status: check.GroupDrift, Drifts: []check.Drift{{Path: "x"}}},
@@ -82,7 +82,7 @@ func TestRunResultExitCode(t *testing.T) {
 		},
 		{
 			name: "error beats drift",
-			run: check.RunResult{Configs: []check.ConfigRun{
+			run: check.RunResult{All: true, Configs: []check.ConfigRun{
 				{Path: "a", Result: check.ConfigResult{Groups: []check.GroupResult{
 					{Status: check.GroupDrift, Drifts: []check.Drift{{Path: "x"}}},
 				}}},
@@ -104,7 +104,7 @@ func TestRunResultExitCode(t *testing.T) {
 
 func TestRunResultCountsIncludesLoadErrors(t *testing.T) {
 	t.Parallel()
-	run := check.RunResult{Configs: []check.ConfigRun{
+	run := check.RunResult{All: true, Configs: []check.ConfigRun{
 		{Path: "bad.yaml", Err: errors.New("parse failed")},
 		{Path: "ok.yaml", Result: check.ConfigResult{Groups: []check.GroupResult{
 			{Name: "one", Status: check.GroupOK},
@@ -158,7 +158,7 @@ func TestRunResultSummaryLines(t *testing.T) {
 func TestRunResultSuccessLines(t *testing.T) {
 	t.Parallel()
 	repo := filepath.Join(string(filepath.Separator), "repo")
-	run := check.RunResult{RepoRoot: repo, Configs: []check.ConfigRun{
+	run := check.RunResult{RepoRoot: repo, All: true, Configs: []check.ConfigRun{
 		{Path: filepath.Join(repo, "web", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
 			{Name: "web", Status: check.GroupOK},
 		}}},
@@ -180,7 +180,7 @@ func TestRunResultSuccessLines(t *testing.T) {
 func TestRunResultSuccessLinesLabelsSkippedGroups(t *testing.T) {
 	t.Parallel()
 	repo := filepath.Join(string(filepath.Separator), "repo")
-	run := check.RunResult{RepoRoot: repo, Configs: []check.ConfigRun{
+	run := check.RunResult{RepoRoot: repo, All: true, Configs: []check.ConfigRun{
 		{Path: filepath.Join(repo, "api", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
 			{Name: "api", Status: check.GroupSkipped},
 		}}},
@@ -213,7 +213,7 @@ func TestRunResultSuccessLinesSingularAndOutsideRepo(t *testing.T) {
 	t.Parallel()
 	repo := filepath.Join(string(filepath.Separator), "repo")
 	outside := filepath.Join(string(filepath.Separator), "tmp", "genguard.yml")
-	run := check.RunResult{RepoRoot: repo, Configs: []check.ConfigRun{{Path: outside}}}
+	run := check.RunResult{RepoRoot: repo, All: true, Configs: []check.ConfigRun{{Path: outside}}}
 	got := strings.Join(run.SuccessLines(), "\n")
 	want := outside + "\n1 config: 1 ok, 0 drift, 0 error"
 	if got != want {
@@ -240,7 +240,7 @@ func TestRunResultSummaryLinesEmpty(t *testing.T) {
 func TestRunResultSummaryLinesSeparatesTotal(t *testing.T) {
 	t.Parallel()
 	repo := filepath.Join(string(filepath.Separator), "repo")
-	run := check.RunResult{RepoRoot: repo, Configs: []check.ConfigRun{{
+	run := check.RunResult{RepoRoot: repo, All: true, Configs: []check.ConfigRun{{
 		Path: filepath.Join(repo, "genguard.yaml"),
 		Result: check.ConfigResult{Groups: []check.GroupResult{
 			{Name: "g", Status: check.GroupOK},
@@ -262,7 +262,7 @@ func TestRunResultSummaryLinesSeparatesTotal(t *testing.T) {
 func TestRunResultSummaryLinesRepoRootDisplaysDot(t *testing.T) {
 	t.Parallel()
 	repo := filepath.Join(string(filepath.Separator), "repo")
-	run := check.RunResult{RepoRoot: repo, Configs: []check.ConfigRun{{
+	run := check.RunResult{RepoRoot: repo, All: true, Configs: []check.ConfigRun{{
 		Path: repo,
 		Err:  errors.New("parse\nfailed\there"),
 	}}}
@@ -274,7 +274,7 @@ func TestRunResultSummaryLinesRepoRootDisplaysDot(t *testing.T) {
 
 func TestRunResultSummaryLinesMixedGroupIsConfigError(t *testing.T) {
 	t.Parallel()
-	run := check.RunResult{Configs: []check.ConfigRun{{
+	run := check.RunResult{All: true, Configs: []check.ConfigRun{{
 		Path: "a.yaml",
 		Result: check.ConfigResult{Groups: []check.GroupResult{
 			{Name: "a", Status: check.GroupError, Err: errors.New("x")},
@@ -312,45 +312,45 @@ func TestRunResultFinalErrorLine(t *testing.T) {
 		want string
 	}{
 		{name: "empty", run: check.RunResult{}, want: ""},
-		{name: "ok", run: check.RunResult{Configs: []check.ConfigRun{ok}}, want: ""},
+		{name: "ok", run: check.RunResult{All: true, Configs: []check.ConfigRun{ok}}, want: ""},
 		{
 			name: "single drift keeps path detail",
-			run:  check.RunResult{Configs: []check.ConfigRun{drift("a")}},
+			run:  check.RunResult{All: true, Configs: []check.ConfigRun{drift("a")}},
 			want: "error: 1 generated path drifted; commit the generator output or fix the command",
 		},
 		{
 			name: "two drifting configs sum paths",
-			run:  check.RunResult{Configs: []check.ConfigRun{drift("a"), drift("b", "c")}},
+			run:  check.RunResult{All: true, Configs: []check.ConfigRun{drift("a"), drift("b", "c")}},
 			want: "error: 3 generated paths drifted; commit the generator output or fix the command",
 		},
 		{
 			name: "single setup error keeps detail",
-			run:  check.RunResult{Configs: []check.ConfigRun{setup, ok}},
+			run:  check.RunResult{All: true, Configs: []check.ConfigRun{setup, ok}},
 			want: "error: parse failed",
 		},
 		{
 			name: "single group error keeps detail",
-			run:  check.RunResult{Configs: []check.ConfigRun{groupErr}},
+			run:  check.RunResult{All: true, Configs: []check.ConfigRun{groupErr}},
 			want: "error: command failed (exit 3): no output",
 		},
 		{
 			name: "two failures",
-			run:  check.RunResult{Configs: []check.ConfigRun{setup, groupErr}},
+			run:  check.RunResult{All: true, Configs: []check.ConfigRun{setup, groupErr}},
 			want: "error: 2 configs failed",
 		},
 		{
 			name: "error and drift",
-			run:  check.RunResult{Configs: []check.ConfigRun{setup, drift("a")}},
+			run:  check.RunResult{All: true, Configs: []check.ConfigRun{setup, drift("a")}},
 			want: "error: 1 config failed; 1 config drifted",
 		},
 		{
 			name: "one failure and two drifts",
-			run:  check.RunResult{Configs: []check.ConfigRun{setup, drift("a"), drift("b")}},
+			run:  check.RunResult{All: true, Configs: []check.ConfigRun{setup, drift("a"), drift("b")}},
 			want: "error: 1 config failed; 2 configs drifted",
 		},
 		{
 			name: "mixed groups stay on the config line",
-			run: check.RunResult{Configs: []check.ConfigRun{{
+			run: check.RunResult{All: true, Configs: []check.ConfigRun{{
 				Result: check.ConfigResult{Groups: []check.GroupResult{
 					{Name: "a", Status: check.GroupError, Err: errors.New("x")},
 					{Name: "b", Status: check.GroupDrift, Drifts: []check.Drift{{Path: "f"}}},
@@ -360,7 +360,7 @@ func TestRunResultFinalErrorLine(t *testing.T) {
 		},
 		{
 			name: "single config with two paths",
-			run:  check.RunResult{Configs: []check.ConfigRun{drift("a", "b")}},
+			run:  check.RunResult{All: true, Configs: []check.ConfigRun{drift("a", "b")}},
 			want: "error: 2 generated paths drifted; commit the generator output or fix the command",
 		},
 	}

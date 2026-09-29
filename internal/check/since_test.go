@@ -19,10 +19,6 @@ func TestSinceDashRefIsNotAGitOption(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "bad --since ref") || gitFlagError(err.Error()) {
 				t.Fatalf("mergeBase: %v", err)
 			}
-			_, err = isolateSince(commandLog{}, root, since)
-			if err == nil || !strings.Contains(err.Error(), "bad --since ref") || gitFlagError(err.Error()) {
-				t.Fatalf("isolateSince: %v", err)
-			}
 			assertRefNotGitOption(t, recordedGitArgs(t, logPath), since)
 		})
 	}
@@ -38,13 +34,6 @@ func TestMergeBasePassesResolvedSHA(t *testing.T) {
 	base, err := mergeBase(commandLog{}, root, "HEAD")
 	if err != nil {
 		t.Fatal(err)
-	}
-	rev, err := isolateSince(commandLog{}, root, "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if rev != base {
-		t.Fatalf("isolateSince = %q, mergeBase = %q", rev, base)
 	}
 	assertMergeBaseSawSHA(t, recordedGitArgs(t, logPath), "HEAD", base)
 }

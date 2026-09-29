@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/wuddleko/genguard/internal/check/command"
+	"github.com/wuddleko/genguard/internal/command"
 )
 
 // Run runs git in root. A canceled command returns command.ErrInterrupted.

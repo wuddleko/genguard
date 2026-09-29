@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/wuddleko/genguard/internal/check/command"
+	"github.com/wuddleko/genguard/internal/command"
 	"github.com/wuddleko/genguard/internal/config"
 	"github.com/wuddleko/genguard/internal/gitx"
 	"github.com/wuddleko/genguard/internal/pathx"
@@ -63,7 +63,7 @@ func cleanOutputs(ctx context.Context, root, configPath string, group config.Gro
 }
 
 func planCleanSpec(ctx context.Context, root, spec string) ([]cleanTarget, error) {
-	if pathx.IsGlob(spec) {
+	if config.ParseSpec(spec).Glob {
 		return planCleanGlob(ctx, root, spec)
 	}
 	target, isDir, err := resolveCleanPath(root, spec, true)
@@ -78,7 +78,7 @@ func planCleanGlob(ctx context.Context, root, spec string) ([]cleanTarget, error
 	if err := validateGlobSpec(spec); err != nil {
 		return nil, err
 	}
-	if err := refuseGlobPrefix(root, spec); err != nil {
+	if err := refuseSymlinks(root, config.ParseSpec(spec).GlobPrefix()); err != nil {
 		return nil, err
 	}
 	names, err := globCleanFiles(ctx, root, spec)
@@ -101,20 +101,6 @@ func planCleanGlob(ctx context.Context, root, spec string) ([]cleanTarget, error
 		items = append(items, cleanTarget{spec: spec, target: target, isDir: false})
 	}
 	return items, nil
-}
-
-func refuseGlobPrefix(root, spec string) error {
-	var prefix []string
-	for _, part := range strings.Split(filepath.ToSlash(spec), "/") {
-		if part == "" || part == "." {
-			continue
-		}
-		if strings.ContainsAny(part, pathx.GlobChars) {
-			break
-		}
-		prefix = append(prefix, part)
-	}
-	return refuseSymlinks(root, prefix)
 }
 
 func validateGlobSpec(spec string) error {
@@ -311,14 +297,15 @@ func resolveCleanPath(root, spec string, rejectGlob bool) (string, bool, error) 
 	if spec == "" {
 		return "", false, fmt.Errorf("clean refuses an empty output path")
 	}
-	if rejectGlob && pathx.IsGlob(spec) {
+	parsed := config.ParseSpec(spec)
+	if rejectGlob && parsed.Glob {
 		return "", false, fmt.Errorf("clean refuses glob output %q", spec)
 	}
 	if filepath.IsAbs(spec) {
 		return "", false, fmt.Errorf("clean refuses absolute output %q", spec)
 	}
 
-	dirHint := strings.HasSuffix(spec, "/") || strings.HasSuffix(spec, string(filepath.Separator))
+	dirHint := parsed.Dir
 	cleaned := filepath.Clean(spec)
 	if cleaned == "." || pathx.RelEscapes(cleaned) {
 		return "", false, fmt.Errorf("clean refuses %q", spec)

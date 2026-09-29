@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/wuddleko/genguard/internal/command"
 	"github.com/wuddleko/genguard/internal/config"
 )
 
@@ -150,7 +151,7 @@ func TestCheckAllInterruptSkipsLaterConfig(t *testing.T) {
 			}
 			ch := make(chan got, 1)
 			go func() {
-				run, err := CheckAll(CheckAllOptions{
+				run, err := ExecuteAll(Options{
 					RepoRoot: root,
 					Paths:    []string{filepath.Join(api, "genguard.yaml"), filepath.Join(web, "genguard.yaml")},
 					Isolated: isolated,
@@ -299,14 +300,14 @@ func TestInterruptBetweenGroupsKeepsDrift(t *testing.T) {
 	if first.Name != "first" || first.Status != GroupDrift || len(first.Drifts) != 1 || first.Drifts[0].Path != "left.txt" {
 		t.Fatalf("first = %+v", first)
 	}
-	if result.cleanup == nil || result.cleanup.Error() != "interrupted" {
-		t.Fatalf("cleanup = %v", result.cleanup)
+	if result.extra == nil || result.extra.Error() != "interrupted" {
+		t.Fatalf("cleanup = %v", result.extra)
 	}
 	body, err := os.ReadFile(filepath.Join(root, "right.txt"))
 	if err != nil || string(body) != "ok\n" {
 		t.Fatalf("right.txt = %q, %v", body, err)
 	}
-	report, reportErr := FormatFailureReport(result, root)
+	report, reportErr := singleReport(result, root)
 	if reportErr != nil {
 		t.Fatal(reportErr)
 	}
@@ -315,26 +316,30 @@ func TestInterruptBetweenGroupsKeepsDrift(t *testing.T) {
 	}
 }
 
-func TestCanceledStopKeepsRunDrift(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	run := RunResult{Configs: []ConfigRun{{
-		Path: "api/genguard.yaml",
-		Result: ConfigResult{Groups: []GroupResult{{
-			Name:   "first",
-			Status: GroupDrift,
-			Drifts: []Drift{{Group: "first", Path: "out.txt", Kind: "modified"}},
-		}}},
-	}}}
-	stop, err := canceledStop(ctx, run.ExitCode(), func(interrupt error) { noteInterruptedDrift(&run, interrupt) })
-	if !stop || err != nil {
-		t.Fatalf("stop = %v err = %v", stop, err)
+func TestInterruptBetweenConfigsKeepsDrift(t *testing.T) {
+	root := gitRepo(t)
+	writeTracked(t, root, "api/left.txt", "old\n")
+	writeTracked(t, root, "api/genguard.yaml", "groups:\n  - name: first\n    command: python3 -c \"open('left.txt','wb').write(b'new\\n')\"\n    outputs:\n      - left.txt\n")
+	writeTracked(t, root, "web/out.txt", "ok\n")
+	writeTracked(t, root, "web/genguard.yaml", "groups:\n  - name: second\n    command: python3 -c \"open('ran','w').close()\"\n    outputs:\n      - out.txt\n")
+	ctx := &errGate{Context: context.Background(), path: filepath.Join(root, "api", "left.txt")}
+
+	run, err := ExecuteAll(Options{RepoRoot: root, Context: ctx})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if run.ExitCode() != 2 || run.Configs[0].Result.cleanup == nil || run.Configs[0].Result.cleanup.Error() != "interrupted" {
-		t.Fatalf("exit = %d cleanup = %v", run.ExitCode(), run.Configs[0].Result.cleanup)
+	if run.ExitCode() != 2 || len(run.Configs) != 1 {
+		t.Fatalf("exit = %d configs = %+v", run.ExitCode(), run.Configs)
 	}
-	if run.Configs[0].Result.Groups[0].Status != GroupDrift {
-		t.Fatalf("group = %+v", run.Configs[0].Result.Groups[0])
+	api := run.Configs[0].Result
+	if len(api.Groups) != 1 || api.Groups[0].Status != GroupDrift {
+		t.Fatalf("groups = %+v", api.Groups)
+	}
+	if api.extra == nil || api.extra.Error() != "interrupted" {
+		t.Fatalf("extra = %v", api.extra)
+	}
+	if _, err := os.Stat(filepath.Join(root, "web", "ran")); !os.IsNotExist(err) {
+		t.Fatalf("second config ran: %v", err)
 	}
 }
 
@@ -342,7 +347,7 @@ func TestCanceledContextSkipsCheckAll(t *testing.T) {
 	root := gitRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	run, err := CheckAll(CheckAllOptions{
+	run, err := ExecuteAll(Options{
 		RepoRoot: root,
 		Paths:    []string{filepath.Join(root, "genguard.yaml")},
 		Context:  ctx,
@@ -579,12 +584,12 @@ func TestWorktreeRemoveFailureOutranksInterrupt(t *testing.T) {
 	}
 	root := gitRepo(t)
 	writeTracked(t, root, "keep.txt", "ok\n")
-	t.Cleanup(func() { releaseWorktrees(t, root) })
+	lockableTempDir(t)
 	err := withIsolatedWorktree(commandLog{}, root, func(wt isolatedWorktree) error {
 		if chmodErr := os.Chmod(wt.root, 0o555); chmodErr != nil {
 			t.Fatal(chmodErr)
 		}
-		return errInterrupted
+		return command.ErrInterrupted
 	})
 	if err == nil || !strings.Contains(err.Error(), "git worktree remove") {
 		t.Fatalf("err = %v", err)

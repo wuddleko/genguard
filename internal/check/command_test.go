@@ -2,6 +2,7 @@ package check
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os/exec"
 	"path/filepath"
@@ -10,14 +11,14 @@ import (
 	"time"
 
 	"github.com/wuddleko/genguard/internal/actions"
-	"github.com/wuddleko/genguard/internal/check/command"
+	"github.com/wuddleko/genguard/internal/command"
 )
 
 func TestCaptureReportsStartFailure(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("COMSPEC", "genguard-missing-shell.exe")
 	for _, timeout := range []time.Duration{0, time.Second} {
-		out, code, err := command.Capture(t.TempDir(), "genguard-not-a-binary --version", timeout)
+		out, code, err := command.Capture(context.Background(), t.TempDir(), "genguard-not-a-binary --version", timeout)
 		if out != "" || code != 0 {
 			t.Fatalf("timeout %s: out = %q code = %d err = %v", timeout, out, code, err)
 		}
@@ -35,11 +36,7 @@ func TestRunCommandCopiesLines(t *testing.T) {
 	root := t.TempDir()
 	var buf bytes.Buffer
 	tail, err := runCommand(root, `python3 -c "import sys; sys.stderr.write('line1'+chr(10)+'line2'+chr(10)); sys.exit(3)"`, &buf, "", 0)
-	var genguardErr *GenguardError
-	if !errors.As(err, &genguardErr) {
-		t.Fatalf("err = %v", err)
-	}
-	if err.Error() != "command failed (exit 3)" {
+	if err == nil || err.Error() != "command failed (exit 3)" {
 		t.Fatalf("err = %v", err)
 	}
 	if tail != "" {

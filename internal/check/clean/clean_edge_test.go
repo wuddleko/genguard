@@ -64,7 +64,7 @@ func TestRefuseGlobPrefixSkipsDotAndEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, spec := range []string{"./bar/*.txt", "bar//*.txt", "foo/./bar/*.go"} {
-		if err := refuseGlobPrefix(root, spec); err != nil {
+		if err := refuseSymlinks(root, config.ParseSpec(spec).GlobPrefix()); err != nil {
 			t.Fatalf("%s: %v", spec, err)
 		}
 	}

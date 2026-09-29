@@ -2,31 +2,21 @@ package check
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"time"
 
 	"github.com/wuddleko/genguard/internal/actions"
-	"github.com/wuddleko/genguard/internal/check/command"
+	"github.com/wuddleko/genguard/internal/command"
 )
 
 type commandLog struct {
-	w         io.Writer
-	prefix    string
-	timeout   time.Duration
-	quiet     bool
-	ctx       context.Context
-	toolCache *toolCache
-	env       actions.Env
-}
-
-func (c commandLog) withToolCache() commandLog {
-	if c.toolCache == nil {
-		c.toolCache = &toolCache{}
-	}
-	return c
+	w      io.Writer
+	prefix string
+	quiet  bool
+	ctx    context.Context
+	env    actions.Env
 }
 
 func (c commandLog) canceled() bool {
@@ -70,17 +60,7 @@ func (c commandLog) writeGroupedTail(name, tail string) {
 	if !strings.HasSuffix(tail, "\n") {
 		body.WriteByte('\n')
 	}
-	text := body.String()
-	token, err := actions.Token()
-	if err != nil {
-		fmt.Fprint(c.w, text)
-		fmt.Fprint(c.w, "\n")
-		return
-	}
-	bracket := actions.Bracket{W: c.w, Token: token}
-	bracket.Open()
-	fmt.Fprint(c.w, text)
-	bracket.Close()
+	actions.WriteBracketed(c.w, body.String())
 	fmt.Fprint(c.w, "\n")
 }
 
@@ -97,12 +77,7 @@ type commandStream struct {
 func newCommandStream(w io.Writer, header string, env actions.Env) *commandStream {
 	s := &commandStream{w: w, header: header, active: w != nil}
 	if s.active && env.Actions {
-		token, err := actions.Token()
-		if err != nil {
-			s.active = false
-			return s
-		}
-		s.token = token
+		s.token = actions.Token()
 	}
 	return s
 }
@@ -146,14 +121,6 @@ func (s *commandStream) streamed() bool {
 	return s.w != nil && s.active
 }
 
-func RunCommand(root, commandText string) (string, error) {
-	return runCommand(root, commandText, nil, "", 0)
-}
-
-func runCommand(root, commandText string, log io.Writer, header string, timeout time.Duration) (string, error) {
-	return runCommandContext(nil, root, commandText, log, header, timeout, actions.Env{})
-}
-
 func runCommandContext(ctx context.Context, root, commandText string, log io.Writer, header string, timeout time.Duration, env actions.Env) (string, error) {
 	stream := newCommandStream(log, header, env)
 	defer stream.finish()
@@ -161,15 +128,9 @@ func runCommandContext(ctx context.Context, root, commandText string, log io.Wri
 	if stream.active {
 		onLine = stream.onLine
 	}
-	tail, err := command.RunContext(ctx, root, commandText, onLine, timeout)
+	tail, err := command.Run(ctx, root, commandText, onLine, timeout)
 	if err != nil && stream.streamed() {
 		tail = ""
 	}
-	if errors.Is(err, command.ErrInterrupted) {
-		return tail, errInterrupted
-	}
-	if err != nil {
-		return tail, newGenguardError("%s", err.Error())
-	}
-	return tail, nil
+	return tail, err
 }

@@ -4,17 +4,46 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
 	"github.com/wuddleko/genguard/internal/config"
-	"github.com/wuddleko/genguard/internal/pathx"
 )
 
+// Drift.Path is relative to the repository root.
 type Drift struct {
 	Group string
 	Path  string
 	Kind  string
+}
+
+// tree places a config directory in its repository.
+type tree struct {
+	dir    string
+	repo   string
+	prefix string
+}
+
+func newTree(repo, dir string) (tree, error) {
+	rel, err := relInsideRepo(repo, dir)
+	if err != nil {
+		return tree{}, err
+	}
+	prefix := filepath.ToSlash(rel)
+	if prefix == "." {
+		prefix = ""
+	}
+	return tree{dir: dir, repo: repo, prefix: prefix}, nil
+}
+
+// repoPath turns a path relative to the config directory into a repository path.
+func (t tree) repoPath(rel string) string {
+	return path.Join(t.prefix, filepath.ToSlash(rel))
+}
+
+func (t tree) abs(repoPath string) string {
+	return filepath.Join(t.repo, filepath.FromSlash(repoPath))
 }
 
 type pathSnap struct {
@@ -25,15 +54,7 @@ type pathSnap struct {
 	hashed  bool
 }
 
-func DriftForGroup(root string, group config.Group) ([]Drift, error) {
-	return driftForGroup(commandLog{}, root, group)
-}
-
-func DriftDiff(root string, drifts []Drift) (string, error) {
-	return driftDiff(newDriftBase(root, ""), drifts)
-}
-
-func driftDiff(base driftBase, drifts []Drift) (string, error) {
+func driftDiff(repoRoot string, drifts []Drift) (string, error) {
 	parts := make([]string, 0, len(drifts))
 	seen := make(map[string]struct{}, len(drifts))
 
@@ -42,11 +63,10 @@ func driftDiff(base driftBase, drifts []Drift) (string, error) {
 			continue
 		}
 		seen[item.Path] = struct{}{}
-		gitRoot, rel := base.gitArg(item.Path)
 
 		switch item.Kind {
 		case "modified", "missing":
-			diff, err := gitDiffText(gitRoot, "HEAD", "--", rel)
+			diff, err := gitDiffText(repoRoot, "HEAD", "--", item.Path)
 			if err != nil {
 				return "", err
 			}
@@ -55,13 +75,13 @@ func driftDiff(base driftBase, drifts []Drift) (string, error) {
 				parts = append(parts, diff)
 			}
 		case "untracked":
-			target := filepath.Join(gitRoot, filepath.FromSlash(rel))
+			target := filepath.Join(repoRoot, filepath.FromSlash(item.Path))
 			info, err := os.Stat(target)
 			if err != nil || !info.Mode().IsRegular() {
-				parts = append(parts, fmt.Sprintf("Untracked generated file: %s", rel))
+				parts = append(parts, fmt.Sprintf("Untracked generated file: %s", item.Path))
 				continue
 			}
-			diff, err := gitDiffText(gitRoot, "--no-index", os.DevNull, rel)
+			diff, err := gitDiffText(repoRoot, "--no-index", os.DevNull, item.Path)
 			if err != nil {
 				return "", err
 			}
@@ -69,7 +89,7 @@ func driftDiff(base driftBase, drifts []Drift) (string, error) {
 			if diff != "" {
 				parts = append(parts, diff)
 			} else {
-				parts = append(parts, fmt.Sprintf("Untracked generated file: %s", rel))
+				parts = append(parts, fmt.Sprintf("Untracked generated file: %s", item.Path))
 			}
 		}
 	}
@@ -77,83 +97,30 @@ func driftDiff(base driftBase, drifts []Drift) (string, error) {
 	return strings.Join(parts, "\n"), nil
 }
 
-type driftBase struct {
-	repoRoot  string
-	configDir string
-}
-
-func newDriftBase(configDir, repoRoot string) driftBase {
-	absDir, err := filepath.Abs(configDir)
-	if err != nil {
-		absDir = configDir
-	}
-	repoRoot = strings.TrimSpace(repoRoot)
-	if repoRoot == "" {
-		if found, err := gitRepoRoot(absDir); err == nil {
-			repoRoot = found
-		}
-	}
-	return driftBase{repoRoot: repoRoot, configDir: absDir}
-}
-
-func (d driftBase) shown(path string) string {
-	rel, ok := repoRelDrift(d.repoRoot, d.configDir, path)
-	if !ok {
-		return path
-	}
-	return rel
-}
-
-func (d driftBase) gitArg(path string) (gitRoot, rel string) {
-	rel, ok := repoRelDrift(d.repoRoot, d.configDir, path)
-	if !ok {
-		return d.configDir, path
-	}
-	return d.repoRoot, rel
-}
-
-func repoRelDrift(repoRoot, configDir, driftPath string) (string, bool) {
-	if repoRoot == "" || configDir == "" || driftPath == "" {
-		return driftPath, false
-	}
-	abs := filepath.Join(configDir, filepath.FromSlash(driftPath))
-	rel, err := relInsideRepo(repoRoot, abs)
-	if err != nil {
-		return driftPath, false
-	}
-	return filepath.ToSlash(rel), true
-}
-
-func recordCleanDamage(log commandLog, damage map[string]pathSnap, root string, group config.Group) error {
-	found, err := driftForGroup(log, root, group)
+func recordCleanDamage(log commandLog, damage map[string]pathSnap, t tree, group config.Group) error {
+	found, err := driftForGroup(log, t, group)
 	if err != nil {
 		return err
 	}
 	for _, item := range found {
-		abs := absDriftPath(root, item.Path)
-		damage[abs] = snapPath(abs)
+		damage[item.Path] = snapPath(t.abs(item.Path))
 	}
 	return nil
 }
 
-func omitUnchangedDamage(root string, found []Drift, damage map[string]pathSnap) []Drift {
+func omitUnchangedDamage(t tree, found []Drift, damage map[string]pathSnap) []Drift {
 	if len(damage) == 0 || len(found) == 0 {
 		return found
 	}
 	kept := make([]Drift, 0, len(found))
 	for _, item := range found {
-		abs := absDriftPath(root, item.Path)
-		snap, ok := damage[abs]
-		if ok && samePathSnap(abs, snap) {
+		snap, ok := damage[item.Path]
+		if ok && samePathSnap(t.abs(item.Path), snap) {
 			continue
 		}
 		kept = append(kept, item)
 	}
 	return kept
-}
-
-func absDriftPath(root, rel string) string {
-	return filepath.Clean(filepath.Join(root, rel))
 }
 
 func snapPath(abs string) pathSnap {
@@ -192,58 +159,41 @@ func samePathSnap(abs string, snap pathSnap) bool {
 	return sha256.Sum256(data) == snap.sum
 }
 
-func driftPath(path string) string {
-	return filepath.ToSlash(filepath.Clean(path))
-}
-
-func driftForGroup(log commandLog, root string, group config.Group) ([]Drift, error) {
+func driftForGroup(log commandLog, t tree, group config.Group) ([]Drift, error) {
 	found := make([]Drift, 0)
 	seen := make(map[string]struct{})
-	record := func(path, kind string) {
-		path = driftPath(path)
-		if _, ok := seen[path]; ok {
+	record := func(repoPath, kind string) {
+		repoPath = path.Clean(repoPath)
+		if _, ok := seen[repoPath]; ok {
 			return
 		}
-		seen[path] = struct{}{}
-		found = append(found, Drift{Group: group.Name, Path: path, Kind: kind})
+		seen[repoPath] = struct{}{}
+		found = append(found, Drift{Group: group.Name, Path: repoPath, Kind: kind})
 	}
 
-	modified, err := gitDiffNames(log, root, "HEAD", group.Outputs)
+	modified, err := gitDiffNames(log, t.dir, "HEAD", group.Outputs)
 	if err != nil {
 		return nil, err
 	}
-	if len(modified) > 0 {
-		prefix, err := gitPrefix(log, root)
-		if err != nil {
-			return nil, err
-		}
-		for i, path := range modified {
-			rel, err := configRelativeGitPath(prefix, path)
-			if err != nil {
-				return nil, err
-			}
-			modified[i] = rel
-		}
-	}
-	untracked, err := gitUntracked(log, root, group.Outputs)
+	untracked, err := gitUntracked(log, t.dir, group.Outputs)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, path := range modified {
+	for _, repoPath := range modified {
 		kind := "modified"
-		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
+		if _, err := os.Stat(t.abs(repoPath)); err != nil {
 			kind = "missing"
 		}
-		record(path, kind)
+		record(repoPath, kind)
 	}
-	for _, path := range untracked {
-		record(path, "untracked")
+	for _, repoPath := range untracked {
+		record(repoPath, "untracked")
 	}
 
 	for _, spec := range group.Outputs {
-		if literalOutputAbsent(root, spec) {
-			record(spec, "missing")
+		if literalOutputAbsent(t.dir, spec) {
+			record(t.repoPath(spec), "missing")
 		}
 	}
 
@@ -273,7 +223,7 @@ func groupAffected(log commandLog, root, base, configName string, group config.G
 }
 
 func literalOutputAbsent(root, spec string) bool {
-	if pathx.IsGlob(spec) || strings.HasSuffix(spec, "/") {
+	if parsed := config.ParseSpec(spec); parsed.Glob || parsed.Dir {
 		return false
 	}
 	_, err := os.Stat(filepath.Join(root, spec))

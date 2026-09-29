@@ -41,11 +41,14 @@ func TestFormatFailureReportUsesRepoRelativePaths(t *testing.T) {
 		Name:   "g",
 		Status: check.GroupDrift,
 		Drifts: []check.Drift{
-			{Group: "g", Kind: "modified", Path: "gen/a.txt"},
-			{Group: "g", Kind: "untracked", Path: "gen/b.txt"},
+			{Group: "g", Kind: "modified", Path: "svc/gen/a.txt"},
+			{Group: "g", Kind: "untracked", Path: "svc/gen/b.txt"},
 		},
 	}}}
-	report, err := check.FormatFailureReport(result, svc)
+	report, err := check.FormatFailureReport(check.RunResult{
+		RepoRoot: root,
+		Configs:  []check.ConfigRun{{Path: filepath.Join(svc, "genguard.yaml"), Result: result}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,9 +61,6 @@ func TestFormatFailureReportUsesRepoRelativePaths(t *testing.T) {
 		if !strings.Contains(report, part) {
 			t.Fatalf("report missing %q:\n%s", part, report)
 		}
-	}
-	if result.Groups[0].Drifts[0].Path != "gen/a.txt" || result.Groups[0].Drifts[1].Path != "gen/b.txt" {
-		t.Fatalf("stored paths changed: %v", result.Groups[0].Drifts)
 	}
 }
 
@@ -75,16 +75,17 @@ func TestFormatRunFailureReportUsesAllRepoRoot(t *testing.T) {
 	}
 	run := check.RunResult{
 		RepoRoot: root,
+		All:      true,
 		Configs: []check.ConfigRun{{
 			Path: filepath.Join(api, "genguard.yaml"),
 			Result: check.ConfigResult{Groups: []check.GroupResult{{
 				Name:   "api",
 				Status: check.GroupDrift,
-				Drifts: []check.Drift{{Group: "api", Kind: "modified", Path: "out.txt"}},
+				Drifts: []check.Drift{{Group: "api", Kind: "modified", Path: "api/out.txt"}},
 			}}},
 		}},
 	}
-	report, _ := check.FormatRunFailureReport(run)
+	report, _ := check.FormatFailureReport(run)
 	if !strings.Contains(report, "[modified] api: api/out.txt") {
 		t.Fatalf("report missing parent-relative path:\n%s", report)
 	}
@@ -108,7 +109,7 @@ func TestFormatFailureReportSections(t *testing.T) {
 			{Group: "sqlc", Kind: "modified", Path: "generated/hello.txt"},
 		}},
 	}}
-	report, err := check.FormatFailureReport(result, root)
+	report, err := singleReport(result, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +139,7 @@ func TestFormatFailureReportKeepsSectionsWhenDiffFails(t *testing.T) {
 			{Group: "sqlc", Kind: "modified", Path: "generated/hello.txt"},
 		}},
 	}}
-	report, err := check.FormatFailureReport(result, filepath.Join(t.TempDir(), "missing"))
+	report, err := singleReport(result, filepath.Join(t.TempDir(), "missing"))
 	if err == nil {
 		t.Fatalf("expected diff error, report = %q", report)
 	}
@@ -165,7 +166,7 @@ func TestFormatFailureReportCommandTails(t *testing.T) {
 		{Name: "quiet", Status: check.GroupError, Err: errors.New("command failed (exit 1): no output")},
 		{Name: "other", Status: check.GroupError, Err: errors.New("command failed (exit 4)"), CommandTail: "boom"},
 	}}
-	report, err := check.FormatFailureReport(result, t.TempDir())
+	report, err := singleReport(result, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,6 +195,7 @@ func TestFormatRunFailureReportCommandTails(t *testing.T) {
 	web := filepath.Join(root, "services", "web", "genguard.yaml")
 	run := check.RunResult{
 		RepoRoot: root,
+		All:      true,
 		Configs: []check.ConfigRun{
 			{Path: api, Result: check.ConfigResult{Groups: []check.GroupResult{
 				{Name: "greeting", Status: check.GroupError, Err: errors.New("command failed (exit 3)"), CommandTail: "line1\nline2\n"},
@@ -204,7 +206,7 @@ func TestFormatRunFailureReportCommandTails(t *testing.T) {
 			}}},
 		},
 	}
-	report, err := check.FormatRunFailureReport(run)
+	report, err := check.FormatFailureReport(run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +224,7 @@ func TestFormatFailureReportErrorsOnly(t *testing.T) {
 	result := check.ConfigResult{Groups: []check.GroupResult{
 		{Name: "broken", Status: check.GroupError, Err: errors.New("command failed (exit 3): no output")},
 	}}
-	report, err := check.FormatFailureReport(result, t.TempDir())
+	report, err := singleReport(result, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,6 +253,7 @@ func TestFormatRunFailureReportSections(t *testing.T) {
 
 	run := check.RunResult{
 		RepoRoot: root,
+		All:      true,
 		Configs: []check.ConfigRun{
 			{Path: filepath.Join(root, "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
 				{Name: "sqlc", Status: check.GroupDrift, Drifts: []check.Drift{
@@ -262,7 +265,7 @@ func TestFormatRunFailureReportSections(t *testing.T) {
 			}}},
 		},
 	}
-	report, err := check.FormatRunFailureReport(run)
+	report, err := check.FormatFailureReport(run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,10 +291,10 @@ func TestFormatRunFailureReportSections(t *testing.T) {
 }
 
 func TestFormatRunFailureReportSetupError(t *testing.T) {
-	run := check.RunResult{Configs: []check.ConfigRun{
+	run := check.RunResult{All: true, Configs: []check.ConfigRun{
 		{Path: "bad.yaml", Err: errors.New("parse failed")},
 	}}
-	report, err := check.FormatRunFailureReport(run)
+	report, err := check.FormatFailureReport(run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,14 +310,14 @@ func TestFormatRunFailureReportSetupError(t *testing.T) {
 }
 
 func TestFormatRunFailureReportKeepsSectionsWhenDiffFails(t *testing.T) {
-	run := check.RunResult{Configs: []check.ConfigRun{
+	run := check.RunResult{RepoRoot: filepath.Join(t.TempDir(), "missing"), All: true, Configs: []check.ConfigRun{
 		{Path: filepath.Join(t.TempDir(), "missing", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
 			{Name: "sqlc", Status: check.GroupDrift, Drifts: []check.Drift{
 				{Group: "sqlc", Kind: "modified", Path: "generated/hello.txt"},
 			}},
 		}}},
 	}}
-	report, err := check.FormatRunFailureReport(run)
+	report, err := check.FormatFailureReport(run)
 	if err == nil {
 		t.Fatalf("expected diff error, report = %q", report)
 	}
@@ -330,7 +333,7 @@ func TestFormatRunFailureReportKeepsSectionsWhenDiffFails(t *testing.T) {
 }
 
 func TestFormatRunFailureReportStopsBeforeLaterConfigs(t *testing.T) {
-	run := check.RunResult{Configs: []check.ConfigRun{
+	run := check.RunResult{RepoRoot: filepath.Join(t.TempDir(), "missing"), All: true, Configs: []check.ConfigRun{
 		{Path: filepath.Join(t.TempDir(), "missing", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
 			{Name: "sqlc", Status: check.GroupDrift, Drifts: []check.Drift{
 				{Group: "sqlc", Kind: "modified", Path: "generated/hello.txt"},
@@ -342,7 +345,7 @@ func TestFormatRunFailureReportStopsBeforeLaterConfigs(t *testing.T) {
 			}},
 		}}},
 	}}
-	report, err := check.FormatRunFailureReport(run)
+	report, err := check.FormatFailureReport(run)
 	if err == nil {
 		t.Fatalf("expected diff error, report = %q", report)
 	}
@@ -368,27 +371,28 @@ func TestFormatRunFailureReportKeepsEarlierDiffWhenLaterDiffFails(t *testing.T) 
 
 	run := check.RunResult{
 		RepoRoot: root,
+		All:      true,
 		Configs: []check.ConfigRun{
 			{Path: filepath.Join(root, "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
 				{Name: "sqlc", Status: check.GroupDrift, Drifts: []check.Drift{
 					{Group: "sqlc", Kind: "modified", Path: "generated/hello.txt"},
 				}},
 			}}},
-			{Path: filepath.Join(t.TempDir(), "gone", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
+			{Path: filepath.Join(root, "web", "genguard.yaml"), Result: check.ConfigResult{Groups: []check.GroupResult{
 				{Name: "web", Status: check.GroupDrift, Drifts: []check.Drift{
-					{Group: "web", Kind: "modified", Path: "later-only.txt"},
+					{Group: "web", Kind: "modified", Path: "../later-only.txt"},
 				}},
 			}}},
 		},
 	}
-	report, err := check.FormatRunFailureReport(run)
+	report, err := check.FormatFailureReport(run)
 	if err == nil {
 		t.Fatalf("expected diff error, report = %q", report)
 	}
 	if !strings.Contains(report, "diff --git") {
 		t.Fatalf("earlier diff missing:\n%s", report)
 	}
-	if !strings.Contains(report, "[modified] web: later-only.txt") {
+	if !strings.Contains(report, "[modified] web: ../later-only.txt") {
 		t.Fatalf("later drift header missing:\n%s", report)
 	}
 	if strings.Contains(report, "error: ") {

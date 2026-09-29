@@ -1,6 +1,7 @@
 package command
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -9,14 +10,11 @@ import (
 	"time"
 )
 
-func TestCaptureReturnsWhenGrandchildHoldsStdout(t *testing.T) {
-	pidPath := captureHeldStdout(t, 0)
-	assertPidAlive(t, pidPath)
-}
-
-func TestCaptureProcessGroupStopsHeldStdout(t *testing.T) {
-	pidPath := captureHeldStdout(t, 2*time.Second)
-	assertPidGone(t, pidPath)
+func TestCaptureStopsGrandchildHoldingStdout(t *testing.T) {
+	for _, timeout := range []time.Duration{0, 2 * time.Second} {
+		pidPath := captureHeldStdout(t, timeout)
+		assertPidGone(t, pidPath)
+	}
 }
 
 func captureHeldStdout(t *testing.T, timeout time.Duration) string {
@@ -31,7 +29,7 @@ func captureHeldStdout(t *testing.T, timeout time.Duration) string {
 	t.Cleanup(func() { killPidFile(pidPath) })
 
 	start := time.Now()
-	text, code, err := Capture(root, command, timeout)
+	text, code, err := Capture(context.Background(), root, command, timeout)
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -42,21 +40,6 @@ func captureHeldStdout(t *testing.T, timeout time.Duration) string {
 		t.Fatalf("tail = %q", text)
 	}
 	return pidPath
-}
-
-func assertPidAlive(t *testing.T, pidPath string) {
-	t.Helper()
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		t.Fatalf("pid file = %q", data)
-	}
-	if !processRunning(pid) {
-		t.Fatalf("pid %d is not running", pid)
-	}
 }
 
 func killPidFile(path string) {

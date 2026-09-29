@@ -3,6 +3,7 @@
 package command
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -25,7 +26,7 @@ func TestRunCommandTimeoutKillsProcessGroup(t *testing.T) {
 
 	const limit = 8 * time.Second
 	start := time.Now()
-	tail, err := run(nil, root, command, nil, limit)
+	tail, err := Run(context.Background(), root, command, nil, limit)
 	if time.Since(start) >= 12*time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -40,7 +41,7 @@ func TestRunCommandTimeoutKillsProcessGroup(t *testing.T) {
 
 func warmShell(t *testing.T, root string) {
 	t.Helper()
-	text, code, err := Capture(root, `python3 -c "import os, subprocess, sys; sys.stderr.write('ok'+chr(10)); sys.stderr.flush()"`, 45*time.Second)
+	text, code, err := Capture(context.Background(), root, `python3 -c "import os, subprocess, sys; sys.stderr.write('ok'+chr(10)); sys.stderr.flush()"`, 45*time.Second)
 	if err != nil || code != 0 || text != "ok\n" {
 		t.Fatalf("warmup code=%d err=%v tail=%q", code, err, text)
 	}

@@ -3,7 +3,6 @@ package check
 import (
 	"bytes"
 	"encoding/json"
-	"path/filepath"
 )
 
 type jsonRun struct {
@@ -64,8 +63,8 @@ func jsonConfigFrom(repoRoot string, cfg ConfigRun) jsonConfig {
 	switch {
 	case cfg.Err != nil:
 		out.Error = oneLineError(cfg.Err)
-	case cfg.Result.cleanup != nil:
-		out.Error = oneLineError(cfg.Result.cleanup)
+	case cfg.Result.extra != nil:
+		out.Error = oneLineError(cfg.Result.extra)
 	}
 	for _, group := range cfg.Result.Groups {
 		item := jsonGroup{
@@ -76,10 +75,7 @@ func jsonConfigFrom(repoRoot string, cfg ConfigRun) jsonConfig {
 			item.Error = oneLineError(group.Err)
 		}
 		for _, drift := range group.Drifts {
-			item.Drifts = append(item.Drifts, jsonDrift{
-				Kind: drift.Kind,
-				Path: jsonDriftPath(repoRoot, cfg.Path, drift.Path),
-			})
+			item.Drifts = append(item.Drifts, jsonDrift{Kind: drift.Kind, Path: drift.Path})
 		}
 		if group.Status != GroupSkipped {
 			for _, tool := range group.Tools {
@@ -93,15 +89,4 @@ func jsonConfigFrom(repoRoot string, cfg ConfigRun) jsonConfig {
 		out.Groups = append(out.Groups, item)
 	}
 	return out
-}
-
-func jsonDriftPath(repoRoot, configPath, driftPath string) string {
-	if repoRoot == "" || driftPath == "" || !filepath.IsAbs(configPath) {
-		return driftPath
-	}
-	rel, ok := repoRelDrift(repoRoot, filepath.Dir(configPath), driftPath)
-	if !ok {
-		return driftPath
-	}
-	return rel
 }

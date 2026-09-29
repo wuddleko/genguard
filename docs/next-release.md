@@ -42,4 +42,8 @@ A missing key stays the default. A present null and a present empty value take t
 
 ## Overlapping outputs
 
-Two output specs that can name the same path are a load error. A trailing slash or a glob is the directory prefix up to the first glob character, and it overlaps that prefix and anything under it. Within one file the error names both groups and both specs. `check --all`, `run --all`, and `check --all --isolated` use the same check across configs and name both config paths. Isolated reads the committed files, including a config removed from the checkout. A file that does not parse is reported for that config. Outputs from a file that parses still count, so another config that names one of those paths does not run. The commands do not run, so neither path is reported as drift.
+Two output specs that can name the same path are a load error. A trailing slash is the whole directory. A literal overlaps a glob only when that literal matches the glob, and two globs overlap only when one path could match both. Within one file the error names both groups and both specs. `check --all`, `run --all`, and `check --all --isolated` use the same check across configs and name both config paths. Isolated reads the committed files, including a config removed from the checkout. A file that does not parse is reported for that config. Outputs from a file that parses still count, so another config that names one of those paths does not run. The commands do not run, so neither path is reported as drift.
+
+## Interrupts
+
+An interrupt before any group has run prints `error: interrupted` and exits 2. After that, the Summary covers the groups that ran and the final line adds `error: interrupted`, including when the earlier groups all passed or one had already failed.

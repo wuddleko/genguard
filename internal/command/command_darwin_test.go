@@ -31,7 +31,7 @@ func TestCancelKillsProcessThatLeftTheGroup(t *testing.T) {
 
 	ch := make(chan error, 1)
 	go func() {
-		_, err := run(ctx, root, command, nil, 0)
+		_, err := Run(ctx, root, command, nil, 0)
 		ch <- err
 	}()
 	deadline := time.Now().Add(5 * time.Second)

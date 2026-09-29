@@ -1,7 +1,9 @@
-package config
+// Package discover lists genguard configs through git.
+package discover
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -9,7 +11,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/wuddleko/genguard/internal/config"
 	"github.com/wuddleko/genguard/internal/gitx"
+	"github.com/wuddleko/genguard/internal/pathx"
 )
 
 var skipDirNames = map[string]struct{}{
@@ -18,13 +22,15 @@ var skipDirNames = map[string]struct{}{
 	"node_modules": {},
 }
 
-func SkipDir(name string) bool {
+func skipDir(name string) bool {
 	_, skip := skipDirNames[name]
 	return skip
 }
 
+// FindAll lists the configs under repoRoot: the index and untracked files
+// that are not ignored, or with isolated the HEAD tree.
 func FindAll(ctx context.Context, repoRoot string, isolated bool) ([]string, error) {
-	root, err := resolveStart(repoRoot)
+	root, err := filepath.Abs(repoRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +50,7 @@ func FindAll(ctx context.Context, repoRoot string, isolated bool) ([]string, err
 		return nil, err
 	}
 	if code != 0 {
-		return nil, fmt.Errorf("%s", gitx.Detail(out, fallback))
+		return nil, errors.New(gitx.Detail(out, fallback))
 	}
 	if err := listingFailure(stderr); err != nil {
 		return nil, err
@@ -67,10 +73,33 @@ func FindAll(ctx context.Context, repoRoot string, isolated bool) ([]string, err
 		found = append(found, configPath)
 	}
 	sort.Strings(found)
-	if err := RejectBothConfigNames(found); err != nil {
+	if err := config.RejectBothConfigNames(found); err != nil {
 		return nil, err
 	}
 	return found, nil
+}
+
+// Committed reads the HEAD copy of a config for config.RejectOutputOverlaps.
+// A config outside repoRoot or absent from HEAD is skipped.
+func Committed(ctx context.Context, repoRoot string) func(string) ([]byte, error) {
+	return func(configPath string) ([]byte, error) {
+		rel, ok := pathx.RelInsideResolved(repoRoot, configPath)
+		if !ok || rel == "." {
+			return nil, config.ErrSkipConfig
+		}
+		out, _, code, err := gitx.Run(ctx, repoRoot, "--no-pager", "show", "--no-textconv", "HEAD:"+filepath.ToSlash(rel))
+		if err != nil {
+			return nil, err
+		}
+		if code != 0 {
+			detail := gitx.Detail(out, "git show failed")
+			if strings.Contains(detail, "does not exist in") || strings.Contains(detail, "exists on disk, but not in") {
+				return nil, config.ErrSkipConfig
+			}
+			return nil, errors.New(detail)
+		}
+		return []byte(out), nil
+	}
 }
 
 func listingFailure(stderr string) error {
@@ -85,7 +114,7 @@ func listingFailure(stderr string) error {
 	if len(lines) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%s", strings.Join(lines, "\n"))
+	return errors.New(strings.Join(lines, "\n"))
 }
 
 func unreadableSkipDir(line string) bool {
@@ -100,7 +129,7 @@ func unreadableSkipDir(line string) bool {
 	}
 	dir = strings.Trim(filepath.ToSlash(dir), "/")
 	for _, part := range strings.Split(dir, "/") {
-		if SkipDir(part) {
+		if skipDir(part) {
 			return true
 		}
 	}
@@ -109,7 +138,7 @@ func unreadableSkipDir(line string) bool {
 
 func keepConfig(rel string) bool {
 	rel = filepath.ToSlash(rel)
-	if !IsConfigName(path.Base(rel)) {
+	if !config.IsConfigName(path.Base(rel)) {
 		return false
 	}
 	dir := path.Dir(rel)
@@ -117,7 +146,7 @@ func keepConfig(rel string) bool {
 		return true
 	}
 	for _, part := range strings.Split(dir, "/") {
-		if SkipDir(part) {
+		if skipDir(part) {
 			return false
 		}
 	}
@@ -144,13 +173,4 @@ func resolveWalkRoot(root string) (string, error) {
 		return "", fmt.Errorf("%s is not a directory", root)
 	}
 	return walk, nil
-}
-
-func IsConfigName(name string) bool {
-	for _, candidate := range configNames {
-		if name == candidate {
-			return true
-		}
-	}
-	return false
 }

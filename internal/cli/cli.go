@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -31,7 +30,7 @@ func Run(args []string) int {
 }
 
 func RunWithIO(args []string, stdout, stderr io.Writer) int {
-	return runArgs(nil, args, stdout, stderr, actions.Read())
+	return runArgs(context.Background(), args, stdout, stderr, actions.Read())
 }
 
 func runArgs(ctx context.Context, args []string, stdout, stderr io.Writer, env actions.Env) int {
@@ -42,9 +41,9 @@ func runArgs(ctx context.Context, args []string, stdout, stderr io.Writer, env a
 
 	switch args[0] {
 	case "check":
-		return runCheck(ctx, args[1:], stdout, stderr, env)
+		return runCommand(ctx, check.ModeCheck, args[1:], stdout, stderr, env)
 	case "run":
-		return runRun(ctx, args[1:], stdout, stderr, env)
+		return runCommand(ctx, check.ModeRun, args[1:], stdout, stderr, env)
 	case "version", "--version":
 		fmt.Fprintln(stdout, Version)
 		return 0
@@ -58,87 +57,53 @@ func runArgs(ctx context.Context, args []string, stdout, stderr io.Writer, env a
 	}
 }
 
-func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer, env actions.Env) int {
-	flags, code, ok := parseCommandFlags(args, stderr, commandUsage{
+var commandUsages = map[check.Mode]commandUsage{
+	check.ModeCheck: {
 		name:     "check",
 		all:      "Check every genguard.yaml or genguard.yml under the git repository root",
 		isolated: "Check the HEAD copy in a throwaway worktree (do not read or write the current checkout)",
-	}, env)
-	if !ok {
-		return code
-	}
-	path, useAll, code, ok := resolveConfigPath(stderr, flags, env)
-	if !ok {
-		return code
-	}
-	log, quiet := commandWriter(stderr, flags.verbose, env)
-	if useAll {
-		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Isolated: flags.isolated, Log: log, Quiet: quiet, Context: ctx, Env: env}, flags.asJSON, "Generated files match the generators.", check.CheckAll, env)
-	}
-
-	var result check.ConfigResult
-	root := filepath.Dir(path)
-	if flags.isolated {
-		var err error
-		result, err = check.CheckSinceIsolatedLog(ctx, path, flags.since, log, quiet, env)
-		if err != nil && len(result.Groups) == 0 {
-			return errorExit(stderr, path, err.Error(), env)
-		}
-	} else {
-		cfg, err := config.LoadConfig(path)
-		if err != nil {
-			return errorExit(stderr, path, err.Error(), env)
-		}
-		result, err = check.CheckSinceLog(ctx, cfg, flags.since, log, quiet, env)
-		if err != nil {
-			return errorExit(stderr, path, err.Error(), env)
-		}
-		root = cfg.Root()
-	}
-	return finishConfig(stdout, stderr, result, path, root, "Generated files match the generators.", flags.asJSON, env)
-}
-
-func runAll(stdout, stderr io.Writer, opts check.CheckAllOptions, asJSON bool, success string, run func(check.CheckAllOptions) (check.RunResult, error), env actions.Env) int {
-	result, err := run(opts)
-	if err != nil {
-		return errorExit(stderr, "", err.Error(), env)
-	}
-	if len(result.Configs) == 0 {
-		return errorExit(stderr, "", "no genguard.yaml or genguard.yml found under repository root", env)
-	}
-	return finish(stdout, stderr, result, success, false, asJSON, env)
-}
-
-func runRun(ctx context.Context, args []string, stdout, stderr io.Writer, env actions.Env) int {
-	flags, code, ok := parseCommandFlags(args, stderr, commandUsage{
+		success:  "Generated files match the generators.",
+	},
+	check.ModeRun: {
 		name:     "run",
 		all:      "Run every genguard.yaml or genguard.yml under the git repository root",
 		isolated: "Not valid with run; run writes the checkout",
-	}, env)
+		success:  "Generated files written.",
+	},
+}
+
+func runCommand(ctx context.Context, mode check.Mode, args []string, stdout, stderr io.Writer, env actions.Env) int {
+	usage := commandUsages[mode]
+	flags, code, ok := parseCommandFlags(args, stderr, usage, env)
 	if !ok {
 		return code
 	}
-	if flags.isolated {
+	if mode == check.ModeRun && flags.isolated {
 		return errorExit(stderr, "", "genguard run writes the checkout; --isolated is not valid", env)
 	}
-	path, useAll, code, ok := resolveConfigPath(stderr, flags, env)
+	path, repoRoot, useAll, code, ok := resolveConfigPath(stderr, flags, env)
 	if !ok {
 		return code
 	}
 	log, quiet := commandWriter(stderr, flags.verbose, env)
-	if useAll {
-		return runAll(stdout, stderr, check.CheckAllOptions{Since: flags.since, Log: log, Quiet: quiet, Context: ctx, Env: env}, flags.asJSON, "Generated files written.", check.RunAll, env)
-	}
+	opts := check.Options{Mode: mode, Context: ctx, Since: flags.since, Isolated: flags.isolated, Log: log, Quiet: quiet, Env: env, RepoRoot: repoRoot}
 
-	cfg, err := config.LoadConfig(path)
+	var run check.RunResult
+	var err error
+	if useAll {
+		run, err = check.ExecuteAll(opts)
+		if err == nil && len(run.Configs) == 0 {
+			err = errors.New("no genguard.yaml or genguard.yml found under repository root")
+		}
+	} else {
+		run, err = check.Execute(opts, path)
+	}
 	if err != nil {
 		return errorExit(stderr, path, err.Error(), env)
 	}
-	result, err := check.RunSinceLog(ctx, cfg, flags.since, log, quiet, env)
-	if err != nil {
-		return errorExit(stderr, path, err.Error(), env)
-	}
-	return finishConfig(stdout, stderr, result, path, cfg.Root(), "Generated files written.", flags.asJSON, env)
+	code = render(stdout, stderr, run, usage.success, flags.asJSON, env)
+	maybeAnnotate(stderr, run, env)
+	return code
 }
 
 type commandFlags struct {
@@ -154,6 +119,7 @@ type commandUsage struct {
 	name     string
 	all      string
 	isolated string
+	success  string
 }
 
 func parseCommandFlags(args []string, stderr io.Writer, usage commandUsage, env actions.Env) (commandFlags, int, bool) {
@@ -196,121 +162,60 @@ func commandWriter(stderr io.Writer, verbose bool, env actions.Env) (io.Writer, 
 	return stderr, !verbose
 }
 
-func resolveConfigPath(stderr io.Writer, flags commandFlags, env actions.Env) (path string, useAll bool, code int, ok bool) {
+// resolveConfigPath returns the repository root too when it found the config
+// by walking up from the working directory.
+func resolveConfigPath(stderr io.Writer, flags commandFlags, env actions.Env) (path, repoRoot string, useAll bool, code int, ok bool) {
 	if flags.all && flags.selected != "" {
-		return "", false, errorExit(stderr, "", "--all and --config are mutually exclusive", env), false
+		return "", "", false, errorExit(stderr, "", "--all and --config are mutually exclusive", env), false
 	}
 	if flags.all {
-		return "", true, 0, true
+		return "", "", true, 0, true
 	}
-	path = flags.selected
-	if path == "" {
-		root, err := check.RepoRoot("")
-		if err != nil {
-			return "", false, errorExit(stderr, "", err.Error(), env), false
-		}
-		found, err := config.FindConfig("", root)
-		if err != nil {
-			return "", false, errorExit(stderr, "", err.Error(), env), false
-		}
-		if found == "" {
-			return "", false, errorExit(stderr, "", "no genguard.yaml or genguard.yml found (pass --config)", env), false
-		}
-		path = found
+	if flags.selected != "" {
+		return flags.selected, "", false, 0, true
 	}
-	return path, false, 0, true
-}
-
-func finishConfig(stdout, stderr io.Writer, result check.ConfigResult, path, root, success string, asJSON bool, env actions.Env) int {
-	run, err := check.SingleConfigRun(path, result)
+	root, err := check.RepoRoot("")
 	if err != nil {
-		if asJSON {
-			return errorExit(stderr, path, err.Error(), env)
-		}
-		code := renderFinish(stdout, stderr, check.RunResult{
-			Configs: []check.ConfigRun{{
-				Path:   filepath.Join(root, "genguard.yaml"),
-				Result: result,
-			}},
-		}, success, true, false, env)
-		if env.Annotating() {
-			writeError(stderr, path, err.Error(), env)
-		}
-		return code
+		return "", "", false, errorExit(stderr, "", err.Error(), env), false
 	}
-	return finish(stdout, stderr, run, success, true, asJSON, env)
+	found, err := config.FindConfig("", root)
+	if err != nil {
+		return "", "", false, errorExit(stderr, "", err.Error(), env), false
+	}
+	if found == "" {
+		return "", "", false, errorExit(stderr, "", "no genguard.yaml or genguard.yml found (pass --config)", env), false
+	}
+	return found, root, false, 0, true
 }
 
-func finish(stdout, stderr io.Writer, run check.RunResult, success string, singleConfig, asJSON bool, env actions.Env) int {
-	code := renderFinish(stdout, stderr, run, success, singleConfig, asJSON, env)
-	maybeAnnotate(stderr, run, env)
-	return code
-}
-
-func renderFinish(stdout, stderr io.Writer, run check.RunResult, success string, singleConfig, asJSON bool, env actions.Env) int {
-	var code int
+func render(stdout, stderr io.Writer, run check.RunResult, success string, asJSON bool, env actions.Env) int {
 	if asJSON {
-		writeCommandTail(stderr, commandTails(run, singleConfig), env)
-		code = writeJSON(stdout, stderr, run, env)
-	} else if run.ExitCode() == 0 {
+		if tails := check.FormatCommandTails(run); tails != "" {
+			withoutWorkflowCommands(stderr, env, func(w io.Writer) {
+				fmt.Fprint(w, tails)
+			})
+		}
+		return writeJSON(stdout, stderr, run, env)
+	}
+	code := run.ExitCode()
+	if code == 0 {
 		var buf strings.Builder
 		fmt.Fprintln(&buf, success)
-		for _, line := range successLines(run, singleConfig) {
+		for _, line := range run.SuccessLines() {
 			fmt.Fprintln(&buf, line)
 		}
 		writePlain(stdout, buf.String(), env)
-	} else {
-		withoutWorkflowCommands(stderr, env, func(w io.Writer) {
-			report, err := failureReport(run, singleConfig)
-			fmt.Fprint(w, report)
-			if err != nil {
-				fmt.Fprintf(w, "error: %v\n", err)
-				code = 2
-			} else {
-				code = run.ExitCode()
-			}
-		})
-	}
-	return code
-}
-
-func successLines(run check.RunResult, singleConfig bool) []string {
-	if !singleConfig {
-		return run.SuccessLines()
-	}
-	if len(run.Configs) != 1 || run.Configs[0].Err != nil || run.Configs[0].Result.Skipped() == 0 {
-		return nil
-	}
-	return run.Configs[0].Result.SummaryLines()
-}
-
-func commandTails(run check.RunResult, singleConfig bool) string {
-	if singleConfig && len(run.Configs) == 1 && run.Configs[0].Err == nil {
-		return check.FormatCommandTails(run.Configs[0].Result)
-	}
-	if singleConfig {
-		return ""
-	}
-	return check.FormatRunCommandTails(run)
-}
-
-func failureReport(run check.RunResult, singleConfig bool) (string, error) {
-	if !singleConfig {
-		return check.FormatRunFailureReport(run)
-	}
-	if len(run.Configs) != 1 || run.Configs[0].Err != nil {
-		return "", nil
-	}
-	return check.FormatFailureReport(run.Configs[0].Result, filepath.Dir(run.Configs[0].Path))
-}
-
-func writeCommandTail(stderr io.Writer, tails string, env actions.Env) {
-	if tails == "" {
-		return
+		return 0
 	}
 	withoutWorkflowCommands(stderr, env, func(w io.Writer) {
-		fmt.Fprint(w, tails)
+		report, err := check.FormatFailureReport(run)
+		fmt.Fprint(w, report)
+		if err != nil {
+			fmt.Fprintf(w, "error: %v\n", err)
+			code = 2
+		}
 	})
+	return code
 }
 
 func errorExit(stderr io.Writer, file, message string, env actions.Env) int {
@@ -362,18 +267,7 @@ func withoutWorkflowCommands(w io.Writer, env actions.Env, write func(io.Writer)
 	}
 	var buf strings.Builder
 	write(&buf)
-	token, err := actions.Token()
-	if err != nil {
-		token = fmt.Sprintf("genguard-%d", os.Getpid())
-	}
-	bracket := actions.Bracket{W: w, Token: token}
-	bracket.Open()
-	text := buf.String()
-	fmt.Fprint(w, text)
-	if text != "" && !strings.HasSuffix(text, "\n") {
-		fmt.Fprint(w, "\n")
-	}
-	bracket.Close()
+	actions.WriteBracketed(w, buf.String())
 }
 
 func writeJSON(stdout, stderr io.Writer, run check.RunResult, env actions.Env) int {

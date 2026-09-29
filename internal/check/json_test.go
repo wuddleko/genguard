@@ -17,9 +17,9 @@ func TestFormatJSONDriftOmitsDiff(t *testing.T) {
 			Result: ConfigResult{Groups: []GroupResult{
 				{Name: "protobuf", Status: GroupOK},
 				{Name: "sqlc", Status: GroupDrift, Drifts: []Drift{
-					{Group: "sqlc", Kind: "modified", Path: "gen/a.go"},
-					{Group: "sqlc", Kind: "untracked", Path: "gen/b.go"},
-					{Group: "sqlc", Kind: "missing", Path: "../top.txt"},
+					{Group: "sqlc", Kind: "modified", Path: "api/gen/a.go"},
+					{Group: "sqlc", Kind: "untracked", Path: "api/gen/b.go"},
+					{Group: "sqlc", Kind: "missing", Path: "top.txt"},
 				}},
 			}},
 		}},
@@ -115,7 +115,7 @@ func TestFormatJSONCleanupOutranksDrift(t *testing.T) {
 		Status: GroupDrift,
 		Drifts: []Drift{{Kind: "modified", Path: "out.txt"}},
 	}}}
-	result.noteCleanup(errors.New("git worktree remove: boom"))
+	result.note(errors.New("git worktree remove: boom"))
 	if result.ExitCode() != 2 {
 		t.Fatalf("exit = %d, want 2", result.ExitCode())
 	}
@@ -133,7 +133,7 @@ func TestFormatJSONCleanupOutranksDrift(t *testing.T) {
 
 func TestFormatJSONCleanupError(t *testing.T) {
 	result := ConfigResult{Groups: []GroupResult{{Name: "api", Status: GroupOK}}}
-	result.noteCleanup(errors.New("git worktree remove: boom"))
+	result.note(errors.New("git worktree remove: boom"))
 	doc := decodeJSON(t, mustFormatJSON(t, RunResult{Configs: []ConfigRun{{
 		Path:   "genguard.yaml",
 		Result: result,

@@ -110,8 +110,8 @@ func TestGitSeparatesStdoutAndStderr(t *testing.T) {
 		if !strings.Contains(out, "fatal:") || !strings.Contains(out, "HEAD") || strings.Contains(out, "diff --git") {
 			t.Fatalf("stdout = %q, want the fatal text", out)
 		}
-		if _, err := gitPrefix(commandLog{}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "fatal:") {
-			t.Fatalf("gitPrefix error = %v, want git fatal text", err)
+		if _, err := gitNames(commandLog{}, t.TempDir(), "ls-files"); err == nil || !strings.Contains(err.Error(), "fatal:") {
+			t.Fatalf("gitNames error = %v, want git fatal text", err)
 		}
 	})
 }

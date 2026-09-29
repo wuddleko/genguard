@@ -31,7 +31,7 @@ func TestRunWritesWithoutFailingOnDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := check.RunConfig(cfg)
+	result, err := runConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestRunSinceSkipsUnchangedAndDoesNotClean(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := check.RunSince(cfg, "base")
+	result, err := runSince(cfg, "base")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestRunCommandFailureExit2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := check.RunConfig(cfg)
+	result, err := runConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestRunCommandFailureExit2(t *testing.T) {
 	if len(result.AllDrifts()) != 0 {
 		t.Fatalf("drifts = %+v", result.AllDrifts())
 	}
-	report, err := check.FormatFailureReport(result, root)
+	report, err := singleReport(result, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestRunContinuesAfterCommandFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := check.RunConfig(cfg)
+	result, err := runConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestRunSinceBlankRefRunsEveryGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := check.RunSince(cfg, "")
+	result, err := runSince(cfg, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestRunBadSinceRef(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = check.RunSince(cfg, "not-a-ref")
+	_, err = runSince(cfg, "not-a-ref")
 	if err == nil || !strings.Contains(err.Error(), "bad --since ref") {
 		t.Fatalf("error = %v", err)
 	}
@@ -219,7 +219,7 @@ func TestRunWithoutSinceRunsEveryGroup(t *testing.T) {
 
 func TestRunSinceTrimsRef(t *testing.T) {
 	root := writeSinceRepo(t)
-	commitPath(t, root, "queries/q.sql", "select 2;\n")
+	testutil.CommitPath(t, root, "queries/q.sql", "select 2;\n")
 
 	result := mustRunSince(t, root, "  base  ")
 	assertGroupStatus(t, result, "sqlc", check.GroupOK)
@@ -231,7 +231,7 @@ func TestRunSinceTrimsRef(t *testing.T) {
 
 func TestRunSinceRunsChangedInput(t *testing.T) {
 	root := writeSinceRepo(t)
-	commitPath(t, root, "queries/q.sql", "select 2;\n")
+	testutil.CommitPath(t, root, "queries/q.sql", "select 2;\n")
 
 	result := mustRunSince(t, root, "base")
 	assertGroupStatus(t, result, "sqlc", check.GroupOK)
@@ -352,7 +352,7 @@ func TestRunSinceIgnoredInputDoesNotRun(t *testing.T) {
 
 func TestRunSinceRunsWhenWorktreeMatchesBaseNotHEAD(t *testing.T) {
 	root := writeSinceRepo(t)
-	commitPath(t, root, "internal/db/out.txt", "edited\n")
+	testutil.CommitPath(t, root, "internal/db/out.txt", "edited\n")
 	if err := os.WriteFile(filepath.Join(root, "internal/db/out.txt"), []byte("db\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +377,7 @@ func TestRunSinceRunsWhenWorktreeMatchesBaseNotHEAD(t *testing.T) {
 
 func TestRunSinceRunsInputRestoredToBase(t *testing.T) {
 	root := writeSinceRepo(t)
-	commitPath(t, root, "queries/q.sql", "select 2;\n")
+	testutil.CommitPath(t, root, "queries/q.sql", "select 2;\n")
 	if err := os.WriteFile(filepath.Join(root, "queries/q.sql"), []byte("select 1;\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func TestRunSinceRunsUntrackedConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := check.RunSince(cfg, "HEAD")
+	result, err := runSince(cfg, "HEAD")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +545,7 @@ func TestRunSinceSubdirectoryConfigSelectsItsGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	skipped, err := check.RunSince(cfg, "base")
+	skipped, err := runSince(cfg, "base")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,8 +554,8 @@ func TestRunSinceSubdirectoryConfigSelectsItsGroup(t *testing.T) {
 		t.Fatal("unchanged subdirectory config ran")
 	}
 
-	commitPath(t, root, "api/src/a.txt", "changed\n")
-	result, err := check.RunSince(cfg, "base")
+	testutil.CommitPath(t, root, "api/src/a.txt", "changed\n")
+	result, err := runSince(cfg, "base")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -593,7 +593,7 @@ func TestRunSinceCleanWipesSelectedGroupOnly(t *testing.T) {
 	groups := sinceGroups()
 	groups[1].Command = runProtoCleanProbe
 	commitConfigAsBase(t, root, groups)
-	commitPath(t, root, "proto/a.proto", "syntax = \"proto3\";\n// changed\n")
+	testutil.CommitPath(t, root, "proto/a.proto", "syntax = \"proto3\";\n// changed\n")
 
 	result := mustRunSince(t, root, "base")
 	assertGroupStatus(t, result, "protobuf", check.GroupOK)
@@ -724,7 +724,7 @@ func TestRunCleanCommandFailureAfterWipeContinues(t *testing.T) {
 	if len(result.AllDrifts()) != 0 {
 		t.Fatalf("drifts = %+v", result.AllDrifts())
 	}
-	report, err := check.FormatFailureReport(result, root)
+	report, err := singleReport(result, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -835,7 +835,7 @@ func TestRunCommandFailureLeavesRewriteWithoutDrift(t *testing.T) {
 	if string(got) != "changed\n" {
 		t.Fatalf("output = %q", got)
 	}
-	report, err := check.FormatFailureReport(result, root)
+	report, err := singleReport(result, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -907,7 +907,7 @@ func TestRunRunsFromConfigRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := check.RunConfig(cfg)
+	result, err := runConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -956,7 +956,7 @@ func mustRunConfig(t *testing.T, root string) check.ConfigResult {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := check.RunConfig(cfg)
+	result, err := runConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -969,7 +969,7 @@ func mustRunSince(t *testing.T, root, since string) check.ConfigResult {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := check.RunSince(cfg, since)
+	result, err := runSince(cfg, since)
 	if err != nil {
 		t.Fatal(err)
 	}

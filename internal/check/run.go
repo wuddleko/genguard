@@ -2,7 +2,6 @@ package check
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"github.com/wuddleko/genguard/internal/pathx"
 )
@@ -20,8 +19,22 @@ func (c ConfigRun) ExitCode() int {
 	return c.Result.ExitCode()
 }
 
+func (c ConfigRun) hasInterrupt() bool {
+	return isInterrupt(c.Err) || c.Result.hasInterrupt()
+}
+
+func (c ConfigRun) finalErrorLine() string {
+	if c.Err != nil {
+		return "error: " + oneLineError(c.Err)
+	}
+	return c.Result.FinalErrorLine()
+}
+
+// RunResult is one Execute or ExecuteAll. All selects the --all report:
+// config paths as labels and one summary per config.
 type RunResult struct {
 	RepoRoot string
+	All      bool
 	Configs  []ConfigRun
 }
 
@@ -53,7 +66,17 @@ func (r RunResult) Counts() (configs, ok, drift, errors int) {
 	return configs, ok, drift, errors
 }
 
+func (r RunResult) single() (ConfigRun, bool) {
+	if r.All || len(r.Configs) != 1 {
+		return ConfigRun{}, false
+	}
+	return r.Configs[0], true
+}
+
 func (r RunResult) SummaryLines() []string {
+	if cfg, ok := r.single(); ok {
+		return cfg.Result.SummaryLines()
+	}
 	lines := make([]string, 0, len(r.Configs)*4+1)
 	for i, cfg := range r.Configs {
 		if i > 0 {
@@ -65,8 +88,8 @@ func (r RunResult) SummaryLines() []string {
 			continue
 		}
 		lines = append(lines, cfg.Result.SummaryLines()...)
-		if cfg.Result.cleanup != nil {
-			lines = append(lines, fmt.Sprintf("  error (%s)", oneLineError(cfg.Result.cleanup)))
+		if cfg.Result.extra != nil {
+			lines = append(lines, fmt.Sprintf("  error (%s)", oneLineError(cfg.Result.extra)))
 		}
 	}
 	if len(r.Configs) > 0 {
@@ -76,7 +99,15 @@ func (r RunResult) SummaryLines() []string {
 	return lines
 }
 
+// SuccessLines follow the success message: every config path under --all,
+// and the summary of a config that skipped a group.
 func (r RunResult) SuccessLines() []string {
+	if cfg, ok := r.single(); ok {
+		if cfg.Result.Skipped() == 0 {
+			return nil
+		}
+		return cfg.Result.SummaryLines()
+	}
 	lines := make([]string, 0, len(r.Configs)+1)
 	for _, cfg := range r.Configs {
 		lines = append(lines, displayConfigPath(r.RepoRoot, cfg.Path))
@@ -105,44 +136,25 @@ func (r RunResult) configStatusLine() string {
 }
 
 func (r RunResult) FinalErrorLine() string {
+	if cfg, ok := r.single(); ok {
+		return cfg.finalErrorLine()
+	}
 	var failed, drifted []ConfigRun
+	paths := 0
 	for _, cfg := range r.Configs {
 		switch cfg.ExitCode() {
 		case 2:
 			failed = append(failed, cfg)
 		case 1:
 			drifted = append(drifted, cfg)
+			paths += len(cfg.Result.AllDrifts())
 		}
 	}
-	switch {
-	case len(failed) > 0 && len(drifted) > 0:
-		return fmt.Sprintf(
-			"error: %s failed; %s drifted",
-			countNoun(len(failed), "config", "configs"),
-			countNoun(len(drifted), "config", "configs"),
-		)
-	case len(failed) == 1:
-		cfg := failed[0]
-		if cfg.Err != nil {
-			return "error: " + oneLineError(cfg.Err)
-		}
-		return cfg.Result.FinalErrorLine()
-	case len(failed) > 1:
-		return fmt.Sprintf("error: %d configs failed", len(failed))
-	case len(drifted) == 1:
-		return drifted[0].Result.FinalErrorLine()
-	case len(drifted) > 1:
-		n := 0
-		for _, cfg := range drifted {
-			n += len(cfg.Result.AllDrifts())
-		}
-		return fmt.Sprintf(
-			"error: %s drifted; commit the generator output or fix the command",
-			countNoun(n, "generated path", "generated paths"),
-		)
-	default:
-		return ""
+	oneFailed := ""
+	if len(failed) == 1 {
+		oneFailed = failed[0].finalErrorLine()
 	}
+	return failureLine(len(failed), len(drifted), "config", oneFailed, paths)
 }
 
 func (r RunResult) configStatusCounts() (ok, drift, errors int) {
@@ -157,21 +169,6 @@ func (r RunResult) configStatusCounts() (ok, drift, errors int) {
 		}
 	}
 	return ok, drift, errors
-}
-
-func SingleConfigRun(configPath string, result ConfigResult) (RunResult, error) {
-	abs, err := filepath.Abs(configPath)
-	if err != nil {
-		return RunResult{}, err
-	}
-	repoRoot, err := gitRepoRoot(filepath.Dir(abs))
-	if err != nil {
-		return RunResult{}, err
-	}
-	return RunResult{
-		RepoRoot: repoRoot,
-		Configs:  []ConfigRun{{Path: abs, Result: result}},
-	}, nil
 }
 
 func displayConfigPath(repoRoot, path string) string {

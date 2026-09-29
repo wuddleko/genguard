@@ -39,7 +39,7 @@ func TestCLIIsolatedInterruptRemovesWorktree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "generated", "hello.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	command := "python3 scripts/nap.py " + shellQuote(ready)
+	command := "python3 scripts/nap.py " + testutil.ShellQuote(ready)
 	if _, err := testutil.WriteGenguardConfig(root, "generated/hello.txt", command, "", nil); err != nil {
 		t.Fatal(err)
 	}

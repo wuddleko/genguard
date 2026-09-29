@@ -32,7 +32,9 @@ type GroupResult struct {
 type ConfigResult struct {
 	Groups   []GroupResult
 	captured *capturedDriftDiff
-	cleanup  error
+	// extra is an error outside any group: the run was interrupted, or the
+	// isolated worktree could not be removed.
+	extra error
 }
 
 type capturedDriftDiff struct {
@@ -44,11 +46,25 @@ func (r *ConfigResult) captureDriftDiff(text string, err error) {
 	r.captured = &capturedDriftDiff{text: text, err: err}
 }
 
-func (r *ConfigResult) noteCleanup(err error) {
-	if err == nil || r.cleanup != nil {
+// note keeps the first error, except that any other error replaces an
+// interrupt.
+func (r *ConfigResult) note(err error) {
+	if err == nil || (r.extra != nil && !isInterrupt(r.extra)) {
 		return
 	}
-	r.cleanup = err
+	r.extra = err
+}
+
+func (r ConfigResult) hasInterrupt() bool {
+	if isInterrupt(r.extra) {
+		return true
+	}
+	for _, group := range r.Groups {
+		if isInterrupt(group.Err) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r ConfigResult) AllDrifts() []Drift {
@@ -60,7 +76,7 @@ func (r ConfigResult) AllDrifts() []Drift {
 }
 
 func (r ConfigResult) ExitCode() int {
-	if r.cleanup != nil {
+	if r.extra != nil {
 		return 2
 	}
 	_, drift, errors := r.Counts()
@@ -166,34 +182,37 @@ func (r ConfigResult) Skipped() int {
 }
 
 func (r ConfigResult) FinalErrorLine() string {
-	line := r.groupFinalErrorLine()
-	if r.cleanup == nil {
+	_, drift, errors := r.Counts()
+	oneFailed := "error: 1 group failed"
+	if err := r.firstGroupError(); err != nil {
+		oneFailed = "error: " + oneLineError(err)
+	}
+	line := failureLine(errors, drift, "group", oneFailed, len(r.AllDrifts()))
+	if r.extra == nil {
 		return line
 	}
-	cleanup := "error: " + oneLineError(r.cleanup)
+	extra := "error: " + oneLineError(r.extra)
 	if line == "" {
-		return cleanup
+		return extra
 	}
-	return line + "\n" + cleanup
+	return line + "\n" + extra
 }
 
-func (r ConfigResult) groupFinalErrorLine() string {
-	_, drift, errors := r.Counts()
+// failureLine is the last line of a failed run of groups or configs.
+// oneFailed is the line when exactly one of them failed.
+func failureLine(failed, drifted int, unit, oneFailed string, driftedPaths int) string {
+	units := unit + "s"
 	switch {
-	case errors > 0 && drift > 0:
-		return fmt.Sprintf("error: %s failed; %s drifted", countNoun(errors, "group", "groups"), countNoun(drift, "group", "groups"))
-	case errors > 0:
-		if errors == 1 {
-			if err := r.firstGroupError(); err != nil {
-				return "error: " + oneLineError(err)
-			}
-			return "error: 1 group failed"
-		}
-		return fmt.Sprintf("error: %d groups failed", errors)
-	case drift > 0:
+	case failed > 0 && drifted > 0:
+		return fmt.Sprintf("error: %s failed; %s drifted", countNoun(failed, unit, units), countNoun(drifted, unit, units))
+	case failed == 1:
+		return oneFailed
+	case failed > 1:
+		return fmt.Sprintf("error: %d %s failed", failed, units)
+	case drifted > 0:
 		return fmt.Sprintf(
 			"error: %s drifted; commit the generator output or fix the command",
-			countNoun(len(r.AllDrifts()), "generated path", "generated paths"),
+			countNoun(driftedPaths, "generated path", "generated paths"),
 		)
 	default:
 		return ""

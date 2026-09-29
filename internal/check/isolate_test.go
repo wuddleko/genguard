@@ -2,6 +2,7 @@ package check
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -110,7 +111,7 @@ func TestIsolatedWorktreeAddFailureRemovesParent(t *testing.T) {
 		t.Fatal("fn ran")
 		return nil
 	})
-	assertIsolateGenguardError(t, err, "git worktree add:")
+	assertIsolateError(t, err, "git worktree add:")
 	_, hooks := isolatedAddPaths(t, recordedGitArgs(t, logPath))
 	parent := filepath.Dir(hooks)
 	if _, statErr := os.Stat(parent); !os.IsNotExist(statErr) {
@@ -150,13 +151,13 @@ func TestWithIsolatedWorktreeRemovesOnFnError(t *testing.T) {
 	assertWorktreeGone(t, root, wtRoot)
 }
 
-func TestWithIsolatedWorktreeAddFailureIsGenguardError(t *testing.T) {
-	t.Run("not a git work tree", func(t *testing.T) {
+func TestWithIsolatedWorktreeAddFailure(t *testing.T) {
+	t.Run("not a repository", func(t *testing.T) {
 		err := withIsolatedWorktree(commandLog{}, t.TempDir(), func(isolatedWorktree) error {
 			t.Fatal("fn ran")
 			return nil
 		})
-		assertIsolateGenguardError(t, err, "not a git work tree")
+		assertIsolateError(t, err, "git worktree add:")
 	})
 	t.Run("git worktree add", func(t *testing.T) {
 		root := gitRepo(t)
@@ -164,7 +165,7 @@ func TestWithIsolatedWorktreeAddFailureIsGenguardError(t *testing.T) {
 			t.Fatal("fn ran")
 			return nil
 		})
-		assertIsolateGenguardError(t, err, "git worktree add:")
+		assertIsolateError(t, err, "git worktree add:")
 		listed, listErr := gitWorktreeList(root)
 		if listErr != nil {
 			t.Fatal(listErr)
@@ -180,7 +181,7 @@ func TestMapPathRefusesOutsideRepo(t *testing.T) {
 	writeTracked(t, root, "tracked.txt", "ok\n")
 	err := withIsolatedWorktree(commandLog{}, root, func(wt isolatedWorktree) error {
 		_, err := wt.mapPath(t.TempDir())
-		assertIsolateGenguardError(t, err, "is not inside the repository")
+		assertIsolateError(t, err, "is not inside the repository")
 		mapped, err := wt.mapPath(root)
 		if err != nil {
 			return err
@@ -195,10 +196,10 @@ func TestMapPathRefusesOutsideRepo(t *testing.T) {
 	}
 }
 
-func TestWithIsolatedWorktreeFromSubdir(t *testing.T) {
+func TestMapPathNestedConfig(t *testing.T) {
 	root := gitRepo(t)
 	writeTracked(t, root, "api/genguard.yaml", "nested\n")
-	err := withIsolatedWorktree(commandLog{}, filepath.Join(root, "api"), func(wt isolatedWorktree) error {
+	err := withIsolatedWorktree(commandLog{}, root, func(wt isolatedWorktree) error {
 		mapped, err := wt.mapPath(filepath.Join(root, "api", "genguard.yaml"))
 		if err != nil {
 			return err
@@ -217,13 +218,9 @@ func TestWithIsolatedWorktreeFromSubdir(t *testing.T) {
 	}
 }
 
-func assertIsolateGenguardError(t *testing.T, err error, want string) {
+func assertIsolateError(t *testing.T, err error, want string) {
 	t.Helper()
-	var ge *GenguardError
-	if !errors.As(err, &ge) {
-		t.Fatalf("err = %v, want GenguardError", err)
-	}
-	if !strings.Contains(err.Error(), want) {
+	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("err = %q, want substring %q", err, want)
 	}
 }
@@ -285,7 +282,7 @@ func gitWorktreeList(repo string) (string, error) {
 		return "", err
 	}
 	if code != 0 {
-		return "", newGenguardError("git worktree list: %s", strings.TrimSpace(out))
+		return "", fmt.Errorf("git worktree list: %s", strings.TrimSpace(out))
 	}
 	return out, nil
 }

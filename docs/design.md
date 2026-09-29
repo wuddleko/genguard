@@ -16,11 +16,12 @@ genguard re-runs the commands in `genguard.yaml` and fails when declared outputs
 
 ```
 cmd/genguard            version stamp, os.Exit
-internal/cli            flags, discovery, reports, JSON, Actions wrapping
-internal/config         YAML, Find / FindAll, overlap
-internal/check          skip, tools, clean, run, drift
-internal/check/command  sh -c, timeout, process group
+internal/cli            flags, config lookup, output, Actions wrapping
+internal/config         YAML, FindConfig, output specs, overlap
+internal/discover       --all listing, HEAD copies of configs
+internal/check          skip, tools, clean, run, drift, reports, JSON
 internal/check/clean    wipe with guards
+internal/command        sh -c, timeout, process group
 internal/gitx           git -C <root>
 internal/pathx          RelInside, glob detection
 internal/actions        ::group::, ::error, stop-commands
@@ -28,7 +29,7 @@ internal/actions        ::group::, ::error, stop-commands
 
 `check` and `run` share the group loop. `run` stops after the command. `check` then diffs against `HEAD`. `--isolated` is `check` only.
 
-A run is a `RunResult` of one or more `ConfigRun` values. Each loaded file is a `ConfigResult` of `GroupResult` values (`ok`, `drift`, `error`, `skipped`).
+`Execute` runs one config and `ExecuteAll` every config. Each resolves the repository root and the `--since` merge-base once, and returns a `RunResult` of `ConfigRun` values. Each loaded file is a `ConfigResult` of `GroupResult` values (`ok`, `drift`, `error`, `skipped`). `RunResult.All` selects the `--all` report.
 
 Git is a subprocess, not go-git. Drift then uses the same ignore rules and pathspecs as the repo’s Git.
 
@@ -37,7 +38,8 @@ Git is a subprocess, not go-git. Drift then uses the same ignore rules and paths
 Every group, in order:
 
 ```
-canceled?  → stop (keep drift already found)
+canceled?  → stop; with no group run yet this is an error,
+             otherwise the result notes the interrupt
 
 --since and inputs declared and unchanged
   vs merge-base and HEAD, no missing literal output
@@ -59,13 +61,13 @@ A failed command is still diffed so the summary can name both the crash and the 
 | `untracked` | A new file that is not gitignored |
 | `missing` | A tracked file under `outputs` is gone, or a listed **file** spec is absent. A directory or a glob is not, by itself, missing |
 
-`git diff` is `-c diff.relative=false --no-renames --name-only -z` against `HEAD`, pathspecs limited to that group’s `outputs`. Untracked files are `git ls-files --others --exclude-standard`. Paths are rewritten relative to the config directory with `rev-parse --show-prefix`. `--all` and JSON show repo-relative paths.
+`git diff` is `-c diff.relative=false --no-renames --name-only -z` against `HEAD`, pathspecs limited to that group’s `outputs`. Untracked files are `git ls-files --others --exclude-standard --full-name`. Drift paths are relative to the repository root in the result, the report, JSON, annotations, and the `git diff` that shows them.
 
 After `clean`, paths that still match the post-wipe snapshot are omitted from that group’s drift: they are the wipe, not a rewrite. A later group does not report paths an earlier failed group deleted and this group never touched.
 
 ### Overlap
 
-Two output specs that can name the same path fail at load. A trailing slash or a glob is a directory prefix (for a glob, up to the first glob character). `--all` uses the same check across config files. The commands do not run.
+Two output specs that can name the same path fail at load. A trailing slash is the whole directory. A literal overlaps a glob only when that literal matches the glob, and two globs overlap only when one path could match both. `--all` uses the same check across config files. The commands do not run.
 
 ## `--since`
 
@@ -83,7 +85,7 @@ This is not a cache of generator output. It is “has anything this group claims
 
 `--isolated` checks the committed tree and does not write the caller’s checkout.
 
-1. Resolve `--since` in the caller’s repo (refs like `@{u}` are meaningless in a detached worktree).
+1. Resolve `--since` to its merge-base in the caller’s repo (refs like `@{u}` are meaningless in a detached worktree).
 2. Create a temp directory, mode `0700`.
 3. `git worktree add --detach <dir> HEAD` with `core.hooksPath` pointed at a missing directory, so `post-checkout` cannot edit the new tree.
 4. Map the config path into that worktree, load, run the same check.
@@ -124,7 +126,7 @@ Timeout is a Go duration on the group or at the top level. The same limit applie
 
 Interrupt (`SIGINT` / `SIGTERM`) and timeout kill the process group (`Setpgid`, `kill(-pid, SIGKILL)`). Darwin also walks `kern.proc.all` and kills descendants that left the group. The CLI restores the default signal action after the first signal so a second Ctrl-C kills the process normally.
 
-Top-level `tools` declare `{name, version?, command?}`. The default probe is `name --version`. A leading `v` is stripped from the pin and from the first version-shaped token in the probe output. A group may only name tools declared at the top level. Probes are cached across configs in `--all`.
+Top-level `tools` declare `{name, version?, command?}`. The default probe is `name --version`. A leading `v` is stripped from the pin and from the first version-shaped token in the probe output. A group may only name tools declared at the top level. The groups of one config share a probe with the same command, pin, and timeout. Probes run in the config directory, so configs do not share them.
 
 Unknown YAML keys are errors. A present null is not “use the default”: `timeout: ~` is a duration error; omitting the key leaves it unset. Pathspecs starting with `:` are rejected so Git magic such as `:(exclude)` cannot be treated as a clean path.
 

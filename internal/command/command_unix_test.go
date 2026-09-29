@@ -22,7 +22,7 @@ func TestRunCommandTimeoutKillsProcessGroup(t *testing.T) {
 
 	const limit = 3 * time.Second
 	start := time.Now()
-	tail, err := run(nil, root, command, nil, limit)
+	tail, err := Run(context.Background(), root, command, nil, limit)
 	if time.Since(start) >= 6*time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -57,7 +57,7 @@ func TestCaptureContextInterruptOutranksTimeout(t *testing.T) {
 	ch := make(chan got, 1)
 	start := time.Now()
 	go func() {
-		text, code, err := CaptureContext(ctx, root, command, 30*time.Second)
+		text, code, err := Capture(ctx, root, command, 30*time.Second)
 		ch <- got{text, code, err}
 	}()
 	deadline := time.Now().Add(5 * time.Second)
@@ -96,7 +96,7 @@ func TestCaptureContextInterruptOutranksTimeout(t *testing.T) {
 func TestRunCommandTimeoutWithNoOutput(t *testing.T) {
 	root := t.TempDir()
 	start := time.Now()
-	tail, err := run(nil, root, "sleep 5", nil, 200*time.Millisecond)
+	tail, err := Run(context.Background(), root, "sleep 5", nil, 200*time.Millisecond)
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -106,11 +106,6 @@ func TestRunCommandTimeoutWithNoOutput(t *testing.T) {
 	if tail != "" {
 		t.Fatalf("tail = %q", tail)
 	}
-}
-
-func processRunning(pid int) bool {
-	err := unix.Kill(pid, 0)
-	return err == nil || errors.Is(err, unix.EPERM)
 }
 
 func assertPidGone(t *testing.T, pidPath string) {

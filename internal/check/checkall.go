@@ -1,182 +1,95 @@
 package check
 
 import (
-	"context"
-	"io"
 	"path/filepath"
 	"sort"
-	"strings"
 
-	"github.com/wuddleko/genguard/internal/actions"
+	"github.com/wuddleko/genguard/internal/command"
 	"github.com/wuddleko/genguard/internal/config"
+	"github.com/wuddleko/genguard/internal/discover"
 )
 
-type CheckAllOptions struct {
-	RepoRoot string
-	Paths    []string
-	Since    string
-	Isolated bool
-	Log      io.Writer
-	Quiet    bool
-	Context  context.Context
-	Env      actions.Env
-}
-
-type Mode int
-
-const (
-	ModeCheck Mode = iota
-	ModeRun
-)
-
-type Options struct {
-	Mode     Mode
-	RepoRoot string
-	Paths    []string
-	Since    string
-	Isolated bool
-	Log      io.Writer
-	Quiet    bool
-	Context  context.Context
-	Env      actions.Env
-}
-
-func optionsFrom(opts CheckAllOptions, mode Mode) Options {
-	return Options{
-		Mode:     mode,
-		RepoRoot: opts.RepoRoot,
-		Paths:    opts.Paths,
-		Since:    opts.Since,
-		Isolated: opts.Isolated,
-		Log:      opts.Log,
-		Quiet:    opts.Quiet,
-		Context:  opts.Context,
-		Env:      opts.Env,
-	}
-}
-
-func CheckAll(opts CheckAllOptions) (RunResult, error) {
-	return executeAll(optionsFrom(opts, ModeCheck))
-}
-
-func executeAll(opts Options) (RunResult, error) {
+// ExecuteAll runs every config under the repository, or opts.Paths. The error
+// is set when nothing ran.
+func ExecuteAll(opts Options) (RunResult, error) {
 	if opts.Mode == ModeRun && opts.Isolated {
-		return RunResult{}, newGenguardError("genguard run writes the checkout; --isolated is not valid")
+		return RunResult{}, errRunIsolated
 	}
-	repoRoot, paths, base, err := discoverConfigs(opts)
+	log := commandLog{ctx: opts.Context, env: opts.Env}
+	repoRoot, paths, base, err := discoverConfigs(log, opts)
 	if err != nil {
 		return RunResult{}, err
 	}
-	run := RunResult{
-		RepoRoot: repoRoot,
-		Configs:  make([]ConfigRun, 0, len(paths)),
-	}
-	cache := &toolCache{}
-	for _, configPath := range paths {
-		if stop, err := canceledStop(opts.Context, run.ExitCode(), func(interrupt error) { noteInterruptedDrift(&run, interrupt) }); stop {
-			return run, err
+	run := RunResult{RepoRoot: repoRoot, All: true, Configs: make([]ConfigRun, 0, len(paths))}
+	for _, path := range paths {
+		if log.canceled() {
+			break
 		}
-		log := streamFor(repoRoot, configPath, opts.Log, opts.Quiet, opts.Env)
-		log.ctx = opts.Context
-		log.toolCache = cache
-		run.Configs = append(run.Configs, configRun(opts, configPath, base, log))
+		cfgLog := log
+		if opts.Log != nil {
+			cfgLog.w = opts.Log
+			cfgLog.quiet = opts.Quiet
+			cfgLog.prefix = displayConfigPath(repoRoot, path) + ": "
+		}
+		run.Configs = append(run.Configs, runListed(opts, cfgLog, repoRoot, path, base))
+	}
+	if !log.canceled() {
+		return run, nil
+	}
+	if len(run.Configs) == 0 {
+		return run, command.ErrInterrupted
+	}
+	if last := &run.Configs[len(run.Configs)-1]; !last.hasInterrupt() {
+		last.Result.note(command.ErrInterrupted)
 	}
 	return run, nil
 }
 
-func configRun(opts Options, path, base string, log commandLog) ConfigRun {
-	if opts.Mode == ModeCheck && opts.Isolated {
-		return checkOneIsolated(path, base, log)
-	}
-	if opts.Mode == ModeCheck {
-		return checkOne(path, base, log)
-	}
-	return runOne(path, base, log)
-}
-
-func streamFor(repoRoot, configPath string, log io.Writer, quiet bool, env actions.Env) commandLog {
-	if log == nil {
-		return commandLog{env: env}
-	}
-	return commandLog{w: log, prefix: displayConfigPath(repoRoot, configPath) + ": ", quiet: quiet, env: env}
-}
-
-func rejectDiscoveredOverlaps(opts Options, repoRoot string, paths []string) error {
+func runListed(opts Options, log commandLog, repoRoot, path, base string) ConfigRun {
+	run := ConfigRun{Path: path}
+	var err error
 	if opts.Isolated {
-		return config.RejectCommittedOutputOverlaps(opts.Context, repoRoot, paths)
-	}
-	return config.RejectOutputOverlaps(paths)
-}
-
-func discoverConfigs(opts Options) (repoRoot string, paths []string, base string, err error) {
-	repoRoot, err = gitRepoRoot(opts.RepoRoot)
-	if err != nil {
-		return "", nil, "", err
-	}
-
-	paths = opts.Paths
-	if len(paths) == 0 {
-		paths, err = config.FindAll(opts.Context, repoRoot, opts.Isolated)
-		if err != nil {
-			return "", nil, "", err
+		run.Result, err = checkIsolated(log, repoRoot, path, base)
+	} else {
+		var cfg config.Config
+		if cfg, err = config.LoadConfig(path); err == nil {
+			run.Result, err = groups(cfg, repoRoot, base, log, opts.Mode)
 		}
 	}
-
-	paths, err = normalizeConfigPaths(paths)
-	if err != nil {
-		return "", nil, "", err
-	}
-	if err := rejectDiscoveredOverlaps(opts, repoRoot, paths); err != nil {
-		return "", nil, "", err
-	}
-	if strings.TrimSpace(opts.Since) != "" {
-		base, err = mergeBase(commandLog{ctx: opts.Context}, repoRoot, opts.Since)
-		if err != nil {
-			return "", nil, "", err
-		}
-	}
-	return repoRoot, paths, base, nil
-}
-
-func checkOneIsolated(path, since string, log commandLog) ConfigRun {
-	result, err := checkSinceIsolated(path, since, log)
-	return isolatedRun(path, result, err)
-}
-
-func isolatedRun(configPath string, result ConfigResult, err error) ConfigRun {
-	run := ConfigRun{Path: configPath, Result: result}
-	if err != nil && len(result.Groups) == 0 {
+	if err != nil && len(run.Result.Groups) == 0 {
 		run.Err = err
 	}
 	return run
 }
 
-func checkOne(path, base string, log commandLog) ConfigRun {
-	return loadConfigRun(path, func(cfg config.Config) (ConfigResult, error) {
-		return checkConfig(cfg, base, log)
-	})
-}
-
-func runOne(path, base string, log commandLog) ConfigRun {
-	return loadConfigRun(path, func(cfg config.Config) (ConfigResult, error) {
-		return runConfig(cfg, base, log)
-	})
-}
-
-func loadConfigRun(path string, run func(config.Config) (ConfigResult, error)) ConfigRun {
-	cfgRun := ConfigRun{Path: path}
-	cfg, err := config.LoadConfig(path)
+func discoverConfigs(log commandLog, opts Options) (repoRoot string, paths []string, base string, err error) {
+	repoRoot, err = gitRepoRoot(log, opts.RepoRoot)
 	if err != nil {
-		cfgRun.Err = err
-		return cfgRun
+		return "", nil, "", err
 	}
-	result, err := run(cfg)
+	paths = opts.Paths
+	if len(paths) == 0 {
+		paths, err = discover.FindAll(opts.Context, repoRoot, opts.Isolated)
+		if err != nil {
+			return "", nil, "", err
+		}
+	}
+	paths, err = normalizeConfigPaths(paths)
 	if err != nil {
-		cfgRun.Err = err
-		return cfgRun
+		return "", nil, "", err
 	}
-	cfgRun.Result = result
-	return cfgRun
+	var read func(string) ([]byte, error)
+	if opts.Isolated {
+		read = discover.Committed(opts.Context, repoRoot)
+	}
+	if err := config.RejectOutputOverlaps(paths, read); err != nil {
+		return "", nil, "", err
+	}
+	base, err = sinceBase(log, repoRoot, opts.Since)
+	if err != nil {
+		return "", nil, "", err
+	}
+	return repoRoot, paths, base, nil
 }
 
 func normalizeConfigPaths(paths []string) ([]string, error) {

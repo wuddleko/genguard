@@ -19,8 +19,8 @@ func TestFormatAnnotationsDriftFile(t *testing.T) {
 			Result: ConfigResult{Groups: []GroupResult{
 				{Name: "plain", Status: GroupOK},
 				{Name: "protobuf", Status: GroupDrift, Drifts: []Drift{
-					{Kind: "modified", Path: "gen/a.go"},
-					{Kind: "missing", Path: "gen/a,b.go"},
+					{Kind: "modified", Path: "api/gen/a.go"},
+					{Kind: "missing", Path: "api/gen/a,b.go"},
 				}},
 			}},
 		}},
@@ -41,7 +41,7 @@ func TestFormatAnnotationsErrorAndCleanup(t *testing.T) {
 		Err:    errors.New("command failed (exit 1): line1\nline2"),
 		Drifts: []Drift{{Kind: "modified", Path: "gen/a.go"}},
 	}}}
-	result.noteCleanup(errors.New("remove failed"))
+	result.note(errors.New("remove failed"))
 	text := FormatAnnotations(RunResult{
 		RepoRoot: root,
 		Configs: []ConfigRun{
@@ -93,7 +93,7 @@ func TestFormatAnnotationsWorkspacePrefix(t *testing.T) {
 			Result: ConfigResult{Groups: []GroupResult{{
 				Name:   "protobuf",
 				Status: GroupDrift,
-				Drifts: []Drift{{Kind: "modified", Path: "gen/a.go"}},
+				Drifts: []Drift{{Kind: "modified", Path: "api/gen/a.go"}},
 			}}},
 		}},
 	}

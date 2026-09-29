@@ -21,17 +21,19 @@ func TestCheckTimeoutRunsLaterGroup(t *testing.T) {
 				Name:    "greeting",
 				Command: `python3 -c "import sys,time; sys.stderr.write('line1'+chr(10)); sys.stderr.flush(); time.sleep(5)"`,
 				Outputs: []string{"left.txt"},
+				Timeout: 200 * time.Millisecond,
 			},
 			{
 				Name:    "other",
 				Command: "true",
 				Outputs: []string{"right.txt"},
+				Timeout: 200 * time.Millisecond,
 			},
 		},
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "", commandLog{timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -66,11 +68,12 @@ func TestCheckTimeoutWriterDropsTail(t *testing.T) {
 			Name:    "greeting",
 			Command: `python3 -c "import sys,time; sys.stderr.write('line1'+chr(10)); sys.stderr.flush(); time.sleep(5)"`,
 			Outputs: []string{"left.txt"},
+			Timeout: 200 * time.Millisecond,
 		}},
 	}
 	var buf bytes.Buffer
 	start := time.Now()
-	result, err := checkConfig(cfg, "", commandLog{w: &buf, timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "", commandLog{w: &buf})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -101,11 +104,12 @@ func TestCheckTimeoutSkipDoesNotRun(t *testing.T) {
 			Command: `python3 -c "import sys,time; sys.stderr.write('ran'+chr(10)); sys.stderr.flush(); time.sleep(5)"`,
 			Inputs:  []string{"queries/"},
 			Outputs: []string{"out.txt"},
+			Timeout: 200 * time.Millisecond,
 		}},
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "HEAD", commandLog{timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "HEAD", commandLog{})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -131,11 +135,12 @@ func TestCheckTimeoutCleanLeavesWipe(t *testing.T) {
 			Command: `python3 -c "import time; time.sleep(5)"`,
 			Outputs: []string{"generated/hello.txt"},
 			Clean:   true,
+			Timeout: 200 * time.Millisecond,
 		}},
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "", commandLog{timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -161,11 +166,12 @@ func TestCheckTimeoutStillDiffs(t *testing.T) {
 			Name:    "greeting",
 			Command: `python3 -c "f=open('generated/hello.txt','wb'); f.write(b'new\n'); f.flush(); f.close(); import time; time.sleep(5)"`,
 			Outputs: []string{"generated/hello.txt"},
+			Timeout: 200 * time.Millisecond,
 		}},
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "", commandLog{timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}

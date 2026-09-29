@@ -1,62 +1,26 @@
 package check
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/wuddleko/genguard/internal/actions"
 	"github.com/wuddleko/genguard/internal/config"
 	"github.com/wuddleko/genguard/internal/pathx"
 )
 
-func CheckSinceIsolated(path, since string) (ConfigResult, error) {
-	return executeIsolated(path, Options{Mode: ModeCheck, Since: since})
-}
-
-func CheckSinceIsolatedLog(ctx context.Context, path, since string, log io.Writer, quiet bool, env actions.Env) (ConfigResult, error) {
-	return executeIsolated(path, Options{Mode: ModeCheck, Since: since, Log: log, Quiet: quiet, Context: ctx, Env: env})
-}
-
-func executeIsolated(path string, opts Options) (ConfigResult, error) {
-	return checkSinceIsolated(path, opts.Since, commandLog{w: opts.Log, quiet: opts.Quiet, ctx: opts.Context, env: opts.Env})
-}
-
-func checkSinceIsolated(path, since string, log commandLog) (ConfigResult, error) {
-	var result ConfigResult
-	err := withIsolatedCheck(path, since, log, func(cfg config.Config, r ConfigResult) error {
-		if drifts := r.AllDrifts(); len(drifts) > 0 {
-			diff, diffErr := DriftDiff(cfg.Root(), drifts)
-			r.captureDriftDiff(diff, diffErr)
-		}
-		result = r
-		return nil
-	})
-	if err != nil && len(result.Groups) > 0 {
-		if isInterrupt(result.cleanup) {
-			result.cleanup = err
-		} else {
-			result.noteCleanup(err)
-		}
-	}
-	return result, err
-}
-
-func withIsolatedCheck(path, since string, log commandLog, fn func(config.Config, ConfigResult) error) error {
+// checkIsolated checks the HEAD copy of path in a throwaway worktree of
+// repoRoot. base comes from the caller's repository: refs such as @{u} mean
+// nothing in the detached worktree.
+func checkIsolated(log commandLog, repoRoot, path, base string) (ConfigResult, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return err
+		return ConfigResult{}, err
 	}
-	// @{u} and HEAD@{1} are meaningless in the detached worktree.
-	since, err = isolateSince(log, filepath.Dir(abs), since)
-	if err != nil {
-		return err
-	}
-	return withIsolatedWorktree(log, filepath.Dir(abs), func(wt isolatedWorktree) error {
+	var result ConfigResult
+	err = withIsolatedWorktree(log, repoRoot, func(wt isolatedWorktree) error {
 		mapped, err := wt.mapPath(abs)
 		if err != nil {
 			return err
@@ -64,28 +28,22 @@ func withIsolatedCheck(path, since string, log commandLog, fn func(config.Config
 		cfg, err := config.LoadConfig(mapped)
 		if err != nil {
 			if os.IsNotExist(err) {
-				return newGenguardError("%s is not in HEAD", path)
+				return fmt.Errorf("%s is not in HEAD", path)
 			}
 			return callerPathError(err, mapped, path)
 		}
-		result, err := checkSince(cfg, since, log)
-		if err != nil {
+		if result, err = groups(cfg, wt.root, base, log, ModeCheck); err != nil {
 			return err
 		}
-		return fn(cfg, result)
+		if drifts := result.AllDrifts(); len(drifts) > 0 {
+			result.captureDriftDiff(driftDiff(wt.root, drifts))
+		}
+		return nil
 	})
-}
-
-func isolateSince(log commandLog, dir, since string) (string, error) {
-	since = strings.TrimSpace(since)
-	if since == "" {
-		return "", nil
+	if err != nil && len(result.Groups) > 0 {
+		result.note(err)
 	}
-	root, err := gitRepoRoot(dir)
-	if err != nil {
-		return "", err
-	}
-	return verifyCommit(log, root, since)
+	return result, err
 }
 
 func callerPathError(err error, mapped, path string) error {
@@ -125,11 +83,7 @@ func withIsolatedWorktree(log commandLog, repoRoot string, fn func(isolatedWorkt
 	return fn(wt)
 }
 
-func addIsolatedWorktree(log commandLog, repoRoot string) (isolatedWorktree, error) {
-	repo, err := gitRepoRoot(repoRoot)
-	if err != nil {
-		return isolatedWorktree{}, err
-	}
+func addIsolatedWorktree(log commandLog, repo string) (isolatedWorktree, error) {
 	parent, err := os.MkdirTemp("", "genguard-")
 	if err != nil {
 		return isolatedWorktree{}, err
@@ -195,26 +149,10 @@ func (w isolatedWorktree) mapPath(path string) (string, error) {
 }
 
 func relInsideRepo(root, path string) (string, error) {
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return "", err
-	}
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	if rel, ok := pathx.RelInside(absRoot, absPath); ok {
+	if rel, ok := pathx.RelInsideResolved(root, path); ok {
 		return rel, nil
 	}
-	resolvedRoot, rootErr := filepath.EvalSymlinks(absRoot)
-	resolvedPath, pathErr := filepath.EvalSymlinks(absPath)
-	if rootErr != nil || pathErr != nil {
-		return "", newGenguardError("%s is not inside the repository", path)
-	}
-	if rel, ok := pathx.RelInside(resolvedRoot, resolvedPath); ok {
-		return rel, nil
-	}
-	return "", newGenguardError("%s is not inside the repository", path)
+	return "", fmt.Errorf("%s is not inside the repository", path)
 }
 
 func isolateGitError(op, out string, err error) error {
@@ -225,5 +163,5 @@ func isolateGitError(op, out string, err error) error {
 	if detail == "" {
 		detail = "git worktree " + op + " failed"
 	}
-	return newGenguardError("git worktree %s: %s", op, detail)
+	return fmt.Errorf("git worktree %s: %s", op, detail)
 }

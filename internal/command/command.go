@@ -14,28 +14,19 @@ var ErrInterrupted = errors.New("interrupted")
 
 var waitDelay = 10 * time.Second
 
-func Run(root, command string, onLine func(string), timeout time.Duration) (string, error) {
-	return run(nil, root, command, onLine, timeout)
-}
-
-func RunContext(ctx context.Context, root, command string, onLine func(string), timeout time.Duration) (string, error) {
-	return run(ctx, root, command, onLine, timeout)
-}
-
-func Capture(root, command string, timeout time.Duration) (string, int, error) {
-	return execute(nil, root, command, nil, timeout)
-}
-
-func CaptureContext(ctx context.Context, root, command string, timeout time.Duration) (string, int, error) {
-	return execute(ctx, root, command, nil, timeout)
-}
-
-func run(ctx context.Context, root, command string, onLine func(string), timeout time.Duration) (string, error) {
+// Run runs command with sh -c in root. The tail of its output is returned
+// only when it fails.
+func Run(ctx context.Context, root, command string, onLine func(string), timeout time.Duration) (string, error) {
 	text, code, err := execute(ctx, root, command, onLine, timeout)
 	if err != nil || code != 0 {
 		return text, err
 	}
 	return "", nil
+}
+
+// Capture runs command like Run and returns its output and exit code.
+func Capture(ctx context.Context, root, command string, timeout time.Duration) (string, int, error) {
+	return execute(ctx, root, command, nil, timeout)
 }
 
 func execute(ctx context.Context, root, command string, onLine func(string), timeout time.Duration) (string, int, error) {
@@ -62,7 +53,8 @@ func execute(ctx context.Context, root, command string, onLine func(string), tim
 	if errors.Is(err, ErrInterrupted) {
 		return ring.String(), 0, ErrInterrupted
 	}
-	if timeoutFailure(err) {
+	var timedOut *TimeoutError
+	if errors.As(err, &timedOut) {
 		return ring.String(), 0, err
 	}
 	if err != nil && !started {
@@ -104,13 +96,6 @@ func waitCommand(parent context.Context, cmd *exec.Cmd, timeout time.Duration) (
 	if interrupted(parent) {
 		return false, ErrInterrupted
 	}
-	if timeout <= 0 && !watchable(parent) {
-		err := cmd.Run()
-		if errors.Is(err, exec.ErrWaitDelay) && succeeded(cmd) {
-			return cmd.Process != nil, nil
-		}
-		return cmd.Process != nil, err
-	}
 
 	group, err := startCommand(cmd)
 	if cmd.Process == nil {
@@ -151,7 +136,7 @@ func waitCommand(parent context.Context, cmd *exec.Cmd, timeout time.Duration) (
 		if interrupted(parent) {
 			return true, ErrInterrupted
 		}
-		return true, timeoutError(timeout)
+		return true, &TimeoutError{Limit: timeout}
 	}
 }
 
@@ -187,12 +172,12 @@ func succeeded(cmd *exec.Cmd) bool {
 	return cmd.ProcessState != nil && cmd.ProcessState.Success()
 }
 
-func timeoutError(limit time.Duration) error {
-	return fmt.Errorf("command timed out after %s", limit)
+type TimeoutError struct {
+	Limit time.Duration
 }
 
-func timeoutFailure(err error) bool {
-	return err != nil && strings.HasPrefix(err.Error(), "command timed out after ")
+func (e *TimeoutError) Error() string {
+	return fmt.Sprintf("command timed out after %s", e.Limit)
 }
 
 type StartError struct {

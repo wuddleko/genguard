@@ -3,6 +3,7 @@ package check
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/wuddleko/genguard/internal/actions"
+	"github.com/wuddleko/genguard/internal/command"
 	"github.com/wuddleko/genguard/internal/config"
+	"github.com/wuddleko/genguard/internal/discover"
 	"github.com/wuddleko/genguard/internal/gitx"
 	"github.com/wuddleko/genguard/tests/testutil"
 )
@@ -41,28 +44,36 @@ func TestRunGroupAffectedErrorSkipsCommand(t *testing.T) {
 	}
 }
 
-func TestNoteCleanupKeepsTheFirstError(t *testing.T) {
+func TestNoteKeepsTheFirstError(t *testing.T) {
 	var result ConfigResult
-	result.noteCleanup(nil)
-	if result.cleanup != nil {
-		t.Fatalf("cleanup = %v", result.cleanup)
+	result.note(nil)
+	if result.extra != nil {
+		t.Fatalf("extra = %v", result.extra)
 	}
-	result.noteCleanup(errors.New("first"))
-	result.noteCleanup(errors.New("second"))
-	if result.cleanup == nil || result.cleanup.Error() != "first" {
-		t.Fatalf("cleanup = %v", result.cleanup)
+	result.note(errors.New("first"))
+	result.note(errors.New("second"))
+	if result.extra == nil || result.extra.Error() != "first" {
+		t.Fatalf("extra = %v", result.extra)
+	}
+
+	var interrupted ConfigResult
+	interrupted.note(command.ErrInterrupted)
+	interrupted.note(errors.New("git worktree remove: busy"))
+	if interrupted.extra == nil || interrupted.extra.Error() != "git worktree remove: busy" {
+		t.Fatalf("extra = %v, want the removal error over the interrupt", interrupted.extra)
 	}
 }
 
-func TestSingleConfigRunRejectsBadPaths(t *testing.T) {
-	_, err := SingleConfigRun(filepath.Join(t.TempDir(), "genguard.yaml"), ConfigResult{})
+func TestExecuteRejectsBadPaths(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "genguard.yaml")
+	writeFile(t, path, "groups:\n  - command: \"true\"\n    outputs: [out.txt]\n")
+	_, err := Execute(Options{}, path)
 	if err == nil || !strings.Contains(err.Error(), "not a git work tree") {
 		t.Fatalf("error = %v", err)
 	}
 
 	testutil.WithoutWorkingDirectory(t)
-	_, err = SingleConfigRun("genguard.yaml", ConfigResult{})
-	if err == nil {
+	if _, err := Execute(Options{}, "genguard.yaml"); err == nil {
 		t.Fatal("relative path")
 	}
 }
@@ -89,42 +100,33 @@ func TestCallerPathErrorRewritesOrWraps(t *testing.T) {
 	}
 }
 
-func TestIsolateSinceRejectsUnusableRefs(t *testing.T) {
-	dir := t.TempDir()
-	_, err := isolateSince(commandLog{}, dir, "HEAD")
-	if err == nil || !strings.Contains(err.Error(), "not a git work tree") {
-		t.Fatalf("non-repo: %v", err)
-	}
-
+func TestMergeBaseRejectsUnusableRefs(t *testing.T) {
 	root := gitRepo(t)
-	_, err = isolateSince(commandLog{}, root, "not-a-ref")
+	_, err := mergeBase(commandLog{}, root, "not-a-ref")
 	if err == nil || !strings.Contains(err.Error(), "bad --since ref") {
 		t.Fatalf("bad ref: %v", err)
 	}
 
 	t.Run("quiet", func(t *testing.T) {
 		installGitShim(t, "verify-quiet")
-		_, err := isolateSince(commandLog{}, root, "HEAD")
+		_, err := mergeBase(commandLog{}, root, "HEAD")
 		if err == nil || !strings.Contains(err.Error(), "git rev-parse failed") {
 			t.Fatalf("error = %v", err)
 		}
 	})
 	t.Run("empty", func(t *testing.T) {
 		installGitShim(t, "verify-empty")
-		_, err := isolateSince(commandLog{}, root, "HEAD")
+		_, err := mergeBase(commandLog{}, root, "HEAD")
 		if err == nil || !strings.Contains(err.Error(), "empty revision") {
 			t.Fatalf("error = %v", err)
 		}
 	})
 }
 
-func TestWithIsolatedCheckRejectsRelativePathWithoutCwd(t *testing.T) {
+func TestCheckIsolatedRejectsRelativePathWithoutCwd(t *testing.T) {
+	root := gitRepo(t)
 	testutil.WithoutWorkingDirectory(t)
-	err := withIsolatedCheck("genguard.yaml", "", commandLog{}, func(config.Config, ConfigResult) error {
-		t.Fatal("fn ran")
-		return nil
-	})
-	if err == nil {
+	if _, err := checkIsolated(commandLog{}, root, "genguard.yaml", ""); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -134,7 +136,7 @@ func TestIsolatedCheckMergeBaseFailure(t *testing.T) {
 	writeTracked(t, root, "keep.txt", "ok\n")
 	writeTracked(t, root, "genguard.yaml", "groups:\n  - name: plain\n    command: \"true\"\n    outputs:\n      - keep.txt\n")
 	installGitShim(t, "merge-base-quiet")
-	_, err := CheckSinceIsolated(filepath.Join(root, "genguard.yaml"), "HEAD")
+	_, err := Execute(Options{Isolated: true, Since: "HEAD"}, filepath.Join(root, "genguard.yaml"))
 	if err == nil || !strings.Contains(err.Error(), "git merge-base failed") {
 		t.Fatalf("error = %v", err)
 	}
@@ -147,14 +149,15 @@ func TestCheckSinceIsolatedNotesFailedWorktreeRemoval(t *testing.T) {
 	root := gitRepo(t)
 	writeTracked(t, root, "keep.txt", "ok\n")
 	writeTracked(t, root, "genguard.yaml", "groups:\n  - name: lock\n    command: chmod 555 .\n    outputs:\n      - keep.txt\n")
-	t.Cleanup(func() { releaseWorktrees(t, root) })
+	lockableTempDir(t)
 
-	run := checkOneIsolated(filepath.Join(root, "genguard.yaml"), "", commandLog{})
-	if run.Err != nil {
-		t.Fatalf("Err = %v", run.Err)
+	executed, err := Execute(Options{Isolated: true}, filepath.Join(root, "genguard.yaml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if run.Result.cleanup == nil || !strings.Contains(run.Result.cleanup.Error(), "git worktree remove") {
-		t.Fatalf("cleanup = %v", run.Result.cleanup)
+	run := executed.Configs[0]
+	if run.Result.extra == nil || !strings.Contains(run.Result.extra.Error(), "git worktree remove") {
+		t.Fatalf("extra = %v", run.Result.extra)
 	}
 	if run.ExitCode() != 2 {
 		t.Fatalf("exit = %d, want 2", run.ExitCode())
@@ -220,7 +223,7 @@ func TestListConfigsGitFailures(t *testing.T) {
 
 	t.Run("quiet", func(t *testing.T) {
 		installGitShim(t, "ls-tree-quiet")
-		_, err := config.FindAll(context.Background(), root, true)
+		_, err := discover.FindAll(context.Background(), root, true)
 		if err == nil || !strings.Contains(err.Error(), "git ls-tree failed") {
 			t.Fatalf("error = %v", err)
 		}
@@ -230,28 +233,25 @@ func TestListConfigsGitFailures(t *testing.T) {
 		if _, _, err := git(root, "rev-parse", "--is-inside-work-tree"); err != nil {
 			t.Fatal(err)
 		}
-		_, err := config.FindAll(context.Background(), root, true)
+		_, err := discover.FindAll(context.Background(), root, true)
 		if err == nil {
 			t.Fatal("git still on PATH after the shim removed itself")
 		}
 	})
 }
 
-func TestWithIsolatedCheckRejectsBadSince(t *testing.T) {
+func TestIsolatedRejectsBadSince(t *testing.T) {
 	root := gitRepo(t)
-	err := withIsolatedCheck(filepath.Join(root, "genguard.yaml"), "not-a-ref", commandLog{}, func(config.Config, ConfigResult) error {
-		t.Fatal("fn ran")
-		return nil
-	})
+	_, err := Execute(Options{Isolated: true, Since: "not-a-ref"}, filepath.Join(root, "genguard.yaml"))
 	if err == nil || !strings.Contains(err.Error(), "bad --since ref") {
 		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestIsolateSinceGitDisappears(t *testing.T) {
+func TestIsolatedSinceGitDisappears(t *testing.T) {
 	root := gitRepo(t)
 	installGitShim(t, "drop-on-toplevel")
-	_, err := isolateSince(commandLog{}, root, "HEAD")
+	_, err := Execute(Options{Isolated: true, Since: "HEAD"}, filepath.Join(root, "genguard.yaml"))
 	if err == nil {
 		t.Fatal("expected git to be missing for rev-parse --verify")
 	}
@@ -293,7 +293,7 @@ func TestRelInsideRepoFollowsSymlinkSpelling(t *testing.T) {
 	}
 }
 
-func TestWithIsolatedCheckMapPathOutsideLexicalRoot(t *testing.T) {
+func TestIsolatedMapPathOutsideLexicalRoot(t *testing.T) {
 	root := gitRepo(t)
 	writeTracked(t, root, "keep.txt", "ok\n")
 	sub := filepath.Join(root, "sub")
@@ -304,10 +304,7 @@ func TestWithIsolatedCheckMapPathOutsideLexicalRoot(t *testing.T) {
 	if err := os.Symlink(sub, link); err != nil {
 		t.Fatal(err)
 	}
-	err := withIsolatedCheck(filepath.Join(link, "genguard.yaml"), "", commandLog{}, func(config.Config, ConfigResult) error {
-		t.Fatal("fn ran")
-		return nil
-	})
+	_, err := Execute(Options{Isolated: true}, filepath.Join(link, "genguard.yaml"))
 	if err == nil || !strings.Contains(err.Error(), "is not inside the repository") {
 		t.Fatalf("error = %v", err)
 	}
@@ -352,39 +349,19 @@ func TestAnnotationPathsWhenLookupFails(t *testing.T) {
 	}
 }
 
-func releaseWorktrees(t *testing.T, repo string) {
+// A failed git worktree remove still unregisters the worktree, so a read-only
+// one cannot be found again through git. Isolated worktrees go under a
+// per-test TMPDIR that is made writable before it is removed.
+func lockableTempDir(t *testing.T) {
 	t.Helper()
-	out, code, err := git(repo, "worktree", "list", "--porcelain")
-	if err != nil || code != 0 {
-		t.Errorf("worktree list: %v %s", err, out)
-		return
-	}
-	repoAbs, err := filepath.Abs(repo)
-	if err != nil {
-		t.Error(err)
-		return
-	}
-	for _, line := range strings.Split(out, "\n") {
-		path, ok := strings.CutPrefix(line, "worktree ")
-		if !ok {
-			continue
-		}
-		abs, err := filepath.Abs(path)
-		if err != nil || abs == repoAbs {
-			continue
-		}
-		if err := os.Chmod(path, 0o755); err != nil {
-			t.Errorf("chmod %s: %v", path, err)
-		}
-		if err := os.RemoveAll(path); err != nil {
-			t.Errorf("remove %s: %v", path, err)
-		}
-		if filepath.Base(abs) == "wt" {
-			parent := filepath.Dir(abs)
-			if err := os.RemoveAll(parent); err != nil {
-				t.Errorf("remove %s: %v", parent, err)
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(tmp, func(path string, d fs.DirEntry, err error) error {
+			if err == nil && d.IsDir() {
+				_ = os.Chmod(path, 0o755)
 			}
-		}
-	}
-	_, _, _ = git(repo, "worktree", "prune")
+			return nil
+		})
+	})
 }

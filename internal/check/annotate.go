@@ -24,12 +24,12 @@ func FormatAnnotations(run RunResult, env actions.Env) string {
 				b.WriteString(actions.Annotation(configFile, group.Name, oneLineError(group.Err)))
 			}
 			for _, drift := range group.Drifts {
-				file := actions.WorkspaceFile(env.Workspace, run.RepoRoot, jsonDriftPath(run.RepoRoot, cfg.Path, drift.Path))
+				file := actions.WorkspaceFile(env.Workspace, run.RepoRoot, drift.Path)
 				b.WriteString(actions.Annotation(file, group.Name, drift.Kind))
 			}
 		}
-		if cfg.Result.cleanup != nil {
-			b.WriteString(actions.Annotation(configFile, "", oneLineError(cfg.Result.cleanup)))
+		if cfg.Result.extra != nil {
+			b.WriteString(actions.Annotation(configFile, "", oneLineError(cfg.Result.extra)))
 		}
 	}
 	return b.String()
@@ -47,7 +47,7 @@ func errorAnnotationFile(file string, env actions.Env) string {
 	if err != nil {
 		return filepath.ToSlash(file)
 	}
-	repoRoot, err := gitRepoRoot(filepath.Dir(abs))
+	repoRoot, err := gitRepoRoot(commandLog{}, filepath.Dir(abs))
 	if err != nil {
 		return filepath.ToSlash(abs)
 	}

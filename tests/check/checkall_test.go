@@ -17,7 +17,7 @@ func TestCheckAllAllOK(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestCheckAllDriftAndOK(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,15 +49,15 @@ func TestCheckAllDriftAndOK(t *testing.T) {
 	}
 	assertConfigPaths(t, run, api, web)
 	apiRun := configByPath(t, run, api)
-	if len(apiRun.Result.Groups[0].Drifts) != 1 || apiRun.Result.Groups[0].Drifts[0] != (check.Drift{Group: "api", Path: "out.txt", Kind: "modified"}) {
+	if len(apiRun.Result.Groups[0].Drifts) != 1 || apiRun.Result.Groups[0].Drifts[0] != (check.Drift{Group: "api", Path: "api/out.txt", Kind: "modified"}) {
 		t.Fatalf("api drift = %+v", apiRun.Result.Groups[0].Drifts)
 	}
-	diff, err := check.DriftDiff(filepath.Dir(api), apiRun.Result.Groups[0].Drifts)
+	report, err := check.FormatFailureReport(run)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(diff, "diff --git") {
-		t.Fatalf("diff = %q", diff)
+	if !strings.Contains(report, "diff --git a/api/out.txt") {
+		t.Fatalf("report = %q", report)
 	}
 	webRun := configByPath(t, run, web)
 	if webRun.Result.Groups[0].Status != check.GroupOK {
@@ -71,7 +71,7 @@ func TestCheckAllCommandErrorStillRunsOthers(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestCheckAllInvalidYAMLStillRunsOthers(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestCheckAllNestedConfigsBothRun(t *testing.T) {
 	proto := writeMiniConfig(t, filepath.Join(root, "api", "proto"), "proto", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestCheckAllSortsAndDedupsPaths(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{
+	run, err := check.ExecuteAll(check.Options{
 		RepoRoot: root,
 		Paths:    []string{web, api, web},
 	})
@@ -167,7 +167,7 @@ func TestCheckAllRunsInSortedPathOrder(t *testing.T) {
 
 	web := filepath.Join(root, "web", "genguard.yaml")
 	api := filepath.Join(root, "api", "genguard.yaml")
-	if _, err := check.CheckAll(check.CheckAllOptions{
+	if _, err := check.ExecuteAll(check.Options{
 		RepoRoot: root,
 		Paths:    []string{web, api},
 	}); err != nil {
@@ -185,7 +185,7 @@ func TestCheckAllRunsInSortedPathOrder(t *testing.T) {
 func TestCheckAllEmptyDiscovery(t *testing.T) {
 	root := initMonorepo(t)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestCheckAllSetupErrorContinues(t *testing.T) {
 	orphanDir := t.TempDir()
 	orphan := writeMiniConfig(t, orphanDir, "orphan", "true")
 
-	run, err := check.CheckAll(check.CheckAllOptions{
+	run, err := check.ExecuteAll(check.Options{
 		RepoRoot: root,
 		Paths:    []string{orphan, web},
 	})
@@ -234,7 +234,7 @@ func TestCheckAllSetupErrorContinues(t *testing.T) {
 func TestCheckAllMissingRepoRoot(t *testing.T) {
 	dir := t.TempDir()
 	testutil.Chdir(t, dir)
-	_, err := check.CheckAll(check.CheckAllOptions{})
+	_, err := check.ExecuteAll(check.Options{})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -245,7 +245,7 @@ func TestCheckAllMissingRepoRoot(t *testing.T) {
 
 func TestCheckAllExplicitRepoRootMustBeGit(t *testing.T) {
 	dir := t.TempDir()
-	_, err := check.CheckAll(check.CheckAllOptions{
+	_, err := check.ExecuteAll(check.Options{
 		RepoRoot: dir,
 		Paths:    []string{filepath.Join(dir, "genguard.yaml")},
 	})
@@ -263,7 +263,7 @@ func TestCheckAllRepoRootNormalizesToToplevel(t *testing.T) {
 	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: filepath.Join(root, "api")})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: filepath.Join(root, "api")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestCheckAllEmptyRepoRootUsesCwd(t *testing.T) {
 	commitAll(t, root)
 	testutil.Chdir(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{})
+	run, err := check.ExecuteAll(check.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestCheckAllWhitespaceRepoRootUsesCwd(t *testing.T) {
 	commitAll(t, root)
 	testutil.Chdir(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: " \t\n "})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: " \t\n "})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestCheckAllRelativeRepoRoot(t *testing.T) {
 	testutil.Chdir(t, filepath.Dir(root))
 
 	relAPI := filepath.Join(filepath.Base(root), "api")
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: relAPI})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: relAPI})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +340,7 @@ func TestCheckAllExplicitEmptyPathsDiscovers(t *testing.T) {
 	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Paths: []string{}})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root, Paths: []string{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestCheckAllSymlinkRepoRootKeepsSpelling(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: link})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: link})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func TestCheckAllSymlinkSubdirKeepsToplevelSpelling(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: filepath.Join(link, "api")})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: filepath.Join(link, "api")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +395,7 @@ func TestCheckAllSymlinkLeafUsesGitToplevelSpelling(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: shortcut})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: shortcut})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +423,7 @@ func TestCheckAllDoesNotDedupSymlinkPaths(t *testing.T) {
 	}
 	linked := filepath.Join(link, "genguard.yaml")
 
-	run, err := check.CheckAll(check.CheckAllOptions{
+	run, err := check.ExecuteAll(check.Options{
 		RepoRoot: root,
 		Paths:    []string{api, linked},
 	})
@@ -444,7 +444,7 @@ func TestCheckAllDedupsRelativeAndAbsolute(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := check.CheckAll(check.CheckAllOptions{
+	run, err := check.ExecuteAll(check.Options{
 		RepoRoot: root,
 		Paths:    []string{rel, abs, rel},
 	})
@@ -466,7 +466,7 @@ func TestCheckAllSkipsVendorGitNodeModules(t *testing.T) {
 	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +493,7 @@ func TestCheckAllDiscoversYamlAndYml(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +506,7 @@ func TestCheckAllMissingPathStillRunsOthers(t *testing.T) {
 	commitAll(t, root)
 	missing := filepath.Join(root, "missing.yaml")
 
-	run, err := check.CheckAll(check.CheckAllOptions{
+	run, err := check.ExecuteAll(check.Options{
 		RepoRoot: root,
 		Paths:    []string{missing, web},
 	})
@@ -550,7 +550,7 @@ func TestCheckAllSubdirMissingAndUntracked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,11 +558,11 @@ func TestCheckAllSubdirMissingAndUntracked(t *testing.T) {
 		t.Fatalf("exit = %d, want 1", run.ExitCode())
 	}
 	apiRun := configByPath(t, run, api)
-	if len(apiRun.Result.Groups[0].Drifts) != 1 || apiRun.Result.Groups[0].Drifts[0] != (check.Drift{Group: "api", Path: "out.txt", Kind: "missing"}) {
+	if len(apiRun.Result.Groups[0].Drifts) != 1 || apiRun.Result.Groups[0].Drifts[0] != (check.Drift{Group: "api", Path: "api/out.txt", Kind: "missing"}) {
 		t.Fatalf("api drifts = %+v", apiRun.Result.Groups[0].Drifts)
 	}
 	webRun := configByPath(t, run, web)
-	if len(webRun.Result.Groups[0].Drifts) != 1 || webRun.Result.Groups[0].Drifts[0] != (check.Drift{Group: "web", Path: "extra.txt", Kind: "untracked"}) {
+	if len(webRun.Result.Groups[0].Drifts) != 1 || webRun.Result.Groups[0].Drifts[0] != (check.Drift{Group: "web", Path: "web/extra.txt", Kind: "untracked"}) {
 		t.Fatalf("web drifts = %+v", webRun.Result.Groups[0].Drifts)
 	}
 }
@@ -588,7 +588,7 @@ func TestCheckAllCleanPassesAndStillRunsOthers(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +630,7 @@ func TestCheckAllCleanFailureStillRunsOthers(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,12 +678,12 @@ func TestCheckAllCleanFailureDoesNotBlameLaterConfig(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	_, err = check.ExecuteAll(check.Options{RepoRoot: root})
 	if err == nil || !strings.Contains(err.Error(), "both genguard.yaml and genguard.yml") {
 		t.Fatalf("discovery error = %v", err)
 	}
 
-	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root, Paths: []string{yamlPath, ymlPath}})
+	_, err = check.ExecuteAll(check.Options{RepoRoot: root, Paths: []string{yamlPath, ymlPath}})
 	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), yamlPath) || !strings.Contains(err.Error(), ymlPath) {
 		t.Fatalf("error = %v", err)
 	}
@@ -706,7 +706,7 @@ func TestCheckAllUnreadableDirectoryFailsDiscovery(t *testing.T) {
 		t.Skip("directory permissions are not enforced")
 	}
 
-	_, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	_, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err == nil || !strings.Contains(err.Error(), "could not open directory") {
 		t.Fatalf("error = %v", err)
 	}
@@ -722,11 +722,11 @@ func TestCheckAllFormatsNestedDriftReport(t *testing.T) {
 	writeMiniConfig(t, filepath.Join(root, "web"), "web", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := check.FormatRunFailureReport(run)
+	report, err := check.FormatFailureReport(run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -763,11 +763,11 @@ func TestCheckAllFormatsTwoDriftSections(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := check.FormatRunFailureReport(run)
+	report, err := check.FormatFailureReport(run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -819,7 +819,7 @@ func TestCheckAllIsolatedOverlappingCleanDoesNotShareWipe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	_, err = check.ExecuteAll(check.Options{RepoRoot: root, Isolated: true})
 	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), nested) {
 		t.Fatalf("error = %v", err)
 	}
@@ -847,7 +847,7 @@ func TestCheckAllIsolatedDiscoversHeadConfigs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root, Isolated: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -877,7 +877,7 @@ func TestCheckAllIsolatedSkipsUntrackedOnly(t *testing.T) {
 	commitAll(t, root)
 	writeMiniConfig(t, filepath.Join(root, "extra"), "extra", "true")
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root, Isolated: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -895,7 +895,7 @@ func TestCheckAllIsolatedBothNamesAtHeadIsFatal(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	_, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	_, err := check.ExecuteAll(check.Options{RepoRoot: root, Isolated: true})
 	if err == nil || !strings.Contains(err.Error(), "both genguard.yaml and genguard.yml") {
 		t.Fatalf("err = %v", err)
 	}
@@ -907,7 +907,7 @@ func TestCheckAllIsolatedExplicitPathNotInHead(t *testing.T) {
 	commitAll(t, root)
 	extra := writeMiniConfig(t, filepath.Join(root, "extra"), "extra", "true")
 
-	run, err := check.CheckAll(check.CheckAllOptions{
+	run, err := check.ExecuteAll(check.Options{
 		RepoRoot: root,
 		Paths:    []string{extra, web},
 		Isolated: true,
@@ -941,7 +941,7 @@ func TestCheckAllIsolatedLoadErrorStillRunsOthers(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "true")
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root, Isolated: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1001,7 +1001,7 @@ func TestCheckAllIsolatedOverlapUsesCommittedConfigs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	_, err = check.ExecuteAll(check.Options{RepoRoot: root, Isolated: true})
 	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), web) {
 		t.Fatalf("error = %v", err)
 	}
@@ -1044,7 +1044,7 @@ func TestCheckAllIsolatedOverlapWhenCheckoutConfigIsGone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	_, err = check.ExecuteAll(check.Options{RepoRoot: root, Isolated: true})
 	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), web) {
 		t.Fatalf("error = %v", err)
 	}
@@ -1089,7 +1089,7 @@ func TestCheckAllIsolatedIgnoresCheckoutOverlap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root, Isolated: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1133,7 +1133,7 @@ func TestCheckAllOverlapIncludesConfigThatFailsToLoad(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	_, err = check.ExecuteAll(check.Options{RepoRoot: root})
 	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), web) {
 		t.Fatalf("error = %v", err)
 	}
@@ -1177,7 +1177,7 @@ func TestCheckAllOverlapIncludesDuplicateGroupNames(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	_, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	_, err = check.ExecuteAll(check.Options{RepoRoot: root})
 	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), web) {
 		t.Fatalf("error = %v", err)
 	}
@@ -1224,7 +1224,7 @@ func TestCheckAllWithinFileOverlapRunsOtherConfig(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1253,7 +1253,7 @@ func TestCheckAllIsolatedSinceUsesOneMergeBase(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true, Since: "base"})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root, Isolated: true, Since: "base"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1276,8 +1276,8 @@ func TestCheckAllIsolatedSinceUsesOneMergeBase(t *testing.T) {
 		t.Fatal("isolated --all wrote a marker into the user tree")
 	}
 
-	commitPath(t, root, "queries/q.sql", "select 2;\n")
-	run, err = check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true, Since: "base"})
+	testutil.CommitPath(t, root, "queries/q.sql", "select 2;\n")
+	run, err = check.ExecuteAll(check.Options{RepoRoot: root, Isolated: true, Since: "base"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1297,7 +1297,7 @@ func TestCheckAllIsolatedSinceUsesOneMergeBase(t *testing.T) {
 
 func TestCheckAllIsolatedBadSinceIsFatal(t *testing.T) {
 	root := writeSinceRepo(t)
-	_, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true, Since: "not-a-ref"})
+	_, err := check.ExecuteAll(check.Options{RepoRoot: root, Isolated: true, Since: "not-a-ref"})
 	if err == nil || !strings.Contains(err.Error(), "bad --since ref") {
 		t.Fatalf("err = %v", err)
 	}
@@ -1319,14 +1319,14 @@ func TestCheckAllIsolatedReportUsesCapturedDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, err := check.CheckAll(check.CheckAllOptions{RepoRoot: root, Isolated: true})
+	run, err := check.ExecuteAll(check.Options{RepoRoot: root, Isolated: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if run.ExitCode() != 1 {
 		t.Fatalf("exit = %d, want 1", run.ExitCode())
 	}
-	report, err := check.FormatRunFailureReport(run)
+	report, err := check.FormatFailureReport(run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1349,7 +1349,7 @@ func TestCheckAllIsolatedReportUsesCapturedDiff(t *testing.T) {
 	}
 }
 
-func TestCheckAllIsolatedWorktreeAddFailureStillRunsOthers(t *testing.T) {
+func TestCheckAllIsolatedConfigInOtherRepoStillRunsOthers(t *testing.T) {
 	root := initMonorepo(t)
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "true")
 	commitAll(t, root)
@@ -1360,7 +1360,7 @@ func TestCheckAllIsolatedWorktreeAddFailureStillRunsOthers(t *testing.T) {
 	}
 	orphan := writeMiniConfig(t, orphanDir, "orphan", "true")
 
-	run, err := check.CheckAll(check.CheckAllOptions{
+	run, err := check.ExecuteAll(check.Options{
 		RepoRoot: root,
 		Paths:    []string{orphan, web},
 		Isolated: true,
@@ -1372,7 +1372,7 @@ func TestCheckAllIsolatedWorktreeAddFailureStillRunsOthers(t *testing.T) {
 		t.Fatalf("exit = %d, want 2", run.ExitCode())
 	}
 	orphanRun := configByPath(t, run, orphan)
-	if orphanRun.Err == nil || !strings.Contains(orphanRun.Err.Error(), "git worktree add:") {
+	if orphanRun.Err == nil || !strings.Contains(orphanRun.Err.Error(), "is not inside the repository") {
 		t.Fatalf("orphan err = %v", orphanRun.Err)
 	}
 	webRun := configByPath(t, run, web)
@@ -1387,7 +1387,7 @@ func TestRunAllWritesEveryConfig(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1406,7 +1406,7 @@ func TestRunAllCommandErrorStillRunsOthers(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1437,7 +1437,7 @@ func TestRunAllInvalidYAMLStillRunsOthers(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "true")
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1484,7 +1484,7 @@ func TestRunAllOverlappingCleanSharesTree(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	_, err = check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	_, err = check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), nested) {
 		t.Fatalf("error = %v", err)
 	}
@@ -1495,9 +1495,9 @@ func TestRunAllOverlappingCleanSharesTree(t *testing.T) {
 
 func TestRunAllSinceSelectsPerGroup(t *testing.T) {
 	root := writeSinceRepo(t)
-	commitPath(t, root, "queries/q.sql", "select 2;\n")
+	testutil.CommitPath(t, root, "queries/q.sql", "select 2;\n")
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base"})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root, Since: "base"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1525,7 +1525,7 @@ func TestRunAllSinceSelectsPerGroup(t *testing.T) {
 
 func TestRunAllBadSinceRunsNothing(t *testing.T) {
 	root := writeSinceRepo(t)
-	_, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "not-a-ref"})
+	_, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root, Since: "not-a-ref"})
 	if err == nil || !strings.Contains(err.Error(), "bad --since ref") {
 		t.Fatalf("err = %v", err)
 	}
@@ -1535,7 +1535,7 @@ func TestRunAllBadSinceRunsNothing(t *testing.T) {
 }
 
 func TestRunAllRejectsIsolated(t *testing.T) {
-	_, err := check.RunAll(check.CheckAllOptions{Isolated: true})
+	_, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, Isolated: true})
 	if err == nil || !strings.Contains(err.Error(), "--isolated is not valid") {
 		t.Fatalf("err = %v", err)
 	}
@@ -1571,7 +1571,7 @@ func TestRunAllCleanSuccessLaterCommandSeesWipe(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	_, err = check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	_, err = check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), nested) {
 		t.Fatalf("error = %v", err)
 	}
@@ -1610,7 +1610,7 @@ func TestRunAllLaterCommandSeesEarlierWrite(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	_, err = check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	_, err = check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), nested) {
 		t.Fatalf("error = %v", err)
 	}
@@ -1657,7 +1657,7 @@ func TestRunAllSinceCleanedLiteralOutputRunsLaterConfig(t *testing.T) {
 	}
 	commitBase(t, root)
 
-	alone, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base", Paths: []string{nested}})
+	alone, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root, Since: "base", Paths: []string{nested}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1671,7 +1671,7 @@ func TestRunAllSinceCleanedLiteralOutputRunsLaterConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base"})
+	_, err = check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root, Since: "base"})
 	if err == nil || !strings.Contains(err.Error(), "outputs overlap") || !strings.Contains(err.Error(), api) || !strings.Contains(err.Error(), nested) {
 		t.Fatalf("error = %v", err)
 	}
@@ -1728,7 +1728,7 @@ func TestRunAllSinceCleanedTrackedOutputRunsDirectoryAndGlob(t *testing.T) {
 	}
 	commitBase(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base", Paths: []string{nested}})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root, Since: "base", Paths: []string{nested}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1781,7 +1781,7 @@ func TestRunAllSinceCleanedUntrackedFileLeavesDirectoryAndGlobSkipped(t *testing
 	}
 	commitBase(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Since: "base", Paths: []string{nested}})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root, Since: "base", Paths: []string{nested}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1806,7 +1806,7 @@ func TestRunAllSkipsVendorGitNodeModules(t *testing.T) {
 	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1848,7 +1848,7 @@ func TestRunAllDiscoversAndRunsYml(t *testing.T) {
 	}
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1875,7 +1875,7 @@ func TestRunAllBothNamesRunsNothing(t *testing.T) {
 	writeMiniConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
 	commitAll(t, root)
 
-	_, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	_, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err == nil || !strings.Contains(err.Error(), "both genguard.yaml and genguard.yml") || !strings.Contains(err.Error(), apiDir) {
 		t.Fatalf("err = %v", err)
 	}
@@ -1890,7 +1890,7 @@ func TestRunAllUntrackedConfigRuns(t *testing.T) {
 	commitAll(t, root)
 	extra := writeMiniConfig(t, filepath.Join(root, "extra"), "extra", `python3 -c "open('extra-ran','w').close()"`)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1912,7 +1912,7 @@ func TestRunAllSkipsGitignoredConfig(t *testing.T) {
 	commitAll(t, root)
 	writeMiniConfig(t, filepath.Join(root, "ignored"), "ignored", `python3 -c "open('ignored-ran','w').close()"`)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1934,7 +1934,7 @@ func TestRunAllDoesNotRunConfigDeletedFromCheckout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1956,7 +1956,7 @@ func TestRunAllSortsDedupsAndRunsInPathOrder(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", "printf b >> ../order.txt")
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun,
 		RepoRoot: root,
 		Paths:    []string{web, api, web},
 	})
@@ -1982,7 +1982,7 @@ func TestRunAllRunsInDiscoveredPathOrder(t *testing.T) {
 	writeMiniConfig(t, filepath.Join(root, "a"), "a", "printf a >> ../order.txt")
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2004,7 +2004,7 @@ func TestRunAllMissingPathStillRunsOthers(t *testing.T) {
 	commitAll(t, root)
 	missing := filepath.Join(root, "missing.yaml")
 
-	run, err := check.RunAll(check.CheckAllOptions{
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun,
 		RepoRoot: root,
 		Paths:    []string{missing, web},
 	})
@@ -2029,7 +2029,7 @@ func TestRunAllOutsideRepoStillRunsOthers(t *testing.T) {
 	orphanDir := t.TempDir()
 	orphan := writeMiniConfig(t, orphanDir, "orphan", `python3 -c "open('ran','w').close()"`)
 
-	run, err := check.RunAll(check.CheckAllOptions{
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun,
 		RepoRoot: root,
 		Paths:    []string{orphan, web},
 	})
@@ -2040,7 +2040,7 @@ func TestRunAllOutsideRepoStillRunsOthers(t *testing.T) {
 		t.Fatalf("exit = %d, want 2", run.ExitCode())
 	}
 	orphanRun := configByPath(t, run, orphan)
-	if orphanRun.Err == nil || !strings.Contains(orphanRun.Err.Error(), "git work tree") {
+	if orphanRun.Err == nil || !strings.Contains(orphanRun.Err.Error(), "is not inside the repository") {
 		t.Fatalf("orphan = %+v", orphanRun)
 	}
 	if markerExists(orphanDir, "ran") || !markerExists(filepath.Join(root, "web"), "web-ran") {
@@ -2066,7 +2066,7 @@ func TestRunAllCleanRefusalStillRunsOthers(t *testing.T) {
 	web := writeMiniConfig(t, filepath.Join(root, "web"), "web", `python3 -c "open('web-ran','w').close()"`)
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2089,7 +2089,7 @@ func TestRunAllCleanRefusalStillRunsOthers(t *testing.T) {
 func TestRunAllEmptyDiscovery(t *testing.T) {
 	root := initMonorepo(t)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2103,7 +2103,7 @@ func TestRunAllExplicitEmptyPathsDiscovers(t *testing.T) {
 	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: root, Paths: []string{}})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root, Paths: []string{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2119,7 +2119,7 @@ func TestRunAllRepoRootNormalizesToToplevel(t *testing.T) {
 	api := writeMiniConfig(t, filepath.Join(root, "api"), "api", `python3 -c "open('api-ran','w').close()"`)
 	commitAll(t, root)
 
-	run, err := check.RunAll(check.CheckAllOptions{RepoRoot: filepath.Join(root, "api")})
+	run, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: filepath.Join(root, "api")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2134,7 +2134,7 @@ func TestRunAllRepoRootNormalizesToToplevel(t *testing.T) {
 
 func TestRunAllMissingRepoRoot(t *testing.T) {
 	testutil.Chdir(t, t.TempDir())
-	_, err := check.RunAll(check.CheckAllOptions{})
+	_, err := check.ExecuteAll(check.Options{Mode: check.ModeRun})
 	if err == nil || !strings.Contains(err.Error(), "git work tree") {
 		t.Fatalf("err = %v", err)
 	}
@@ -2143,7 +2143,7 @@ func TestRunAllMissingRepoRoot(t *testing.T) {
 func TestRunAllExplicitRepoRootMustBeGit(t *testing.T) {
 	dir := t.TempDir()
 	path := writeMiniConfig(t, dir, "lone", `python3 -c "open('ran','w').close()"`)
-	_, err := check.RunAll(check.CheckAllOptions{
+	_, err := check.ExecuteAll(check.Options{Mode: check.ModeRun,
 		RepoRoot: dir,
 		Paths:    []string{path},
 	})
@@ -2169,7 +2169,7 @@ func TestRunAllUnreadableDirectoryFailsDiscovery(t *testing.T) {
 		t.Skip("directory permissions are not enforced")
 	}
 
-	_, err := check.RunAll(check.CheckAllOptions{RepoRoot: root})
+	_, err := check.ExecuteAll(check.Options{Mode: check.ModeRun, RepoRoot: root})
 	if err == nil || !strings.Contains(err.Error(), "could not open directory") {
 		t.Fatalf("error = %v", err)
 	}

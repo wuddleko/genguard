@@ -309,9 +309,14 @@ func TestLoadConfigRejectsOverlappingOutputs(t *testing.T) {
 			`outputs overlap: group "dir" "gen/" and group "dir" "gen/out.go"`,
 		},
 		{
-			"glob prefix",
-			"groups:\n  - name: glob\n    command: \"true\"\n    outputs:\n      - gen/*.txt\n  - name: file\n    command: \"true\"\n    outputs:\n      - gen/out.go\n",
-			`group "glob" "gen/*.txt" and group "file" "gen/out.go"`,
+			"glob matches file",
+			"groups:\n  - name: glob\n    command: \"true\"\n    outputs:\n      - gen/*.txt\n  - name: file\n    command: \"true\"\n    outputs:\n      - gen/out.txt\n",
+			`group "glob" "gen/*.txt" and group "file" "gen/out.txt"`,
+		},
+		{
+			"root glob and directory",
+			"groups:\n  - name: protobuf\n    command: \"true\"\n    outputs:\n      - pkg/gen/\n  - name: templ\n    command: \"true\"\n    outputs:\n      - \"*_templ.go\"\n",
+			`group "protobuf" "pkg/gen/" and group "templ" "*_templ.go"`,
 		},
 	}
 	for _, tc := range cases {
@@ -326,6 +331,72 @@ func TestLoadConfigRejectsOverlappingOutputs(t *testing.T) {
 			_, err := config.LoadConfig(path)
 			if err == nil || !strings.Contains(err.Error(), tc.match) {
 				t.Fatalf("error = %v, want substring %q", err, tc.match)
+			}
+		})
+	}
+}
+
+func TestLoadConfigAllowsDisjointOutputs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{
+			"gocron sqlc",
+			"groups:\n  - name: sqlc\n    command: \"true\"\n    outputs:\n      - \"services/jobs/*.sql.go\"\n      - services/jobs/db.go\n      - services/jobs/models.go\n      - services/jobs/querier.go\n",
+		},
+		{
+			"river sqlc",
+			"groups:\n" +
+				"  - name: databasesql\n    command: \"true\"\n    outputs:\n" +
+				"      - \"riverdriver/riverdatabasesql/internal/dbsqlc/*.sql.go\"\n" +
+				"      - riverdriver/riverdatabasesql/internal/dbsqlc/db.go\n" +
+				"      - riverdriver/riverdatabasesql/internal/dbsqlc/models.go\n" +
+				"      - riverdriver/riverdatabasesql/internal/dbsqlc/querier.go\n" +
+				"  - name: pgxv5\n    command: \"true\"\n    outputs:\n" +
+				"      - \"riverdriver/riverpgxv5/internal/dbsqlc/*.sql.go\"\n" +
+				"      - riverdriver/riverpgxv5/internal/dbsqlc/db.go\n" +
+				"      - riverdriver/riverpgxv5/internal/dbsqlc/models.go\n" +
+				"      - riverdriver/riverpgxv5/internal/dbsqlc/querier.go\n" +
+				"  - name: sqlite\n    command: \"true\"\n    outputs:\n" +
+				"      - \"riverdriver/riversqlite/internal/dbsqlc/*.sql.go\"\n" +
+				"      - riverdriver/riversqlite/internal/dbsqlc/db.go\n" +
+				"      - riverdriver/riversqlite/internal/dbsqlc/models.go\n" +
+				"      - riverdriver/riversqlite/internal/dbsqlc/querier.go\n",
+		},
+		{
+			"kannon sqlc and protobuf",
+			"groups:\n" +
+				"  - name: sqlc\n    command: \"true\"\n    outputs:\n" +
+				"      - \"internal/db/*.sql.go\"\n" +
+				"      - internal/db/db.go\n" +
+				"      - internal/db/models.go\n" +
+				"      - internal/db/querier.go\n" +
+				"  - name: protobuf\n    command: \"true\"\n    outputs:\n" +
+				"      - \"proto/**/*.pb.go\"\n" +
+				"      - \"proto/**/*.connect.go\"\n",
+		},
+		{
+			"gqlgen root globs",
+			"groups:\n  - name: go-generate\n    command: \"true\"\n    outputs:\n      - \"*generated.go\"\n      - \"*models_gen.go\"\n",
+		},
+		{
+			"glob skips non-matching file",
+			"groups:\n  - name: glob\n    command: \"true\"\n    outputs:\n      - gen/*.txt\n  - name: file\n    command: \"true\"\n    outputs:\n      - gen/out.go\n",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			path := filepath.Join(root, "genguard.yaml")
+			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := config.LoadConfig(path); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

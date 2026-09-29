@@ -25,7 +25,7 @@ func TestCleanUnixPermissionFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 		lockDir(t, secret)
-		err := refuseGlobPrefix(root, "secret/gen/*.txt")
+		err := refuseSymlinks(root, config.ParseSpec("secret/gen/*.txt").GlobPrefix())
 		if err == nil || os.IsNotExist(err) {
 			t.Fatalf("error = %v", err)
 		}

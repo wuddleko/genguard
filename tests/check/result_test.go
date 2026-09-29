@@ -35,7 +35,7 @@ func TestCheckRunsAllGroupsAfterCommandFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := check.CheckConfig(cfg)
+	result, err := checkConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestCheckConfigExitCodeDriftOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := check.CheckConfig(cfg)
+	result, err := checkConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestCheckConfigExitCodeAllOK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := check.CheckConfig(cfg)
+	result, err := checkConfig(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

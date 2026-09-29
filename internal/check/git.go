@@ -2,18 +2,14 @@ package check
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/wuddleko/genguard/internal/check/command"
 	"github.com/wuddleko/genguard/internal/gitx"
 	"github.com/wuddleko/genguard/internal/pathx"
 )
-
-func RequireGitRepo(root string) error {
-	return requireGitRepo(commandLog{}, root)
-}
 
 func requireGitRepo(log commandLog, root string) error {
 	out, code, err := log.git(root, "rev-parse", "--is-inside-work-tree")
@@ -21,16 +17,16 @@ func requireGitRepo(log commandLog, root string) error {
 		return err
 	}
 	if code != 0 || strings.TrimSpace(out) != "true" {
-		return newGenguardError("%s is not a git work tree", root)
+		return fmt.Errorf("%s is not a git work tree", root)
 	}
 	return nil
 }
 
 func RepoRoot(dir string) (string, error) {
-	return gitRepoRoot(dir)
+	return gitRepoRoot(commandLog{}, dir)
 }
 
-func gitRepoRoot(dir string) (string, error) {
+func gitRepoRoot(log commandLog, dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		wd, err := os.Getwd()
@@ -43,16 +39,16 @@ func gitRepoRoot(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := requireGitRepo(commandLog{}, abs); err != nil {
+	if err := requireGitRepo(log, abs); err != nil {
 		return "", err
 	}
-	out, code, err := git(abs, "rev-parse", "--show-toplevel")
+	out, code, err := log.git(abs, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return "", err
 	}
 	root := strings.TrimSpace(out)
 	if code != 0 || root == "" {
-		return "", newGenguardError("%s is not a git work tree", abs)
+		return "", fmt.Errorf("%s is not a git work tree", abs)
 	}
 	return callerRepoRoot(abs, root), nil
 }
@@ -89,11 +85,11 @@ func verifyCommit(log commandLog, root, since string) (string, error) {
 		return "", err
 	}
 	if code != 0 {
-		return "", newGenguardError("bad --since ref: %s", gitx.Detail(out, "git rev-parse failed"))
+		return "", fmt.Errorf("bad --since ref: %s", gitx.Detail(out, "git rev-parse failed"))
 	}
 	rev := strings.TrimSpace(out)
 	if rev == "" {
-		return "", newGenguardError("bad --since ref: empty revision")
+		return "", errors.New("bad --since ref: empty revision")
 	}
 	return rev, nil
 }
@@ -101,7 +97,7 @@ func verifyCommit(log commandLog, root, since string) (string, error) {
 func mergeBase(log commandLog, root, since string) (string, error) {
 	since = strings.TrimSpace(since)
 	if since == "" {
-		return "", newGenguardError("--since requires a ref")
+		return "", errors.New("--since requires a ref")
 	}
 	rev, err := verifyCommit(log, root, since)
 	if err != nil {
@@ -112,11 +108,11 @@ func mergeBase(log commandLog, root, since string) (string, error) {
 		return "", err
 	}
 	if code != 0 {
-		return "", newGenguardError("bad --since ref: %s", gitx.Detail(out, "git merge-base failed"))
+		return "", fmt.Errorf("bad --since ref: %s", gitx.Detail(out, "git merge-base failed"))
 	}
 	base := strings.TrimSpace(out)
 	if base == "" {
-		return "", newGenguardError("bad --since ref: empty merge-base")
+		return "", errors.New("bad --since ref: empty merge-base")
 	}
 	return base, nil
 }
@@ -127,7 +123,7 @@ func gitDiffNames(log commandLog, root, rev string, specs []string) ([]string, e
 }
 
 func gitUntracked(log commandLog, root string, specs []string) ([]string, error) {
-	args := append([]string{"ls-files", "--others", "--exclude-standard", "-z", "--"}, specs...)
+	args := append([]string{"ls-files", "--others", "--exclude-standard", "--full-name", "-z", "--"}, specs...)
 	return gitNames(log, root, args...)
 }
 
@@ -138,7 +134,7 @@ func gitDiffText(root string, args ...string) (string, error) {
 		return "", err
 	}
 	if code != 0 && code != 1 {
-		return "", newGenguardError("%s", gitx.Detail(out, "git diff failed"))
+		return "", errors.New(gitx.Detail(out, "git diff failed"))
 	}
 	return out, nil
 }
@@ -149,32 +145,9 @@ func gitNames(log commandLog, root string, args ...string) ([]string, error) {
 		return nil, err
 	}
 	if code != 0 {
-		return nil, newGenguardError("%s", gitx.Detail(out, "git failed"))
+		return nil, errors.New(gitx.Detail(out, "git failed"))
 	}
 	return gitx.ParseNameList(out), nil
-}
-
-func gitPrefix(log commandLog, root string) (string, error) {
-	out, code, err := log.git(root, "rev-parse", "--show-prefix")
-	if err != nil {
-		return "", err
-	}
-	if code != 0 {
-		return "", newGenguardError("%s", gitx.Detail(out, "git rev-parse --show-prefix failed"))
-	}
-	return strings.TrimSpace(out), nil
-}
-
-func configRelativeGitPath(prefix, gitPath string) (string, error) {
-	base := strings.TrimSuffix(prefix, "/")
-	if base == "" {
-		base = "."
-	}
-	rel, err := filepath.Rel(filepath.FromSlash(base), filepath.FromSlash(gitPath))
-	if err != nil {
-		return "", err
-	}
-	return filepath.ToSlash(rel), nil
 }
 
 func git(root string, args ...string) (string, int, error) {
@@ -183,8 +156,5 @@ func git(root string, args ...string) (string, int, error) {
 
 func (c commandLog) git(root string, args ...string) (string, int, error) {
 	out, _, code, err := gitx.Run(c.ctx, root, args...)
-	if errors.Is(err, command.ErrInterrupted) {
-		return "", 0, errInterrupted
-	}
 	return out, code, err
 }

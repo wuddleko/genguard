@@ -321,11 +321,12 @@ func TestWorkflowGroupQuietTimeoutKeepsTailInside(t *testing.T) {
 			Name:    "greeting",
 			Command: `python3 -c "import sys,time; sys.stderr.write('line1'+chr(10)); sys.stderr.flush(); time.sleep(5)"`,
 			Outputs: []string{"out.txt"},
+			Timeout: 200 * time.Millisecond,
 		}},
 	}
 	var buf bytes.Buffer
 	start := time.Now()
-	result, err := checkConfig(cfg, "", commandLog{w: &buf, quiet: true, timeout: 200 * time.Millisecond, env: actions.Env{Actions: true}})
+	result, err := checkConfig(cfg, "", commandLog{w: &buf, quiet: true, env: actions.Env{Actions: true}})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -385,7 +386,7 @@ func TestExternalDiffStaysOutOfTheReport(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	diff, err := DriftDiff(root, []Drift{{Group: "g", Path: "out.txt", Kind: "modified"}})
+	diff, err := driftDiff(root, []Drift{{Group: "g", Path: "out.txt", Kind: "modified"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +408,7 @@ func TestStagedRenameListsBothPaths(t *testing.T) {
 		}},
 	}
 
-	result, err := CheckConfig(cfg)
+	result, err := checkConfig(cfg, "", commandLog{})
 	if err != nil {
 		t.Fatal(err)
 	}

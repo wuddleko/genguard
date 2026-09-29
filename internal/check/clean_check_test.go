@@ -60,9 +60,9 @@ func TestCheckAndRunCleanRefuseLoadedConfig(t *testing.T) {
 				}
 				var result ConfigResult
 				if run {
-					result, err = RunConfig(cfg)
+					result, err = runConfig(cfg, "", commandLog{})
 				} else {
-					result, err = CheckConfig(cfg)
+					result, err = checkConfig(cfg, "", commandLog{})
 				}
 				if err != nil {
 					t.Fatal(err)

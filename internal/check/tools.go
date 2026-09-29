@@ -8,14 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wuddleko/genguard/internal/check/command"
+	"github.com/wuddleko/genguard/internal/command"
 	"github.com/wuddleko/genguard/internal/config"
 )
 
 var versionPattern = regexp.MustCompile(`v?\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?`)
 
 type toolKey struct {
-	root    string
 	command string
 	want    string
 	timeout time.Duration
@@ -26,37 +25,19 @@ type cachedProbe struct {
 	detail string
 }
 
-type toolCache struct {
-	entries map[toolKey]cachedProbe
-}
-
-func (c *toolCache) lookup(root, command, want string, timeout time.Duration) (cachedProbe, bool) {
-	if c == nil || c.entries == nil {
-		return cachedProbe{}, false
-	}
-	hit, ok := c.entries[toolKey{root: root, command: command, want: want, timeout: timeout}]
-	return hit, ok
-}
-
-func (c *toolCache) remember(root, command, want string, timeout time.Duration, have, detail string) {
-	if c == nil {
-		return
-	}
-	if c.entries == nil {
-		c.entries = map[toolKey]cachedProbe{}
-	}
-	c.entries[toolKey{root: root, command: command, want: want, timeout: timeout}] = cachedProbe{have: have, detail: detail}
-}
+// toolCache holds the probes of one config. Probes run in the config
+// directory, so a cache is never shared across configs.
+type toolCache map[toolKey]cachedProbe
 
 func (p cachedProbe) apply(name, want string) (ToolResult, error) {
 	item := ToolResult{Name: name, Want: want, Have: p.have}
 	if p.detail == "" {
 		return item, nil
 	}
-	return item, newGenguardError("%s: %s", name, p.detail)
+	return item, fmt.Errorf("%s: %s", name, p.detail)
 }
 
-func verifyTools(root string, declared []config.Tool, names []string, timeout time.Duration, log commandLog) ([]ToolResult, error) {
+func verifyTools(root string, declared []config.Tool, names []string, timeout time.Duration, log commandLog, probes toolCache) ([]ToolResult, error) {
 	byName := make(map[string]config.Tool, len(declared))
 	for _, tool := range declared {
 		byName[tool.Name] = tool
@@ -68,11 +49,11 @@ func verifyTools(root string, declared []config.Tool, names []string, timeout ti
 		if !ok {
 			observed = append(observed, ToolResult{Name: name})
 			if first == nil {
-				first = newGenguardError("%s: unknown tool", name)
+				first = fmt.Errorf("%s: unknown tool", name)
 			}
 			continue
 		}
-		item, err := probeTool(root, tool, timeout, log)
+		item, err := probeTool(root, tool, timeout, log, probes)
 		observed = append(observed, item)
 		if err != nil && first == nil {
 			first = err
@@ -81,42 +62,44 @@ func verifyTools(root string, declared []config.Tool, names []string, timeout ti
 	return observed, first
 }
 
-func probeTool(root string, tool config.Tool, timeout time.Duration, log commandLog) (ToolResult, error) {
+func probeTool(root string, tool config.Tool, timeout time.Duration, log commandLog, probes toolCache) (ToolResult, error) {
 	item := ToolResult{Name: tool.Name, Want: pinVersion(tool.Version)}
 	commandText := strings.TrimSpace(tool.Command)
 	if commandText == "" {
 		commandText = tool.Name + " --version"
 	}
-	if hit, ok := log.toolCache.lookup(root, commandText, item.Want, timeout); ok {
+	key := toolKey{command: commandText, want: item.Want, timeout: timeout}
+	if hit, ok := probes[key]; ok {
 		return hit.apply(tool.Name, item.Want)
 	}
 	item, detail, err := runProbe(root, tool, commandText, item, timeout, log)
 	if isInterrupt(err) {
 		return item, err
 	}
-	log.toolCache.remember(root, commandText, item.Want, timeout, item.Have, detail)
+	probes[key] = cachedProbe{have: item.Have, detail: detail}
 	return item, err
 }
 
 func runProbe(root string, tool config.Tool, commandText string, item ToolResult, timeout time.Duration, log commandLog) (ToolResult, string, error) {
 	fail := func(detail string) (ToolResult, string, error) {
-		return item, detail, newGenguardError("%s: %s", tool.Name, detail)
+		return item, detail, fmt.Errorf("%s: %s", tool.Name, detail)
 	}
 	if strings.TrimSpace(tool.Command) == "" {
 		if _, err := exec.LookPath(tool.Name); err != nil {
 			return fail("not on PATH")
 		}
 	}
-	output, code, err := command.CaptureContext(log.ctx, root, commandText, timeout)
+	output, code, err := command.Capture(log.ctx, root, commandText, timeout)
 	if err != nil {
 		var start *command.StartError
 		if errors.As(err, &start) {
 			return fail("not on PATH")
 		}
 		if errors.Is(err, command.ErrInterrupted) {
-			return item, "", errInterrupted
+			return item, "", err
 		}
-		if strings.HasPrefix(err.Error(), "command timed out after ") {
+		var timedOut *command.TimeoutError
+		if errors.As(err, &timedOut) {
 			return fail(err.Error())
 		}
 		if code == 127 {

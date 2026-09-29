@@ -10,158 +10,128 @@ import (
 
 	"github.com/wuddleko/genguard/internal/actions"
 	"github.com/wuddleko/genguard/internal/check/clean"
-	"github.com/wuddleko/genguard/internal/check/command"
+	"github.com/wuddleko/genguard/internal/command"
 	"github.com/wuddleko/genguard/internal/config"
 )
 
-type GenguardError struct {
-	msg string
+type Mode int
+
+const (
+	ModeCheck Mode = iota
+	ModeRun
+)
+
+type Options struct {
+	Mode     Mode
+	Context  context.Context
+	Since    string
+	Isolated bool
+	Log      io.Writer
+	Quiet    bool
+	Env      actions.Env
+	// RepoRoot is the repository, found from the config directory, or for
+	// ExecuteAll the working directory, when empty. Paths replaces discovery
+	// in ExecuteAll.
+	RepoRoot string
+	Paths    []string
 }
 
-func (e *GenguardError) Error() string {
-	return e.msg
-}
+var errRunIsolated = errors.New("genguard run writes the checkout; --isolated is not valid")
 
-func newGenguardError(format string, args ...any) error {
-	return &GenguardError{msg: fmt.Sprintf(format, args...)}
-}
-
-var errInterrupted = errors.New("interrupted")
-
-func isInterrupt(err error) bool {
-	return errors.Is(err, errInterrupted) || errors.Is(err, command.ErrInterrupted)
-}
-
-func CheckConfig(cfg config.Config) (ConfigResult, error) {
-	return executeConfig(cfg, Options{Mode: ModeCheck})
-}
-
-func CheckSince(cfg config.Config, since string) (ConfigResult, error) {
-	return executeConfig(cfg, Options{Mode: ModeCheck, Since: since})
-}
-
-func CheckSinceLog(ctx context.Context, cfg config.Config, since string, log io.Writer, quiet bool, env actions.Env) (ConfigResult, error) {
-	return executeConfig(cfg, Options{Mode: ModeCheck, Since: since, Log: log, Quiet: quiet, Context: ctx, Env: env})
-}
-
-func executeConfig(cfg config.Config, opts Options) (ConfigResult, error) {
+// Execute runs one config. The error is set, and the result empty, when
+// nothing ran.
+func Execute(opts Options, configPath string) (RunResult, error) {
+	if opts.Mode == ModeRun && opts.Isolated {
+		return RunResult{}, errRunIsolated
+	}
 	log := commandLog{w: opts.Log, quiet: opts.Quiet, ctx: opts.Context, env: opts.Env}
-	return sinceConfig(cfg, opts.Since, log, opts.Mode)
-}
-
-func checkSince(cfg config.Config, since string, log commandLog) (ConfigResult, error) {
-	return sinceConfig(cfg, since, log, ModeCheck)
-}
-
-func sinceConfig(cfg config.Config, since string, log commandLog, mode Mode) (ConfigResult, error) {
-	base, err := sinceBase(log, cfg, since)
+	abs, err := filepath.Abs(configPath)
 	if err != nil {
-		return ConfigResult{}, err
+		return RunResult{}, err
 	}
-	if base == "" {
-		if mode == ModeRun {
-			return runConfig(cfg, "", log)
+	var cfg config.Config
+	if !opts.Isolated {
+		if cfg, err = config.LoadConfig(configPath); err != nil {
+			return RunResult{}, err
 		}
-		return checkConfig(cfg, "", log)
 	}
-	if mode == ModeRun {
-		return groups(cfg, base, log, ModeRun)
+	repoRoot := opts.RepoRoot
+	if repoRoot == "" {
+		if repoRoot, err = gitRepoRoot(log, filepath.Dir(abs)); err != nil {
+			return RunResult{}, err
+		}
 	}
-	return groups(cfg, base, log, ModeCheck)
+	base, err := sinceBase(log, repoRoot, opts.Since)
+	if err != nil {
+		return RunResult{}, err
+	}
+	var result ConfigResult
+	if opts.Isolated {
+		result, err = checkIsolated(log, repoRoot, configPath, base)
+	} else {
+		result, err = groups(cfg, repoRoot, base, log, opts.Mode)
+	}
+	if err != nil && len(result.Groups) == 0 {
+		return RunResult{}, err
+	}
+	return RunResult{RepoRoot: repoRoot, Configs: []ConfigRun{{Path: abs, Result: result}}}, nil
 }
 
-func sinceBase(log commandLog, cfg config.Config, since string) (string, error) {
+func sinceBase(log commandLog, repoRoot, since string) (string, error) {
 	if strings.TrimSpace(since) == "" {
 		return "", nil
 	}
-	if err := requireGitRepo(log, cfg.Root()); err != nil {
-		return "", err
-	}
-	return mergeBase(log, cfg.Root(), since)
+	return mergeBase(log, repoRoot, since)
 }
 
-func checkConfig(cfg config.Config, base string, log commandLog) (ConfigResult, error) {
-	if err := requireGitRepo(log, cfg.Root()); err != nil {
+// configRunner is what the groups of one config share.
+type configRunner struct {
+	cfg    config.Config
+	tree   tree
+	base   string
+	log    commandLog
+	mode   Mode
+	probes toolCache
+}
+
+// groups returns an error only when the run was interrupted before any group.
+func groups(cfg config.Config, repoRoot, base string, log commandLog, mode Mode) (ConfigResult, error) {
+	t, err := newTree(repoRoot, cfg.Root())
+	if err != nil {
 		return ConfigResult{}, err
 	}
-	return groups(cfg, base, log, ModeCheck)
-}
-
-func runConfig(cfg config.Config, base string, log commandLog) (ConfigResult, error) {
-	if err := requireGitRepo(log, cfg.Root()); err != nil {
-		return ConfigResult{}, err
-	}
-	return groups(cfg, base, log, ModeRun)
-}
-
-func groups(cfg config.Config, base string, log commandLog, mode Mode) (ConfigResult, error) {
-	log = log.withToolCache()
-	root := cfg.Root()
+	r := configRunner{cfg: cfg, tree: t, base: base, log: log, mode: mode, probes: toolCache{}}
 	result := ConfigResult{}
 	for _, group := range cfg.Groups {
-		if stop, err := canceledStop(log.ctx, result.ExitCode(), result.noteCleanup); stop {
-			return result, err
+		if log.canceled() {
+			break
 		}
-		var groupResult GroupResult
-		if mode == ModeCheck {
-			groupResult = checkGroup(root, group, cfg.Tools, base, cfg.Path, log)
-		} else {
-			groupResult = runPreparedGroup(root, group, cfg.Tools, base, cfg.Path, log, nil, nil)
-		}
-		result.Groups = append(result.Groups, groupResult)
+		result.Groups = append(result.Groups, r.group(group))
 	}
-	if stop, err := canceledStop(log.ctx, result.ExitCode(), result.noteCleanup); stop {
-		return result, err
+	if !log.canceled() {
+		return result, nil
+	}
+	if len(result.Groups) == 0 {
+		return result, command.ErrInterrupted
+	}
+	if !result.hasInterrupt() {
+		result.note(command.ErrInterrupted)
 	}
 	return result, nil
 }
 
-func checkGroup(root string, group config.Group, tools []config.Tool, base, configPath string, log commandLog) GroupResult {
-	var wipe map[string]pathSnap
-	result := runPreparedGroup(root, group, tools, base, configPath, log, func() error {
-		wipe = map[string]pathSnap{}
-		return recordCleanDamage(log, wipe, root, group)
-	}, func(result GroupResult) GroupResult {
-		found, driftErr := driftForGroup(commandLog{}, root, group)
-		if driftErr != nil {
-			result.Err = newGenguardError("%s: %s", result.Err.Error(), driftErr.Error())
-			return result
-		}
-		result.Drifts = omitUnchangedDamage(root, found, wipe)
-		return result
-	})
-	if result.Status != GroupOK {
-		return result
-	}
-
-	found, err := driftForGroup(log, root, group)
-	if err != nil {
-		result.Status = GroupError
-		result.Err = err
-		return result
-	}
-	if len(found) > 0 {
-		result.Status = GroupDrift
-		result.Drifts = found
-		return result
-	}
-	return result
-}
-
-func runPreparedGroup(root string, group config.Group, tools []config.Tool, base, configPath string, log commandLog, afterClean func() error, onCommandError func(GroupResult) GroupResult) GroupResult {
+func (r configRunner) group(group config.Group) GroupResult {
+	root := r.tree.dir
+	log := r.log
 	result := GroupResult{Name: group.Name}
-	if base != "" && len(group.Inputs) > 0 {
-		affected, err := groupAffected(log, root, base, loadedConfigName(configPath), group)
+	if r.base != "" && len(group.Inputs) > 0 {
+		affected, err := groupAffected(log, root, r.base, loadedConfigName(r.cfg.Path), group)
 		if err != nil {
-			result.Status = GroupError
-			result.Err = err
-			return result
+			return result.failed(err)
 		}
 		if !affected {
 			if log.canceled() {
-				result.Status = GroupError
-				result.Err = errInterrupted
-				return result
+				return result.failed(command.ErrInterrupted)
 			}
 			result.Status = GroupSkipped
 			return result
@@ -170,36 +140,23 @@ func runPreparedGroup(root string, group config.Group, tools []config.Tool, base
 
 	defer log.beginGroup(group.Name)()
 
-	limit := group.Timeout
-	if limit == 0 {
-		limit = log.timeout
-	}
-
 	if len(group.Tools) > 0 {
-		observed, err := verifyTools(root, tools, group.Tools, limit, log)
+		observed, err := verifyTools(root, r.cfg.Tools, group.Tools, group.Timeout, log, r.probes)
 		result.Tools = observed
 		if err != nil {
-			result.Status = GroupError
-			result.Err = err
-			return result
+			return result.failed(err)
 		}
 	}
 
+	var wipe map[string]pathSnap
 	if group.Clean {
-		if err := clean.Outputs(log.ctx, root, configPath, group); err != nil {
-			result.Status = GroupError
-			if isInterrupt(err) {
-				result.Err = errInterrupted
-			} else {
-				result.Err = newGenguardError("%s", err.Error())
-			}
-			return result
+		if err := clean.Outputs(log.ctx, root, r.cfg.Path, group); err != nil {
+			return result.failed(err)
 		}
-		if afterClean != nil {
-			if err := afterClean(); err != nil {
-				result.Status = GroupError
-				result.Err = err
-				return result
+		if r.mode == ModeCheck {
+			wipe = map[string]pathSnap{}
+			if err := recordCleanDamage(log, wipe, r.tree, group); err != nil {
+				return result.failed(err)
 			}
 		}
 	}
@@ -212,50 +169,53 @@ func runPreparedGroup(root string, group config.Group, tools []config.Tool, base
 	if stream != nil {
 		header = log.label(group.Name)
 	}
-	tail, err := runCommandContext(log.ctx, root, group.Command, stream, header, limit, log.env)
+	tail, err := runCommandContext(log.ctx, root, group.Command, stream, header, group.Timeout, log.env)
 	if log.quiet && log.groups() && tail != "" {
 		log.writeGroupedTail(group.Name, tail)
 		tail = ""
 	}
 	if err != nil {
-		result.Status = GroupError
-		result.CommandTail = tail
 		if group.Clean {
-			result.Err = newGenguardError("command failed after cleaning outputs: %s", err.Error())
-		} else {
-			result.Err = err
+			err = fmt.Errorf("command failed after cleaning outputs: %w", err)
 		}
-		if onCommandError != nil {
-			return onCommandError(result)
+		result = result.failed(err)
+		result.CommandTail = tail
+		if r.mode == ModeRun {
+			return result
 		}
+		// No context: an interrupted command still reports what it left behind.
+		found, driftErr := driftForGroup(commandLog{}, r.tree, group)
+		if driftErr != nil {
+			result.Err = fmt.Errorf("%w: %v", result.Err, driftErr)
+			return result
+		}
+		result.Drifts = omitUnchangedDamage(r.tree, found, wipe)
 		return result
 	}
+
 	result.Status = GroupOK
+	if r.mode == ModeRun {
+		return result
+	}
+	found, err := driftForGroup(log, r.tree, group)
+	if err != nil {
+		return result.failed(err)
+	}
+	if len(found) > 0 {
+		result.Status = GroupDrift
+		result.Drifts = found
+	}
 	return result
 }
 
-func canceledStop(ctx context.Context, code int, keep func(error)) (bool, error) {
-	if ctx == nil || ctx.Err() == nil {
-		return false, nil
-	}
-	if code == 2 {
-		return true, nil
-	}
-	err := errInterrupted
-	if code == 1 && keep != nil {
-		keep(err)
-		return true, nil
-	}
-	return true, err
+func (g GroupResult) failed(err error) GroupResult {
+	g.Status = GroupError
+	g.Err = err
+	return g
 }
 
-func noteInterruptedDrift(run *RunResult, err error) {
-	for i := range run.Configs {
-		cfg := &run.Configs[i]
-		if cfg.Err == nil && cfg.Result.ExitCode() == 1 {
-			cfg.Result.noteCleanup(err)
-		}
-	}
+func isInterrupt(err error) bool {
+	return errors.Is(err, command.ErrInterrupted)
 }
 
 func loadedConfigName(path string) string {

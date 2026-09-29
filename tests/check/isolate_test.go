@@ -1,7 +1,6 @@
 package check_test
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,7 +22,7 @@ func TestIsolatedDirtyOutputLeavesUserTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := check.CheckSinceIsolated(filepath.Join(root, "genguard.yaml"), "")
+	result, err := checkIsolated(filepath.Join(root, "genguard.yaml"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +54,7 @@ func TestIsolatedCleanDeletesOnlyInWorktree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := check.CheckSinceIsolated(filepath.Join(root, "genguard.yaml"), "")
+	result, err := checkIsolated(filepath.Join(root, "genguard.yaml"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,13 +82,13 @@ func TestIsolatedDriftIsConfigRelative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitNameChange(t, root)
+	testutil.CommitNameChange(t, root)
 	userOutput := filepath.Join(root, "generated", "hello.txt")
 	if err := os.WriteFile(userOutput, []byte("USERDIRT\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := check.CheckSinceIsolated(filepath.Join(root, "genguard.yaml"), "")
+	result, err := checkIsolated(filepath.Join(root, "genguard.yaml"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +109,7 @@ func TestIsolatedDriftIsConfigRelative(t *testing.T) {
 	if string(got) != "USERDIRT\n" {
 		t.Fatalf("user output = %q, generator wrote the checkout", got)
 	}
-	report, err := check.FormatFailureReport(result, root)
+	report, err := singleReport(result, root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +124,7 @@ func TestIsolatedSinceSkipsUnstagedInput(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := check.CheckSinceIsolated(filepath.Join(root, "genguard.yaml"), "base")
+	result, err := checkIsolated(filepath.Join(root, "genguard.yaml"), "base")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,9 +141,9 @@ func TestIsolatedSinceSkipsUnstagedInput(t *testing.T) {
 
 func TestIsolatedSinceRunsCommittedInput(t *testing.T) {
 	root := writeSinceRepo(t)
-	commitPath(t, root, "queries/q.sql", "select 2;\n")
+	testutil.CommitPath(t, root, "queries/q.sql", "select 2;\n")
 
-	result, err := check.CheckSinceIsolated(filepath.Join(root, "genguard.yaml"), "base")
+	result, err := checkIsolated(filepath.Join(root, "genguard.yaml"), "base")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,12 +167,8 @@ func TestIsolatedAddFailureRunsNoCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := check.CheckSinceIsolated(filepath.Join(root, "genguard.yaml"), "")
-	var ge *check.GenguardError
-	if !errors.As(err, &ge) {
-		t.Fatalf("err = %v, want GenguardError", err)
-	}
-	if !strings.Contains(err.Error(), "git worktree add:") {
+	_, err := checkIsolated(filepath.Join(root, "genguard.yaml"), "")
+	if err == nil || !strings.Contains(err.Error(), "git worktree add:") {
 		t.Fatalf("err = %q", err)
 	}
 	if markerExists(root, "ran") {
@@ -190,7 +185,7 @@ func TestIsolatedLoadsHeadConfigNotDirtyCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := check.CheckSinceIsolated(filepath.Join(root, "genguard.yaml"), "")
+	result, err := checkIsolated(filepath.Join(root, "genguard.yaml"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +216,7 @@ func TestIsolatedMissingConfigIsError(t *testing.T) {
 	}
 
 	cfgPath := filepath.Join(root, "genguard.yaml")
-	_, err := check.CheckSinceIsolated(cfgPath, "")
+	_, err := checkIsolated(cfgPath, "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -249,7 +244,7 @@ func TestIsolatedParseErrorUsesCallerPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := check.CheckSinceIsolated(cfgPath, "")
+	_, err := checkIsolated(cfgPath, "")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -260,12 +255,12 @@ func TestIsolatedParseErrorUsesCallerPath(t *testing.T) {
 
 func TestIsolatedSinceResolvesCallerUpstream(t *testing.T) {
 	root := writeSinceRepo(t)
-	commitPath(t, root, "queries/q.sql", "select 2;\n")
+	testutil.CommitPath(t, root, "queries/q.sql", "select 2;\n")
 	if err := testutil.Git(root, "branch", "-u", "base"); err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := check.CheckSinceIsolated(filepath.Join(root, "genguard.yaml"), "@{u}")
+	result, err := checkIsolated(filepath.Join(root, "genguard.yaml"), "@{u}")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,7 +280,7 @@ func TestIsolatedIgnoresCheckoutHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitNameChange(t, root)
+	testutil.CommitNameChange(t, root)
 	marker := filepath.Join(root, "hooked.txt")
 	hookDir := filepath.Join(root, ".git", "hooks")
 	if err := os.MkdirAll(hookDir, 0o755); err != nil {
@@ -296,7 +291,7 @@ func TestIsolatedIgnoresCheckoutHook(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := check.CheckSinceIsolated(filepath.Join(root, "genguard.yaml"), "")
+	result, err := checkIsolated(filepath.Join(root, "genguard.yaml"), "")
 	if err != nil {
 		t.Fatal(err)
 	}

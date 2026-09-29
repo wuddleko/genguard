@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wuddleko/genguard/tests/testutil"
 )
 
 func TestMain(m *testing.M) {
@@ -47,7 +49,7 @@ func installGitShim(t *testing.T, mode string) {
 
 func installUnixModeShim(t *testing.T, bin string) {
 	t.Helper()
-	script := strings.ReplaceAll(unixGitShim(), "@SCRIPT@", shellQuote(filepath.Join(bin, "git")))
+	script := strings.ReplaceAll(unixGitShim(), "@SCRIPT@", testutil.ShellQuote(filepath.Join(bin, "git")))
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -73,10 +75,6 @@ func installWindowsModeShim(t *testing.T, bin string) {
 	}
 }
 
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}
-
 func containsArg(args []string, want string) bool {
 	for _, arg := range args {
 		if arg == want {
@@ -96,13 +94,6 @@ var gitShimModes = []shimMode{
 		{when: shimOn("--verify"), stdout: "0123456789abcdef0123456789abcdef01234567\n", stop: true},
 		shimExit(2, "merge-base"),
 	}},
-	{name: "show-prefix-abs", steps: []shimStep{{
-		when: shimOn("--show-prefix"), stdout: "/no/such/prefix/\n", stop: true,
-	}}},
-	{name: "show-prefix-fail", steps: []shimStep{{
-		when: shimOn("--show-prefix"), stderr: "fatal: prefix failed\n", code: 128, stop: true,
-	}}},
-	{name: "show-prefix-quiet", steps: []shimStep{shimExit(1, "--show-prefix")}},
 	{name: "show-toplevel-empty", steps: []shimStep{shimExit(0, "--show-toplevel")}},
 	{name: "show-toplevel-fail", steps: []shimStep{{
 		when: shimOn("--show-toplevel"), stderr: "fatal: toplevel\n", code: 128, stop: true,

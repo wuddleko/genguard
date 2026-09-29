@@ -1,6 +1,7 @@
 package check
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -11,19 +12,14 @@ import (
 	"github.com/wuddleko/genguard/tests/testutil"
 )
 
-func TestCheckSinceRejectsNonRepo(t *testing.T) {
-	dir := t.TempDir()
-	_, err := CheckSince(config.Config{Path: filepath.Join(dir, "genguard.yaml")}, "HEAD")
-	if err == nil || !strings.Contains(err.Error(), "not a git work tree") {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestRunSinceRejectsNonRepo(t *testing.T) {
-	dir := t.TempDir()
-	_, err := RunSince(config.Config{Path: filepath.Join(dir, "genguard.yaml")}, "HEAD")
-	if err == nil || !strings.Contains(err.Error(), "not a git work tree") {
-		t.Fatalf("error = %v", err)
+func TestSinceRejectsNonRepo(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "genguard.yaml")
+	writeFile(t, path, "groups:\n  - command: \"true\"\n    outputs: [out.txt]\n")
+	for _, mode := range []Mode{ModeCheck, ModeRun} {
+		_, err := Execute(Options{Mode: mode, Since: "HEAD"}, path)
+		if err == nil || !strings.Contains(err.Error(), "not a git work tree") {
+			t.Fatalf("mode %d: error = %v", mode, err)
+		}
 	}
 }
 
@@ -103,7 +99,8 @@ func TestCheckCommandFailureThenDriftError(t *testing.T) {
 
 func TestRecordCleanDamageReturnsDriftError(t *testing.T) {
 	damage := map[string]pathSnap{}
-	err := recordCleanDamage(commandLog{}, damage, t.TempDir(), config.Group{Outputs: []string{"missing.txt"}})
+	dir := t.TempDir()
+	err := recordCleanDamage(commandLog{}, damage, tree{dir: dir, repo: dir}, config.Group{Outputs: []string{"missing.txt"}})
 	if err == nil {
 		t.Fatal("expected a drift listing error")
 	}
@@ -214,8 +211,8 @@ func TestGitMissingFromPath(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	dir := t.TempDir()
 
-	if err := RequireGitRepo(dir); err == nil {
-		t.Fatal("RequireGitRepo")
+	if err := requireGitRepo(commandLog{}, dir); err == nil {
+		t.Fatal("requireGitRepo")
 	}
 	out, code, err := git(dir, "status")
 	if err == nil || code != -1 || out != "" {
@@ -226,9 +223,6 @@ func TestGitMissingFromPath(t *testing.T) {
 	}
 	if _, err := gitDiffText(dir, "HEAD"); err == nil {
 		t.Fatal("gitDiffText")
-	}
-	if _, err := gitPrefix(commandLog{}, dir); err == nil {
-		t.Fatal("gitPrefix")
 	}
 	if _, err := mergeBase(commandLog{}, dir, "HEAD"); err == nil {
 		t.Fatal("mergeBase")
@@ -264,13 +258,6 @@ func TestGitQuietFailures(t *testing.T) {
 			t.Fatalf("error = %v", err)
 		}
 	})
-	t.Run("show-prefix quiet", func(t *testing.T) {
-		installGitShim(t, "show-prefix-quiet")
-		_, err := gitPrefix(commandLog{}, t.TempDir())
-		if err == nil || !strings.Contains(err.Error(), "git rev-parse --show-prefix failed") {
-			t.Fatalf("error = %v", err)
-		}
-	})
 	t.Run("diff quiet", func(t *testing.T) {
 		installGitShim(t, "diff-quiet")
 		_, err := gitDiffText(t.TempDir(), "HEAD")
@@ -285,14 +272,14 @@ func TestGitRepoRootShimFailures(t *testing.T) {
 
 	t.Run("empty toplevel", func(t *testing.T) {
 		installGitShim(t, "show-toplevel-empty")
-		_, err := gitRepoRoot(root)
+		_, err := gitRepoRoot(commandLog{}, root)
 		if err == nil || !strings.Contains(err.Error(), "not a git work tree") {
 			t.Fatalf("error = %v", err)
 		}
 	})
 	t.Run("toplevel fails", func(t *testing.T) {
 		installGitShim(t, "show-toplevel-fail")
-		_, err := gitRepoRoot(root)
+		_, err := gitRepoRoot(commandLog{}, root)
 		if err == nil || !strings.Contains(err.Error(), "not a git work tree") {
 			t.Fatalf("error = %v", err)
 		}
@@ -302,7 +289,7 @@ func TestGitRepoRootShimFailures(t *testing.T) {
 			t.Skip("cannot remove a running git shim")
 		}
 		installGitShim(t, "drop-after-proxy")
-		_, err := gitRepoRoot(root)
+		_, err := gitRepoRoot(commandLog{}, root)
 		if err == nil || strings.Contains(err.Error(), "not a git work tree") {
 			t.Fatalf("error = %v", err)
 		}
@@ -312,27 +299,11 @@ func TestGitRepoRootShimFailures(t *testing.T) {
 func TestDriftForGroupGitFailures(t *testing.T) {
 	group := config.Group{Name: "greeting", Outputs: []string{"generated/hello.txt"}}
 
-	t.Run("prefix fails", func(t *testing.T) {
-		root := repoWithModifiedFile(t)
-		installGitShim(t, "show-prefix-fail")
-		_, err := DriftForGroup(root, group)
-		if err == nil || !strings.Contains(err.Error(), "prefix failed") {
-			t.Fatalf("error = %v", err)
-		}
-	})
-	t.Run("prefix is absolute", func(t *testing.T) {
-		root := repoWithModifiedFile(t)
-		installGitShim(t, "show-prefix-abs")
-		_, err := DriftForGroup(root, group)
-		if err == nil {
-			t.Fatal("expected error")
-		}
-	})
 	t.Run("untracked list fails", func(t *testing.T) {
 		root := gitRepo(t)
 		writeTracked(t, root, "generated/hello.txt", "hello\n")
 		installGitShim(t, "others-fail")
-		_, err := DriftForGroup(root, group)
+		_, err := groupDrift(root, group)
 		if err == nil || !strings.Contains(err.Error(), "others") {
 			t.Fatalf("error = %v", err)
 		}
@@ -348,7 +319,7 @@ func TestDriftDiffUntrackedRegularFile(t *testing.T) {
 
 	t.Run("empty diff", func(t *testing.T) {
 		installGitShim(t, "diff-empty")
-		got, err := DriftDiff(root, drifts)
+		got, err := driftDiff(root, drifts)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -358,7 +329,7 @@ func TestDriftDiffUntrackedRegularFile(t *testing.T) {
 	})
 	t.Run("diff fails", func(t *testing.T) {
 		installGitShim(t, "diff-quiet")
-		_, err := DriftDiff(root, drifts)
+		_, err := driftDiff(root, drifts)
 		if err == nil || !strings.Contains(err.Error(), "git diff failed") {
 			t.Fatalf("error = %v", err)
 		}
@@ -369,16 +340,16 @@ func TestPathsWhenWorkingDirectoryIsGone(t *testing.T) {
 	root := gitRepo(t)
 	testutil.WithoutWorkingDirectory(t)
 
-	if _, err := gitRepoRoot(""); err == nil {
+	if _, err := gitRepoRoot(commandLog{}, ""); err == nil {
 		t.Fatal("gitRepoRoot empty")
 	}
-	if _, err := gitRepoRoot("."); err == nil {
+	if _, err := gitRepoRoot(commandLog{}, "."); err == nil {
 		t.Fatal("gitRepoRoot dot")
 	}
 	if _, err := normalizeConfigPaths([]string{"genguard.yaml"}); err == nil {
 		t.Fatal("normalizeConfigPaths")
 	}
-	if _, err := CheckAll(CheckAllOptions{RepoRoot: root, Paths: []string{"genguard.yaml"}}); err == nil {
+	if _, err := ExecuteAll(Options{RepoRoot: root, Paths: []string{"genguard.yaml"}}); err == nil {
 		t.Fatal("CheckAll")
 	}
 }
@@ -396,29 +367,13 @@ func writeTracked(t *testing.T, root, rel, content string) {
 	gitExec(t, root, "commit", "-m", rel)
 }
 
-func repoWithModifiedFile(t *testing.T) string {
-	t.Helper()
-	root := gitRepo(t)
-	writeTracked(t, root, "generated/hello.txt", "old\n")
-	if err := os.WriteFile(filepath.Join(root, "generated", "hello.txt"), []byte("new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return root
-}
-
-func TestIsolatedRunKeepsCompletedCheck(t *testing.T) {
-	removeErr := newGenguardError("git worktree remove: busy")
+func TestWorktreeRemovalErrorKeepsCompletedCheck(t *testing.T) {
+	removeErr := errors.New("git worktree remove: busy")
 	result := ConfigResult{Groups: []GroupResult{{Name: "api", Status: GroupDrift, Drifts: []Drift{{
 		Group: "api", Path: "out.txt", Kind: "modified",
 	}}}}}
-	result.noteCleanup(removeErr)
-	run := isolatedRun("genguard.yaml", result, removeErr)
-	if run.Err != nil {
-		t.Fatalf("Err = %v, want the drift result", run.Err)
-	}
-	if len(run.Result.Groups) != 1 || run.Result.Groups[0].Status != GroupDrift {
-		t.Fatalf("Result = %+v", run.Result)
-	}
+	result.note(removeErr)
+	run := ConfigRun{Path: "genguard.yaml", Result: result}
 	if run.ExitCode() != 2 {
 		t.Fatalf("exit = %d, want 2", run.ExitCode())
 	}
@@ -428,27 +383,16 @@ func TestIsolatedRunKeepsCompletedCheck(t *testing.T) {
 	}
 
 	okResult := ConfigResult{Groups: []GroupResult{{Name: "api", Status: GroupOK}}}
-	okResult.noteCleanup(removeErr)
-	run = isolatedRun("genguard.yaml", okResult, removeErr)
-	if run.Err != nil {
-		t.Fatalf("Err = %v", run.Err)
-	}
+	okResult.note(removeErr)
+	run = ConfigRun{Path: "genguard.yaml", Result: okResult}
 	if run.ExitCode() != 2 {
 		t.Fatalf("exit = %d, want 2", run.ExitCode())
 	}
-	report, err := FormatRunFailureReport(RunResult{Configs: []ConfigRun{run}})
+	report, err := FormatFailureReport(RunResult{All: true, Configs: []ConfigRun{run}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(report, "api: OK") || !strings.Contains(report, "error (git worktree remove: busy)") || !strings.Contains(report, "error: git worktree remove: busy") {
 		t.Fatalf("report = %q", report)
-	}
-
-	run = isolatedRun("genguard.yaml", ConfigResult{}, newGenguardError("git worktree add: failed"))
-	if run.Err == nil || !strings.Contains(run.Err.Error(), "git worktree add") {
-		t.Fatalf("Err = %v", run.Err)
-	}
-	if run.ExitCode() != 2 {
-		t.Fatalf("exit = %d, want 2", run.ExitCode())
 	}
 }

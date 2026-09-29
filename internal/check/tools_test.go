@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/wuddleko/genguard/internal/config"
+	"github.com/wuddleko/genguard/tests/testutil"
 )
 
 func TestToolMismatchSkipsCleanAndRunsNextGroup(t *testing.T) {
@@ -373,17 +374,19 @@ func TestToolTimeoutLeavesOutputs(t *testing.T) {
 				Outputs: []string{"gen/"},
 				Clean:   true,
 				Tools:   []string{"buf"},
+				Timeout: 200 * time.Millisecond,
 			},
 			{
 				Name:    "other",
 				Command: "true",
 				Outputs: []string{"right.txt"},
+				Timeout: 200 * time.Millisecond,
 			},
 		},
 	}
 
 	start := time.Now()
-	result, err := checkConfig(cfg, "", commandLog{timeout: 200 * time.Millisecond})
+	result, err := checkConfig(cfg, "", commandLog{})
 	if time.Since(start) >= time.Second {
 		t.Fatalf("took %s", time.Since(start))
 	}
@@ -746,9 +749,9 @@ func TestCheckAllProbesOncePerDirectory(t *testing.T) {
 				err    error
 			)
 			if tc.run {
-				result, err = RunAll(CheckAllOptions{RepoRoot: root})
+				result, err = ExecuteAll(Options{Mode: ModeRun, RepoRoot: root})
 			} else {
-				result, err = CheckAll(CheckAllOptions{RepoRoot: root, Isolated: tc.isolated})
+				result, err = ExecuteAll(Options{RepoRoot: root, Isolated: tc.isolated})
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -789,7 +792,7 @@ func TestVersionProbeFollowsTheConfigDirectory(t *testing.T) {
 		writeTracked(t, root, dir.name+"/genguard.yaml", body)
 	}
 
-	result, err := CheckAll(CheckAllOptions{RepoRoot: root})
+	result, err := ExecuteAll(Options{RepoRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -903,7 +906,7 @@ func writeCountingProbe(t *testing.T, tail string) (command, countPath string) {
 		t.Fatal(err)
 	}
 	// Single quotes keep the path intact for sh, including Git Bash on Windows.
-	return "python3 " + shellQuote(filepath.ToSlash(script)), countPath
+	return "python3 " + testutil.ShellQuote(filepath.ToSlash(script)), countPath
 }
 
 func probeCount(t *testing.T, path string) int {

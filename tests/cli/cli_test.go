@@ -64,36 +64,6 @@ func decodeCLIJSON(t *testing.T, text string) cliJSON {
 	return doc
 }
 
-func commitPath(t *testing.T, root, rel, content string) {
-	t.Helper()
-	path := filepath.Join(root, rel)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := testutil.Git(root, "add", rel); err != nil {
-		t.Fatal(err)
-	}
-	if err := testutil.Git(root, "commit", "-m", rel); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func commitNameChange(t *testing.T, root string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("genguard\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := testutil.Git(root, "add", "name.txt"); err != nil {
-		t.Fatal(err)
-	}
-	if err := testutil.Git(root, "commit", "-m", "rename"); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestCLISuccessMessage(t *testing.T) {
 	root, err := testutil.MakeRepo(t.TempDir(), "generated/hello.txt", "", nil)
 	if err != nil {
@@ -354,7 +324,7 @@ func TestCLIErrorThenOKGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitPath(t, root, "other/out.txt", "ok\n")
+	testutil.CommitPath(t, root, "other/out.txt", "ok\n")
 
 	_, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
 	if code != 2 {
@@ -387,8 +357,8 @@ func TestCLIErrorOKAndDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitPath(t, root, "other/out.txt", "ok\n")
-	commitNameChange(t, root)
+	testutil.CommitPath(t, root, "other/out.txt", "ok\n")
+	testutil.CommitNameChange(t, root)
 
 	stdout, stderr, code := runCLI([]string{"check", "--config", filepath.Join(root, "genguard.yaml")})
 	if code != 2 {
@@ -2221,7 +2191,7 @@ func TestCLIRunAutoDiscoversFromNested(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitNameChange(t, root)
+	testutil.CommitNameChange(t, root)
 	nested := filepath.Join(root, "nested")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
@@ -2412,7 +2382,7 @@ func TestCLIRunBlankSinceRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitNameChange(t, root)
+	testutil.CommitNameChange(t, root)
 
 	stdout, stderr, code := runCLI([]string{"run", "--since=", "--config", filepath.Join(root, "genguard.yaml")})
 	if code != 0 {
@@ -2435,7 +2405,7 @@ func TestCLIRunShortConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitNameChange(t, root)
+	testutil.CommitNameChange(t, root)
 	testutil.Chdir(t, root)
 
 	stdout, stderr, code := runCLI([]string{"run", "-c", "genguard.yaml"})
@@ -2614,7 +2584,7 @@ func TestCLIRunYml(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitNameChange(t, root)
+	testutil.CommitNameChange(t, root)
 	testutil.Chdir(t, root)
 
 	stdout, stderr, code := runCLI([]string{"run"})
@@ -2725,7 +2695,7 @@ func TestCLIRunFromConfigRoot(t *testing.T) {
 	if err := testutil.Git(root, "commit", "-m", "seed"); err != nil {
 		t.Fatal(err)
 	}
-	commitPath(t, root, "service/name.txt", "genguard\n")
+	testutil.CommitPath(t, root, "service/name.txt", "genguard\n")
 
 	stdout, stderr, code := runCLI([]string{"run", "--config", configPath})
 	if code != 0 {
@@ -3025,7 +2995,7 @@ func TestCLIIsolatedDriftLeavesCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitNameChange(t, root)
+	testutil.CommitNameChange(t, root)
 
 	_, stderr, code := runCLI([]string{"check", "--isolated", "--config", filepath.Join(root, "genguard.yaml")})
 	if code != 1 {
@@ -3738,7 +3708,7 @@ func installUnixGitShim(t *testing.T, bin, real, suffix string) {
 	rel := strings.TrimPrefix(suffix, string(filepath.Separator))
 	script := "#!/bin/sh\n" +
 		"root=\nprev=\nnocolor=0\nmatch=0\ndashdash=0\nnoindex=0\n" +
-		"rel=" + shellQuote(rel) + "\n" +
+		"rel=" + testutil.ShellQuote(rel) + "\n" +
 		"for arg in \"$@\"; do\n" +
 		"  if [ \"$prev\" = \"-C\" ]; then\n" +
 		"    root=$arg\n" +
@@ -3779,7 +3749,7 @@ func installUnixGitShim(t *testing.T, bin, real, suffix string) {
 		"  echo \"forced diff failure\" >&2\n" +
 		"  exit 129\n" +
 		"fi\n" +
-		"exec " + shellQuote(real) + " \"$@\"\n"
+		"exec " + testutil.ShellQuote(real) + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -3907,8 +3877,4 @@ func TestGitArgUnderMatchesPathspecsOnly(t *testing.T) {
 	if gitArgUnder([]string{"-C", "/tmp/web-project", "diff", "--no-color", "HEAD", "--", "api/out.txt"}, "web") {
 		t.Fatal("-C path and unrelated pathspec")
 	}
-}
-
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }

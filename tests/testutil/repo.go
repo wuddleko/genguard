@@ -157,6 +157,49 @@ func lockDeepParent(t *testing.T, wd string) bool {
 	return true
 }
 
+// CommitPath writes content to root/rel and commits it.
+func CommitPath(t *testing.T, root, rel, content string) {
+	t.Helper()
+	path := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Git(root, "add", rel); err != nil {
+		t.Fatal(err)
+	}
+	if err := Git(root, "commit", "-m", rel); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// CommitNameChange commits a new generator input to a MakeRepo repository.
+func CommitNameChange(t *testing.T, root string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "name.txt"), []byte("genguard\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Git(root, "add", "name.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Git(root, "commit", "-m", "rename"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func WriteExe(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func ShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
 func Git(dir string, args ...string) error {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	cmd.Stdout = os.Stdout

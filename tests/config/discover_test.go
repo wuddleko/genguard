@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/wuddleko/genguard/internal/config"
+	"github.com/wuddleko/genguard/internal/discover"
 	"github.com/wuddleko/genguard/tests/testutil"
 )
 
@@ -363,7 +364,7 @@ func TestFindAllOmitsGitignoredConfig(t *testing.T) {
 
 	want := []string{filepath.Join(api, "genguard.yaml")}
 	for _, isolated := range []bool{false, true} {
-		found, err := config.FindAll(context.Background(), root, isolated)
+		found, err := discover.FindAll(context.Background(), root, isolated)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -403,7 +404,7 @@ func TestFindAllUntrackedConfigIsWorkingTreeOnly(t *testing.T) {
 		filepath.Join(api, "genguard.yaml"),
 		filepath.Join(web, "genguard.yaml"),
 	})
-	indexed, err := config.FindAll(context.Background(), root, true)
+	indexed, err := discover.FindAll(context.Background(), root, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +434,7 @@ func TestFindAllOmitsCommittedSkipDirs(t *testing.T) {
 
 	want := []string{filepath.Join(api, "genguard.yaml")}
 	for _, isolated := range []bool{false, true} {
-		found, err := config.FindAll(context.Background(), root, isolated)
+		found, err := discover.FindAll(context.Background(), root, isolated)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -476,7 +477,7 @@ func TestFindAllIsolatedListsHeadNotTheIndex(t *testing.T) {
 		filepath.Join(extra, "genguard.yaml"),
 		filepath.Join(web, "genguard.yaml"),
 	})
-	head, err := config.FindAll(context.Background(), root, true)
+	head, err := discover.FindAll(context.Background(), root, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -556,7 +557,7 @@ func initRepo(t *testing.T) string {
 
 func listConfigs(t *testing.T, root string) ([]string, error) {
 	t.Helper()
-	return config.FindAll(context.Background(), root, false)
+	return discover.FindAll(context.Background(), root, false)
 }
 
 func assertPaths(t *testing.T, got, want []string) {

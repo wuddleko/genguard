@@ -7,39 +7,6 @@ import (
 	"github.com/wuddleko/genguard/internal/gitx"
 )
 
-func TestConfigRelativeGitPath(t *testing.T) {
-	tests := []struct {
-		prefix  string
-		gitPath string
-		want    string
-	}{
-		{prefix: "", gitPath: "generated/hello.txt", want: "generated/hello.txt"},
-		{prefix: "api/", gitPath: "api/out.txt", want: "out.txt"},
-		{prefix: "api/", gitPath: "web/out.txt", want: "../web/out.txt"},
-		{prefix: "api/sub/", gitPath: "api/sub/out.txt", want: "out.txt"},
-		{prefix: "api/sub/", gitPath: "web/out.txt", want: "../../web/out.txt"},
-		{prefix: "", gitPath: "generated/hello\nworld.txt", want: "generated/hello\nworld.txt"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.prefix+" "+tc.gitPath, func(t *testing.T) {
-			got, err := configRelativeGitPath(tc.prefix, tc.gitPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != tc.want {
-				t.Fatalf("configRelativeGitPath(%q, %q) = %q, want %q", tc.prefix, tc.gitPath, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestConfigRelativeGitPathRejectsAbsolutePrefix(t *testing.T) {
-	_, err := configRelativeGitPath("/no/such/prefix/", "generated/hello.txt")
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
 func TestParseGitNameList(t *testing.T) {
 	tests := []struct {
 		name string

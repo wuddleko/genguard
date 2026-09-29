@@ -62,12 +62,26 @@ func (b Bracket) Close() (int, error) {
 	return fmt.Fprintf(b.W, "::%s::\n", b.Token)
 }
 
-func Token() (string, error) {
+// WriteBracketed writes text between stop-commands markers, so no line of it
+// runs as a workflow command.
+func WriteBracketed(w io.Writer, text string) {
+	b := Bracket{W: w, Token: Token()}
+	b.Open()
+	io.WriteString(w, text)
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		io.WriteString(w, "\n")
+	}
+	b.Close()
+}
+
+// Token panics when crypto/rand fails: a guessable token would let generator
+// output resume workflow commands.
+func Token() string {
 	var buf [16]byte
 	if _, err := rand.Read(buf[:]); err != nil {
-		return "", err
+		panic(err)
 	}
-	return hex.EncodeToString(buf[:]), nil
+	return hex.EncodeToString(buf[:])
 }
 
 func Annotation(file, title, message string) string {

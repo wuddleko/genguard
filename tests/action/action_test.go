@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/wuddleko/genguard/tests/testutil"
 )
 
 func TestActionScript(t *testing.T) {
@@ -22,9 +24,9 @@ func TestActionScript(t *testing.T) {
 	if err := os.MkdirAll(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeExe(t, filepath.Join(bin, "genguard"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$GENGUARD_TEST_ARGS\"\nexit \"${GENGUARD_TEST_CODE:-0}\"\n")
-	writeExe(t, filepath.Join(bin, "go"), "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$GENGUARD_TEST_GO\"\nif [ \"${1:-}\" = env ]; then\n  case \"${2:-}\" in\n    GOBIN) printf '%s\\n' \"${GOBIN:-}\" ;;\n    GOPATH) printf '%s\\n' \"${GOPATH:-${HOME:-}/go}\" ;;\n  esac\nfi\n")
-	writeExe(t, filepath.Join(root, "install.sh"), "#!/bin/sh\nif [ -z \"${BINDIR:-}\" ]; then\n  printf 'BINDIR unset\\n' >&2\n  exit 1\nfi\nfirst=${PATH%%:*}\nif [ \"$first\" != \"$BINDIR\" ]; then\n  printf 'BINDIR is not first on PATH: %s\\n' \"$PATH\" >&2\n  exit 1\nfi\nprintf '%s\\n' \"$1\" > \"$GENGUARD_TEST_INSTALL\"\nprintf '%s\\n' \"$BINDIR\" > \"$GENGUARD_TEST_BINDIR\"\n")
+	testutil.WriteExe(t, filepath.Join(bin, "genguard"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$GENGUARD_TEST_ARGS\"\nexit \"${GENGUARD_TEST_CODE:-0}\"\n")
+	testutil.WriteExe(t, filepath.Join(bin, "go"), "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$GENGUARD_TEST_GO\"\nif [ \"${1:-}\" = env ]; then\n  case \"${2:-}\" in\n    GOBIN) printf '%s\\n' \"${GOBIN:-}\" ;;\n    GOPATH) printf '%s\\n' \"${GOPATH:-${HOME:-}/go}\" ;;\n  esac\nfi\n")
+	testutil.WriteExe(t, filepath.Join(root, "install.sh"), "#!/bin/sh\nif [ -z \"${BINDIR:-}\" ]; then\n  printf 'BINDIR unset\\n' >&2\n  exit 1\nfi\nfirst=${PATH%%:*}\nif [ \"$first\" != \"$BINDIR\" ]; then\n  printf 'BINDIR is not first on PATH: %s\\n' \"$PATH\" >&2\n  exit 1\nfi\nprintf '%s\\n' \"$1\" > \"$GENGUARD_TEST_INSTALL\"\nprintf '%s\\n' \"$BINDIR\" > \"$GENGUARD_TEST_BINDIR\"\n")
 
 	t.Run("release tag", func(t *testing.T) {
 		out := filepath.Join(t.TempDir(), "out")
@@ -201,13 +203,6 @@ func runAction(t *testing.T, script, bin, actionPath, out string, args, extra []
 	}
 	if code != want {
 		t.Fatalf("exit %d, want %d: %s", code, want, outBytes)
-	}
-}
-
-func writeExe(t *testing.T, path, body string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
 	}
 }
 

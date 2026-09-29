@@ -2,32 +2,14 @@ package check
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 )
 
-func FormatFailureReport(result ConfigResult, root string) (string, error) {
-	return renderFailureReport(RunResult{
-		Configs: []ConfigRun{{
-			Path:   filepath.Join(root, "genguard.yaml"),
-			Result: result,
-		}},
-	}, true)
-}
-
-func FormatRunFailureReport(run RunResult) (string, error) {
-	return renderFailureReport(run, false)
-}
-
-func renderFailureReport(run RunResult, singleConfig bool) (string, error) {
+func FormatFailureReport(run RunResult) (string, error) {
 	var b strings.Builder
-	if singleConfig {
-		b.WriteString(singleCommandTails(run))
-	} else {
-		b.WriteString(FormatRunCommandTails(run))
-	}
+	b.WriteString(FormatCommandTails(run))
 	b.WriteString("Summary\n")
-	for _, line := range failureSummaryLines(run, singleConfig) {
+	for _, line := range run.SummaryLines() {
 		b.WriteString(line)
 		b.WriteString("\n")
 	}
@@ -47,24 +29,16 @@ func renderFailureReport(run RunResult, singleConfig bool) (string, error) {
 		} else {
 			b.WriteString("\n")
 		}
-		repoRoot := run.RepoRoot
-		configDir := filepath.Dir(cfg.Path)
-		if singleConfig {
-			repoRoot = ""
-		} else {
+		if run.All {
 			b.WriteString(displayConfigPath(run.RepoRoot, cfg.Path))
 			b.WriteString("\n")
 		}
-		if err := writeDriftBody(&b, cfg.Result, newDriftBase(configDir, repoRoot), drifts); err != nil {
+		if err := writeDriftBody(&b, run.RepoRoot, cfg.Result, drifts); err != nil {
 			return b.String(), err
 		}
 	}
 
-	line := run.FinalErrorLine()
-	if singleConfig {
-		line = singleFinalErrorLine(run)
-	}
-	if line != "" {
+	if line := run.FinalErrorLine(); line != "" {
 		b.WriteString("\n")
 		b.WriteString(line)
 		b.WriteString("\n")
@@ -72,73 +46,39 @@ func renderFailureReport(run RunResult, singleConfig bool) (string, error) {
 	return b.String(), nil
 }
 
-func singleCommandTails(run RunResult) string {
-	if len(run.Configs) != 1 || run.Configs[0].Err != nil {
-		return ""
-	}
-	return FormatCommandTails(run.Configs[0].Result)
-}
-
-func failureSummaryLines(run RunResult, singleConfig bool) []string {
-	if !singleConfig {
-		return run.SummaryLines()
-	}
-	if len(run.Configs) != 1 || run.Configs[0].Err != nil {
-		return nil
-	}
-	return run.Configs[0].Result.SummaryLines()
-}
-
-func singleFinalErrorLine(run RunResult) string {
-	if len(run.Configs) != 1 || run.Configs[0].Err != nil {
-		return run.FinalErrorLine()
-	}
-	return run.Configs[0].Result.FinalErrorLine()
-}
-
-func FormatCommandTails(result ConfigResult) string {
-	var b strings.Builder
-	writeCommandTails(&b, result.Groups, func(name string) string {
-		return name + ":"
-	})
-	return b.String()
-}
-
-func FormatRunCommandTails(run RunResult) string {
+// FormatCommandTails is the output of each failed command, labeled with the
+// group name, or under --all with the config path and the group name.
+func FormatCommandTails(run RunResult) string {
 	var b strings.Builder
 	for _, cfg := range run.Configs {
 		if cfg.Err != nil {
 			continue
 		}
-		path := displayConfigPath(run.RepoRoot, cfg.Path)
-		writeCommandTails(&b, cfg.Result.Groups, func(name string) string {
-			return path + ": " + name + ":"
-		})
+		prefix := ""
+		if run.All {
+			prefix = displayConfigPath(run.RepoRoot, cfg.Path) + ": "
+		}
+		for _, group := range cfg.Result.Groups {
+			tail := group.CommandTail
+			if tail == "" {
+				continue
+			}
+			b.WriteString(prefix + group.Name + ":\n")
+			b.WriteString(tail)
+			if !strings.HasSuffix(tail, "\n") {
+				b.WriteByte('\n')
+			}
+			b.WriteByte('\n')
+		}
 	}
 	return b.String()
 }
 
-func writeCommandTails(b *strings.Builder, groups []GroupResult, label func(name string) string) {
-	for _, group := range groups {
-		tail := group.CommandTail
-		if tail == "" {
-			continue
-		}
-		b.WriteString(label(group.Name))
-		b.WriteByte('\n')
-		b.WriteString(tail)
-		if !strings.HasSuffix(tail, "\n") {
-			b.WriteByte('\n')
-		}
-		b.WriteByte('\n')
-	}
-}
-
-func writeDriftBody(b *strings.Builder, result ConfigResult, base driftBase, drifts []Drift) error {
+func writeDriftBody(b *strings.Builder, repoRoot string, result ConfigResult, drifts []Drift) error {
 	for _, item := range drifts {
-		fmt.Fprintf(b, "[%s] %s: %s\n", item.Kind, item.Group, base.shown(item.Path))
+		fmt.Fprintf(b, "[%s] %s: %s\n", item.Kind, item.Group, item.Path)
 	}
-	diff, err := resultDriftDiff(result, base, drifts)
+	diff, err := resultDriftDiff(repoRoot, result, drifts)
 	if err != nil {
 		return err
 	}
@@ -150,11 +90,11 @@ func writeDriftBody(b *strings.Builder, result ConfigResult, base driftBase, dri
 	return nil
 }
 
-func resultDriftDiff(result ConfigResult, base driftBase, drifts []Drift) (string, error) {
+func resultDriftDiff(repoRoot string, result ConfigResult, drifts []Drift) (string, error) {
 	if result.captured != nil {
 		return result.captured.text, result.captured.err
 	}
-	return driftDiff(base, drifts)
+	return driftDiff(repoRoot, drifts)
 }
 
 func driftKindSummary(drifts []Drift) string {

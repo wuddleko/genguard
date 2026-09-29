@@ -22,6 +22,15 @@ func ConfigNames() []string {
 	return names
 }
 
+func IsConfigName(name string) bool {
+	for _, candidate := range configNames {
+		if name == candidate {
+			return true
+		}
+	}
+	return false
+}
+
 type Tool struct {
 	Name    string
 	Version string
@@ -85,7 +94,8 @@ func reachedStop(dir, stop string) bool {
 	if sameDir(dir, stop) {
 		return true
 	}
-	return !dirInside(stop, dir)
+	_, inside := pathx.RelInsideResolved(stop, dir)
+	return !inside
 }
 
 func sameDir(a, b string) bool {
@@ -103,28 +113,6 @@ func sameDir(a, b string) bool {
 		return false
 	}
 	return filepath.Clean(left) == filepath.Clean(right)
-}
-
-func dirInside(root, path string) bool {
-	root = filepath.Clean(root)
-	path = filepath.Clean(path)
-	if relInside(root, path) {
-		return true
-	}
-	resolvedRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return false
-	}
-	resolvedPath, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return false
-	}
-	return relInside(filepath.Clean(resolvedRoot), filepath.Clean(resolvedPath))
-}
-
-func relInside(root, path string) bool {
-	_, ok := pathx.RelInside(root, path)
-	return ok
 }
 
 func configFile(dir string) (string, error) {
