@@ -2,9 +2,9 @@
 
 `genguard check` is meant to run in CI after checkout, inside a git work tree. It re-runs your declared generator commands and fails if `git diff HEAD` would show changes under the declared `outputs` (working tree vs committed files, including staged but uncommitted generated output). Gitignored files under `outputs` are not reported as untracked — commit the generated files.
 
-Groups run in order. Without `--since`, every group runs even when an earlier one fails or drifts. On failure genguard prints a **Summary** (one line per group, with drift kinds), then **Drift** details and diffs. A failed command prints its last 50 lines above that Summary, labeled with the group name (`greeting:`). `--all` uses the config path and the group name (`services/api/genguard.yaml: greeting:`). The summary line names `command failed (exit N)`, or `command failed (exit N): no output` when the command printed nothing. `--verbose` prints the lines as the command runs. A failed command is still diffed: the group counts as an error, and the summary line names the drift it left behind. A `clean` wipe the command never rewrote is left out of that list. Later groups see the working tree as earlier groups left it. When an earlier group fails after `clean`, paths it wiped and a later group leaves untouched stay out of that later group's drift. A later command that writes those paths is checked as usual. Prefer disjoint `outputs` so a group that drifts cannot change the tree the next group checks.
+Groups run in order. Without `--since`, every group runs even when an earlier one fails or drifts. On failure genguard prints a **Summary** (one line per group, with drift kinds), then **Drift** details and diffs. A failed command prints its last 50 lines above that Summary, labeled with the group name (`greeting:`). `--all` uses the config path and the group name (`services/api/genguard.yaml: greeting:`). The summary line names `command failed (exit N)`, or `command failed (exit N): no output` when the command printed nothing. `--verbose` prints the lines as the command runs. A failed command is still diffed: the group counts as an error, and the summary line names the drift it left behind. A `clean` wipe the command never rewrote is left out of that list. Later groups see the working tree as earlier groups left it. When an earlier group fails after `clean`, paths it wiped and a later group leaves untouched stay out of that later group's drift. A later command that writes those paths is checked as usual. Two output specs that can name the same path are a load error, in one file and across `--all`. The commands do not run.
 
-`genguard check --since origin/main` reruns a group that declares `inputs` when those inputs, its outputs, or the config file differ between the working tree and the merge-base of that ref and `HEAD`. A group with no `inputs` still runs. An unchanged group is `skipped`: its command does not run, and `clean: true` does not delete its outputs. `genguard check --all --since origin/main` uses one merge-base, then the same rule per group. A missing or unrelated ref exits `2` before any group runs.
+`genguard check --since origin/main` reruns a group that declares `inputs` when those inputs, its outputs, or the config file differ between the working tree and the merge-base of that ref and `HEAD`. It also reruns if a listed file output is absent, if `git diff` against `HEAD` names any of those paths, or if any of those specs has an untracked file. A group with no `inputs` still runs. An unchanged group is `skipped`: its command does not run, and `clean: true` does not delete its outputs. `genguard check --all --since origin/main` uses one merge-base, then the same rule per group. A missing or unrelated ref exits `2` before any group runs.
 
 Exit codes:
 
@@ -28,7 +28,7 @@ A skip does not add a code. A matching run is `0`, including when some groups we
     since: origin/main
 ```
 
-The action installs the release named by `uses:` and runs `genguard check`. It does not check out the repo, install generators, or commit. Inputs are `all`, `config`, `since`, and `isolated`. `--since` needs that ref in the checkout. `actions/checkout` fetches one commit unless `fetch-depth` is `0`. Drifted paths are `::error` annotations, relative to `GITHUB_WORKSPACE`. `GENGUARD_ANNOTATIONS=false` skips those lines. A `uses:` value of `v1.2.3` installs that release. `v1` and `v1.2` are rejected. `uses: ./`, a branch, and a commit SHA build the action checkout with `go install`.
+The action installs the release named by `uses:` and runs `genguard check`. It does not check out the repo, install generators, or commit. Inputs are `all`, `config`, `since`, and `isolated`. There is no input for `--verbose`, `--json`, or `timeout`. `--since` needs that ref in the checkout. `actions/checkout` fetches one commit unless `fetch-depth` is `0`. Drifted paths are `::error` annotations, relative to `GITHUB_WORKSPACE`. `GENGUARD_ANNOTATIONS=false` skips those lines. A `uses:` value of `v1.2.3` installs that release. `v1` and `v1.2` are rejected. `uses: ./`, a branch, and a commit SHA build the action checkout with `go install`.
 
 With `GITHUB_ACTIONS=true`, each group that runs is a `::group::`. A skipped group has none. The title is the group name. `--all` titles it with the config path, a colon, a space, and the name, including an isolated worktree: the path is the one from the checkout. `GENGUARD_ANNOTATIONS=false` still opens the groups. A quiet failure's lines sit inside the group. The Summary, the diff, and the `::error` annotations follow `::endgroup::`. `--verbose` streams the command once inside the group. Without `--verbose`, a successful command is an empty group. The action runs that quiet log.
 
@@ -122,7 +122,7 @@ Place `genguard.yaml` or `genguard.yml` at the repository root. Paths in `output
 
 ## Monorepo with config per service
 
-`genguard check --all` discovers every config under the repository root, one `genguard.yaml` or `genguard.yml` per directory. It lists the index plus untracked files that are not ignored. A gitignored untracked config is omitted. Directories named `.git`, `vendor`, and `node_modules` are skipped. A passing run prints each config path and a totals line. A config that skipped a group is printed again with that group's lines. Both names in one directory exit `2`. `genguard check --all --since origin/main` applies `--since` to every group. `--isolated` checks the HEAD copy in a throwaway worktree and does not write the checkout. `--all --isolated` lists configs tracked at HEAD, skips one that is not committed, and still runs a committed config deleted in the checkout. Each config gets its own worktree, so overlapping `clean` outputs do not share a wipe. Groups in one file still share that worktree.
+`genguard check --all` discovers every config under the repository root, one `genguard.yaml` or `genguard.yml` per directory. It lists the index plus untracked files that are not ignored (`git ls-files`). A gitignored untracked config is omitted. Directories named `.git`, `vendor`, and `node_modules` are skipped. If git cannot open a directory that can hold a config, discovery fails. A passing run prints each config path and a totals line. A config that skipped a group is printed again with that group's lines. Both names in one directory exit `2`. `genguard check --all --since origin/main` applies `--since` to every group. `--isolated` checks the HEAD copy in a throwaway worktree and does not write the checkout. `--all --isolated` lists HEAD (`git ls-tree`): a staged-only config is absent, and a committed config removed from the index is still listed. Each config gets its own worktree. Groups in one file still share that worktree.
 
 ```yaml
       - uses: actions/checkout@v4
@@ -137,7 +137,7 @@ To check specific services, pass each config (`-c` is the same flag):
       - run: genguard check -c services/worker/genguard.yaml
 ```
 
-Each config’s commands run in that config’s directory, not the workflow’s working directory. `--all` runs configs in path order on the shared working tree. A path left untouched after an earlier config fails following `clean` stays out of later configs' drift. Keep `outputs` disjoint across configs.
+Each config’s commands run in that config’s directory, not the workflow’s working directory. `--all` runs configs in path order on the shared working tree. A path left untouched after an earlier config fails following `clean` stays out of later configs' drift. Overlapping outputs across configs are a load error; the commands do not run.
 
 ## Matrix over example templates
 
@@ -189,6 +189,8 @@ git commit -m "regenerate"
 
 Swap the `command` for your stack; keep `outputs` aligned with what the tool writes. `name` is optional (defaults to `groups[N]`).
 
+Pin a generator version with the `tools` key. The fields are in the [README](../README.md#tools). A mismatch fails the group before `clean` and before the generator runs.
+
 ```yaml
 groups:
   - name: protobuf
@@ -205,9 +207,9 @@ groups:
       - internal/db/
 
   - name: openapi
-    command: openapi-generator-cli generate -i api.yaml -g go -o gen/
+    command: openapi-generator-cli generate -i api.yaml -g go -o gen/openapi
     outputs:
-      - gen/
+      - gen/openapi/
 ```
 
 See [examples/README.md](../examples/README.md) for copy-paste `genguard.yaml` templates (`buf`, `sqlc`, `go generate`, etc.).

@@ -3,6 +3,7 @@
 package clean
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -38,7 +39,7 @@ func TestCleanUnixPermissionFailures(t *testing.T) {
 			t.Fatal(err)
 		}
 		lockDir(t, locked)
-		err := cleanOutputs(nil, root, "", config.Group{Outputs: []string{"generated/"}})
+		err := cleanOutputs(context.Background(), root, "", config.Group{Outputs: []string{"generated/"}})
 		if err == nil || !strings.Contains(err.Error(), `clean "generated/"`) {
 			t.Fatalf("error = %v", err)
 		}

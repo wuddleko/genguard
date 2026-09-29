@@ -102,7 +102,7 @@ func TestRunCommandPausesWorkflowCommands(t *testing.T) {
 	root := t.TempDir()
 	var buf bytes.Buffer
 	command := `python3 -c "import sys; sys.stderr.write('::error file=evil.go::hijacked'+chr(10)+'note'+chr(13)+'::stop-commands::hijack'+chr(10)); sys.exit(1)"`
-	tail, err := runCommandContext(nil, root, command, &buf, "", 0, actions.Env{Actions: true})
+	tail, err := runCommandContext(context.Background(), root, command, &buf, "", 0, actions.Env{Actions: true})
 	if err == nil || err.Error() != "command failed (exit 1)" {
 		t.Fatalf("err = %v", err)
 	}
@@ -118,7 +118,7 @@ func TestRunCommandPausesWorkflowCommands(t *testing.T) {
 func TestRunCommandPauseSkipsQuietCommand(t *testing.T) {
 	root := t.TempDir()
 	var buf bytes.Buffer
-	tail, err := runCommandContext(nil, root, "exit 4", &buf, "", 0, actions.Env{Actions: true})
+	tail, err := runCommandContext(context.Background(), root, "exit 4", &buf, "", 0, actions.Env{Actions: true})
 	if err == nil || err.Error() != "command failed (exit 4): no output" {
 		t.Fatalf("err = %v", err)
 	}
@@ -230,7 +230,7 @@ func TestRunCommandHeaderFollowsStopCommands(t *testing.T) {
 	root := t.TempDir()
 	var buf bytes.Buffer
 	header := "::error file=evil.go::hijacked\n::stop-commands::fixed"
-	tail, err := runCommandContext(nil, root, `python3 -c "import sys; sys.stderr.write('hello'+chr(10)); sys.exit(1)"`, &buf, header, 0, actions.Env{Actions: true})
+	tail, err := runCommandContext(context.Background(), root, `python3 -c "import sys; sys.stderr.write('hello'+chr(10)); sys.exit(1)"`, &buf, header, 0, actions.Env{Actions: true})
 	if err == nil || err.Error() != "command failed (exit 1)" {
 		t.Fatalf("err = %v", err)
 	}

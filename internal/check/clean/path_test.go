@@ -1,6 +1,7 @@
 package clean
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,7 +25,7 @@ func TestCleanPathsWhenWorkingDirectoryIsGone(t *testing.T) {
 	if _, _, err := resolveCleanPath("rel", "out.txt", true); err == nil {
 		t.Fatal("resolveCleanPath")
 	}
-	if err := cleanOutputs(nil, "rel", "", config.Group{Outputs: []string{"out.txt"}}); err == nil {
+	if err := cleanOutputs(context.Background(), "rel", "", config.Group{Outputs: []string{"out.txt"}}); err == nil {
 		t.Fatal("cleanOutputs")
 	}
 }

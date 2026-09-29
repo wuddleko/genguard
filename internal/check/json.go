@@ -91,11 +91,7 @@ func jsonConfigFrom(repoRoot string, cfg ConfigRun) jsonConfig {
 		}
 		if group.Status != GroupSkipped {
 			for _, tool := range group.Tools {
-				item.Tools = append(item.Tools, jsonTool{
-					Name: tool.Name,
-					Want: tool.Want,
-					Have: tool.Have,
-				})
+				item.Tools = append(item.Tools, jsonTool(tool))
 			}
 		}
 		out.Groups = append(out.Groups, item)
