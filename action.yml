@@ -1,4 +1,4 @@
-name: genguard
+name: genguard-check
 description: Fail if generated files don't match their generators
 inputs:
   all:
