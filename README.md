@@ -5,36 +5,36 @@
 [![Release](https://img.shields.io/github/v/release/wuddleko/genguard)](https://github.com/wuddleko/genguard/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> Detect generated-code drift in CI by re-running your existing generators.
+> Catch generated-code drift in CI by re-running the generators you already use.
 
-genguard is a Git-aware code generation checker. It re-runs the commands in `genguard.yaml` and fails when a fresh run does not match the generated files committed in Git.
+**genguard** is a Git-aware checker for generated files. It runs the commands in your `genguard.yaml`, then compares the result to what is committed at `HEAD`. If they differ, the check fails.
 
-Any generator you can start with a command works, including:
+Works with anything you can invoke from a shell:
 
-- Go, with `go generate`
-- Protobuf, with `buf generate`
-- SQL, with `sqlc generate`
-- OpenAPI client and type generators
-- a Makefile target, or any other command
+- Go — `go generate`
+- Protobuf — `buf generate`
+- SQL — `sqlc generate`
+- OpenAPI clients and types
+- A Makefile target, or any other command
 
-The generators stay yours. genguard does not install them, and it does not commit the result. `check` leaves the new files in your working tree. `--isolated` runs the same check in a temporary worktree and leaves your checkout alone.
+You keep your generators. genguard does not install tools or commit output for you. `check` leaves new files in your working tree so you can inspect them. `--isolated` runs the same logic in a temporary worktree and does not touch your checkout.
 
-CI runs the same `genguard check`. GitHub Actions snippets are in [docs/ci.md](docs/ci.md).
+**Jump to:** [Install](#install) · [Quick start](#quick-start) · [Use cases](#use-cases) · [Commands](#commands) · [Config](#config) · [Reference](#reference) · [CI](#ci)
 
-## Compared with `git diff`
+## Why not just `git diff`?
 
-Generating and then running `git diff` can show this mismatch. You still have to remember the output paths, compare to `HEAD` rather than the index (a staged file looks clean otherwise), and remove the old files first so a file the generator stopped writing is not left behind. A second generator means doing that again in a script.
+The usual DIY flow is: run codegen, then `git diff`. That works, but you have to wire it yourself — remember every output path, diff against `HEAD` (not the index, or a staged file looks fine), and wipe old outputs so a file your generator stopped producing does not linger. Add a second generator and you are maintaining a script.
 
-genguard keeps those rules next to the generated files and only looks at the paths you list:
+genguard keeps the rules beside the generated tree and only watches paths you declare:
 
-- Compares those outputs to `HEAD`. A file that is only staged still fails until it is committed.
-- Can delete the declared outputs before the command, when `clean` is set.
-- Runs several generator groups, in order, from one file.
-- Skips an unchanged group with `--since`.
-- Can check the committed files in a temporary worktree with `--isolated`.
+- Drift is measured against **`HEAD`**. Staged-but-uncommitted generated files still fail until you commit them.
+- Optional **`clean`** deletes declared outputs before the command runs.
+- Several **groups** run in order from one config file.
+- **`--since`** skips groups whose inputs did not change on this branch (see [Since flag](#since-flag)).
+- **`--isolated`** checks committed files in a throwaway worktree.
 
 ```yaml
-clean: true # delete declared outputs before the command, so a file the generator stopped writing is not left behind
+clean: true # wipe declared outputs first — catches files the generator no longer writes
 groups:
   - name: protobuf
     command: buf generate
@@ -48,155 +48,271 @@ groups:
       - queries/
     outputs:
       - internal/db/
-    clean: false # overrides the clean above
+    clean: false # overrides the top-level clean
 ```
 
-Put `genguard.yaml` (or `genguard.yml`) next to the generated files, outside any directory listed in `outputs`. Templates for the usual tools are in [examples/](examples/README.md). Those files are config only. The generator stays yours.
+Place `genguard.yaml` (or `genguard.yml`) next to your generated files — not inside an `outputs` directory. Stack-specific templates live in [examples/](examples/README.md). They are config only; your generator setup stays yours.
 
-## Quick start
+## Install
 
-With Go 1.22+:
+Pick one path below. After `go install`, put `$(go env GOPATH)/bin` on your `PATH`.
+
+**Pinned release (Go 1.22+):**
 
 ```bash
 go install github.com/wuddleko/genguard/cmd/genguard@v0.7.0
+```
+
+**This repository:**
+
+```bash
+make install
+# or
+go install ./cmd/genguard
+```
+
+**No Go** — needs `curl`, `awk`, and `sha256sum` or `shasum`. Download [install.sh](install.sh), read it, then run:
+
+```bash
+sh install.sh
+sh install.sh v0.6.0
+# or
+GENGUARD_TAG=v0.6.0 sh install.sh
+```
+
+The script verifies the release binary against `checksums.txt` from the same tag. Piping `curl … | sh` is convenient but trusts both the script URL and that release; prefer a clone or a saved copy you have inspected. See `sh install.sh --help` for `BINDIR` and platform overrides.
+
+### Windows
+
+Releases are `genguard_*_windows_amd64.zip` only (no Windows arm64). Download [from Releases](https://github.com/wuddleko/genguard/releases) or run `install.sh` from **Git Bash** or **MSYS** — it uses `unzip` when available, otherwise `tar` on the zip. In **WSL** you get the Linux binary, not `genguard.exe`.
+
+## Quick start
+
+[Install](#install) genguard, then from a Git work tree that contains your config:
+
+```bash
 genguard check
 ```
 
-`$(go env GOPATH)/bin` has to be on your `PATH`. A match prints `Generated files match the generators.` and exits 0. Drift prints a summary, the paths, and a diff, then exits 1. [Install](#install) covers a machine without Go. [Run it](#run-it) lists every exit code.
+**GitHub Actions** (use `fetch-depth: 0` on checkout if you use `--since`):
+
+```yaml
+- uses: wuddleko/genguard@v0.7.0
+  with:
+    all: true
+```
+
+Generator install steps and more CI recipes: [docs/ci.md](docs/ci.md).
+
+A match prints `Generated files match the generators.` and exits `0`. On drift you get a summary, paths, and a diff, then exit `1` — regenerate and commit. Exit codes and stderr details: [Commands](#commands).
+
+### Which command when?
+
+| Goal | Command |
+|------|---------|
+| CI or “are we in sync?” | `genguard check` |
+| Regenerate locally after editing sources | `genguard run` |
+| Large monorepo, skip untouched generators | `genguard check --since origin/main` |
+| Do not dirty the working tree | `genguard check --isolated` |
 
 ## Use cases
 
 ### Generated Go code
 
-Point `command` at `go generate ./...` and list the directories it writes. The generated files have to be committed. genguard fails when a fresh run would change them. [Template](examples/go-generate.yaml).
+Set `command` to `go generate ./...` and list the directories it writes. Generated files must be committed; genguard fails if a fresh run would change them. [Template](examples/go-generate.yaml).
 
 ### Protobuf
 
-Run `buf generate` and list the generated tree under `outputs`. Add `proto/` under `inputs` when `--since` should skip the group if those files are untouched. [Template](examples/buf.yaml).
+Run `buf generate` and put the generated tree under `outputs`. Add `proto/` under `inputs` if you want `--since` to skip the group when protos are unchanged. [Template](examples/buf.yaml).
 
 ### SQL with sqlc
 
-`sqlc generate` checks the generated database package against `HEAD`. [Template](examples/sqlc.yaml).
+`sqlc generate` with the generated package paths in `outputs`. [Template](examples/sqlc.yaml).
 
 ### OpenAPI
 
-Point your OpenAPI generator at the spec and list the client or types it writes. The template uses `openapi-generator-cli`. [Template](examples/openapi.yaml).
+Point `command` at your generator (the example uses `openapi-generator-cli`) and list the client or types directory. [Template](examples/openapi.yaml).
+
+### Makefile-driven codegen
+
+If codegen is `make generate` (or similar), list the tree it produces under `outputs`. [Template](examples/make.yaml).
 
 ### More than one config
 
-In a monorepo, keep a `genguard.yaml` beside each service. `genguard check --all` runs every config it finds.
-
-## Incremental checks
-
-`genguard check --since origin/main` skips a group that declares `inputs` when those paths, its outputs, and the config still match the latest commit that `HEAD` and that ref share. It still runs if a listed file output is absent, if `git diff` against that merge-base or against `HEAD` names any of those paths, or if any of those specs has an untracked file.
-
-A group with no `inputs` still runs. A skipped group does not run its command, and `clean` does not delete its outputs. A pull request that touches one generator can leave the expensive ones alone.
+In a monorepo, put a `genguard.yaml` beside each service. `genguard check --all` discovers and runs every config.
 
 ## Commands
 
-- `check` — run the generators, leave their files in place, and fail if the declared outputs differ from `HEAD`. A file that is only staged still fails until it is committed.
-- `run` — run the generators and leave their files in place. A success exits 0.
-- `version` — print the version.
-- `-c`, `--config` — config file to use. Otherwise genguard walks up from the current directory for `genguard.yaml` or `genguard.yml`, inside a git work tree.
-- `--all` — every config under the repository. `check --all` lists the index plus untracked files that are not ignored (`git ls-files`). `--all --isolated` lists HEAD (`git ls-tree`): a staged-only config is absent, and a committed config removed from the index is still listed. A gitignored untracked config is in neither list. A config under `.git`, `vendor`, or `node_modules` is skipped. If git cannot open a directory that can hold a config, discovery fails.
-- `--since` — skip a group with `inputs` when those paths, its outputs, and the config still match the latest commit that `HEAD` and the ref share. It still runs if a listed file output is absent, if that merge-base or `HEAD` differs, or if any of those specs has an untracked file.
-- `--isolated` — check the committed files in a temporary worktree and leave your checkout alone. `check` only.
-- `--json` — print the result as JSON. The document has `exit` and `configs`. Each config has `path`, `exit`, and `groups`; each group has `name`, `status`, `error`, `drifts` (`kind`, `path`), and `tools` (`want`, `have`). A run that stops before any config runs still prints `{"exit": 2, "error": "...", "configs": []}` on stdout. The `error:` line stays on stderr. A flag the parser does not know prints usage only.
-- `--verbose` — stream the generator's stdout and stderr to stderr while the command runs.
+Subcommands:
 
-`check` and `run` take flags only. A positional argument exits 2 with `unexpected argument`. Pass a config with `--config`. Before, a leftover positional was ignored, and so was every flag after it: `genguard check svc/genguard.yaml --json` checked the config found from the working directory and printed text.
+| Command | What it does |
+|---------|----------------|
+| **`check`** | Run generators, then fail if declared outputs differ from `HEAD`. |
+| **`run`** | Run generators only; exit `0` on success. |
+| **`version`** | Print the version. |
 
-## Run it
+Shared flags:
 
-```bash
-genguard check
-```
+| Flag | What it does |
+|------|----------------|
+| **`-c` / `--config`** | Config file. Otherwise search upward for `genguard.yaml` / `genguard.yml` in the repo. |
+| **`--all`** | Run every config in the repository. [Discovery rules](#all-discovery). |
+| **`--since <ref>`** | Skip groups with `inputs` when paths are unchanged vs `HEAD` and vs the merge-base. [Full rules](#since-flag). |
+| **`--isolated`** | Check committed files in a temporary worktree (`check` only). |
+| **`--json`** | Print results as JSON on stdout. [Schema](#json-output). |
+| **`--verbose`** | Stream generator stdout/stderr to stderr while each command runs. |
 
-A match prints `Generated files match the generators.` and exits 0. Drift prints a summary, the paths, and a diff, then exits 1. Regenerate and commit. `run` prints `Generated files written.` on success.
+`check` and `run` take **flags only**. A positional argument exits `2` with `unexpected argument` — pass the config with `--config`. Older releases ignored a positional path and trailing flags; do not rely on that.
+
+Staged generated files still count as drift until committed. On `run` success you get `Generated files written.`
+
+### Exit codes
 
 | Exit | Meaning |
-|---|---|
-| `0` | `check`: outputs match `HEAD`, including when some groups were skipped. `run`: the commands succeeded |
-| `1` | Drift (`check` only) |
-| `2` | Config, git, or the generator command failed. A command error wins over drift |
+|------|---------|
+| `0` | `check`: outputs match `HEAD` (skipped groups are fine). `run`: commands succeeded. |
+| `1` | Drift (`check` only). |
+| `2` | Config error, Git error, bad `--since` ref, or generator failure. Command failure wins over drift. |
 
-A command that exits 0 stays quiet, including when the check finds drift. A failed command prints its last 50 lines on stderr, labeled with the group name, then the Summary. With `--all` the label is the config path, a colon, a space, and the group name (`services/api/genguard.yaml: greeting:`). The summary line names `command failed (exit N)`. When that is the only failure, the final line is `error: command failed (exit N)`. A command that prints nothing uses `command failed (exit N): no output`. `--json` keeps the document on stdout. Those lines stay on stderr, and the group's `error` field is that same sentence.
+### Output on stderr
 
-`--verbose` prints each line as it arrives, with the same label on the first line. It applies to `check` and `run`, including `--all`, `--since`, `--isolated`, and `--json`. The Summary names the exit and leaves the lines where they were printed.
+Successful generator commands stay quiet even when another group drifted. Failed commands print the last 50 lines, then a **Summary**. Group labels are `name:`; with `--all`, `path/to/genguard.yaml: name:`.
 
-An interrupt before any group has run prints `error: interrupted` and exits 2. After that, the Summary covers the groups that ran and the final line adds `error: interrupted`, including when the earlier groups all passed or one had already failed.
-
-## Install
-
-With Go 1.22+:
-
-```bash
-go install github.com/wuddleko/genguard/cmd/genguard@v0.7.0
-```
-
-`$(go env GOPATH)/bin` has to be on your `PATH`. From a checkout of this repository: `make install` or `go install ./cmd/genguard`.
-
-Without Go, [install.sh](install.sh) downloads the release for this machine, checks the archive against `checksums.txt`, and installs into a directory already on `PATH`. From a checkout: `sh install.sh`. Pass a tag, or set `GENGUARD_TAG`, for another release. `sh install.sh --help` lists location and platform options.
+With `--json`, the document is on stdout; human-readable Summary and `error:` lines stay on stderr. Details: [Command output](#command-output).
 
 ## Config
 
-With no `--config`, genguard walks up from the current directory for `genguard.yaml` or `genguard.yml`, inside a git work tree. A directory holds one of those names. Both files, or `--all` together with `--config`, exit 2.
+Without `--config`, genguard searches upward for `genguard.yaml` or `genguard.yml` inside a Git work tree. One filename per directory — not both. `--all` together with `--config` exits `2`.
 
-Top-level keys are `groups` (required, non-empty), `clean`, `tools`, and `timeout`. An unknown key is an error.
+Unknown top-level keys are errors.
 
-- **`name`** — optional label. The fallback is `groups[0]`, `groups[1]`, and so on. A name that is null, empty, or whitespace uses that fallback.
-- **`command`** — required. Run with `sh -c` from the config directory. On Windows, `sh` or `bash` on `PATH`; otherwise `%COMSPEC% /C`.
-- **`outputs`** — required, non-empty literal paths and globs, relative to the config file. An entry starting with `:` is a config error. A null or blank entry must be a non-empty string.
-- **`inputs`** — optional paths for `--since`, with the same rules as `outputs`. Omit the key and the group runs every time. An empty list is an error. A null or blank entry must be a non-empty string.
-- **`clean`** — optional, default `false`. Delete the outputs before the command. A top-level `clean` applies to every group; a group can override it. `clean: ~` is a boolean error. Omitting the key leaves it unset.
-- **`tools`** — optional names from the top-level `tools` list.
-- **`timeout`** — optional Go duration greater than zero (`200ms`, `1m`). A top-level value applies to every group. A group value replaces it. Omitting it on a group keeps the top-level value. Probes use that same limit. When the key is absent, the command has no limit. `0s`, a negative duration, a non-string, and a string that is not a Go duration are errors. `timeout: ~` is a duration error. Omitting the key leaves it unset. A timeout is a group error (`command timed out after 200ms`), exit 2. The tree is still diffed, and a `clean` wipe is left as it is.
+### Top-level
 
-A missing key stays the default. A present null and a present empty value take the same branch.
+| Key | Required | Description |
+|-----|----------|-------------|
+| **`groups`** | yes | Non-empty list of generator groups. |
+| **`clean`** | no | Default `false`. Wipe each group’s `outputs` before its command unless the group overrides. |
+| **`tools`** | no | Tool definitions groups can reference for version checks. |
+| **`timeout`** | no | Default command/probe timeout for all groups (Go duration, e.g. `1m`). Probes use the same limit. |
 
-### Tools
+### Per group (`groups[]`)
 
-`tools` declares programs a group can require. Each entry has:
+| Key | Required | Description |
+|-----|----------|-------------|
+| **`name`** | no | Label in logs; defaults to `groups[0]`, `groups[1]`, … Empty or whitespace uses that default. |
+| **`command`** | yes | Shell command from the config directory. See [Shell](#shell). |
+| **`outputs`** | yes | Non-empty paths or globs (relative to the config file). |
+| **`inputs`** | no | Paths for `--since`. Omit to always run this group. |
+| **`clean`** | no | Overrides top-level `clean` for this group. |
+| **`tools`** | no | Subset of top-level `tools` names required before this group runs. |
+| **`timeout`** | no | Overrides top-level `timeout` for this group (probes included). |
 
-- **`name`** — required, a single token (`git`, `sqlc`).
-- **`version`** — optional exact version. A leading `v` is stripped from the pin and from the first version-shaped token in the probe output, and those two texts have to match. `v1.32.0` and `1.32.0` are the same pin. A `version` or `command` that is null, `""`, or whitespace requires a non-empty string. Omitting the key leaves it unset.
-- **`command`** — optional probe. The default is `name --version`.
+Validation edge cases (`clean: ~`, empty `inputs`, overlaps, and timeouts): [Config validation](#config-validation).
 
-A group lists those names under its own `tools` key. A name that is not declared at the top level is a config error. The probes run before `clean` and before the generator. A missing program, or a version that does not match, fails the group and the command does not run. The groups of one config share a probe with the same command, pin, and timeout. Probes run in the config directory, so configs do not share them. On OK and drift, the Summary appends the found versions in list order: `protobuf: drift (1 modified); buf 1.32.0`. An error line already names the tool. With `--json`, `want` is the pin and `have` is the probed version, both without a leading `v`. When `version` is omitted, `want` is omitted and `have` is the probed version. Omit `tools` when the group was skipped or listed none.
+### Shell
 
-After the command, genguard compares `HEAD` to the working tree under `outputs`:
+Each group **`command`** runs from the config file’s directory via `sh -c`. On Windows, genguard uses `sh` or `bash` when either is on `PATH`; otherwise `%COMSPEC% /C`.
 
-| What you see | What happened |
-|---|---|
-| `modified` | A tracked file changed |
-| `untracked` | A new file that is not gitignored |
-| `missing` | A tracked file under `outputs` is gone, or a listed **file** is absent. A directory or a glob is not, by itself, a missing path |
+### Tool pins
 
-Generated paths have to be tracked. Gitignored files under `outputs` stay out of the report. A failed command is still diffed, and that group counts as an error (exit 2). Its last 50 lines are printed above the Summary.
+Each top-level `tools` entry has **`name`** (required), optional **`version`** (exact pin; leading `v` ignored when comparing), and optional **`command`** (probe; default `name --version`).
 
-`clean: true` removes the declared outputs before the command: a directory is recreated empty, a file is removed, a glob removes the tracked and untracked matches. A glob that matches a directory is an error. It refuses `.`, `..`, absolute paths, anything outside the config directory, symlinks, and a delete that would take `.git` or the config file. A failed command does not restore the wipe.
+Groups list tool names under their own **`tools`** key. Names not declared at the top level are config errors. Probes run before `clean` and the generator, using the group’s **timeout** (or the top-level default). Missing binaries or version mismatches fail the group without running its command. Results are cached per config.
 
-Two output specs that can name the same path are a load error. A glob follows git: `*`, `?`, and `[...]` also match `/`, so `gen/*.go` overlaps `gen/sub/`. A trailing slash is the whole directory, and so is a listed directory without one. A literal overlaps a glob only when that literal matches the glob, and two globs overlap only when one path could match both. Within one file the error names both groups and both specs. `check --all`, `run --all`, and `check --all --isolated` use the same check across configs and name both config paths. Isolated reads the committed files and directories, including a config removed from the checkout. A file that does not parse is reported for that config. Outputs from a file that parses still count, so another config that names one of those paths does not run. The commands do not run, so neither path is reported as drift.
+On success or drift, the Summary may append detected versions, e.g. `protobuf: drift (1 modified); buf 1.32.0`. In `--json`, `want` is the pin and `have` is what the probe saw (no leading `v`); when there is no pin, `want` is omitted.
 
-Groups run in order and share the tree. `--all --isolated` gives each config its own worktree. `--isolated` is only valid with `check`. A bad `--since` ref exits 2 before any group runs. An unchanged group is `skipped`: its command does not run, and `clean` does not delete its outputs.
+### Drift
+
+After each command, paths under `outputs` are compared to `HEAD`:
+
+| Kind | Meaning |
+|------|---------|
+| `modified` | Tracked file changed |
+| `untracked` | New file, not gitignored |
+| `missing` | Tracked file removed, or a listed **file** missing on disk — not a directory or glob path by itself |
+
+Generated files should be tracked. Gitignored paths under `outputs` are not reported. Failed commands still produce a diff; see [Command output](#command-output).
+
+Groups run in order and share one tree. `clean` behavior and overlap rules: [Config validation](#config-validation).
+
+## Reference
+
+### Since flag
+
+For a group with **`inputs`**, genguard skips the group when its inputs, outputs, and config file match the working tree at both:
+
+1. the merge-base of `HEAD` and the `--since` ref, and  
+2. `HEAD`.
+
+The group **still runs** if:
+
+- a listed **file** output is missing on disk,
+- `git diff` names any of those paths against either revision above, or
+- any of those paths has an untracked file.
+
+Groups without `inputs` always run. Skipped groups do not run their command and do not run `clean`. A bad ref exits `2` before any group runs.
+
+`check --all --since <ref>` uses one merge-base for the whole run, then the same rules for each config and group.
+
+CI notes (fetch depth, monorepos): [docs/ci.md](docs/ci.md).
+
+### All discovery
+
+| Mode | How configs are found |
+|------|------------------------|
+| `check --all` / `run --all` | Index plus non-ignored untracked files (`git ls-files`). |
+| `check --all --isolated` | Committed tree at `HEAD` (`git ls-tree`). |
+
+Skipped paths: `.git`, `vendor`, `node_modules`. Gitignored untracked configs are never listed. A config only in the index (not committed) appears in the first mode but not isolated mode; a committed config removed from the index may still appear in isolated mode. Discovery fails if Git cannot read a directory that might contain a config.
+
+`--all --isolated` uses one temporary worktree per config.
+
+### JSON output
+
+Stdout is one JSON object:
+
+- **`exit`** — process exit code  
+- **`configs`** — array of `{ "path", "exit", "groups" }`  
+- each **group**: `name`, `status`, `error`, `drifts` (`kind`, `path`), `tools` (`want`, `have`)
+
+If the run stops before any config loads, stdout is still `{"exit": 2, "error": "...", "configs": []}`. Human `error:` lines remain on stderr. Unknown CLI flags print usage only.
+
+### Command output
+
+Summary lines use `command failed (exit N)`; empty command output adds `: no output`. When that is the only failure, stderr ends with `error: command failed (exit N)`. The group’s `error` field in `--json` matches that sentence.
+
+`--verbose` prefixes the first streamed line with the same label as the Summary (`name:` or `config: name:`).
+
+**Interrupt:** before any group runs, `error: interrupted` and exit `2`. After that, Summary covers finished groups, then a final `error: interrupted`.
+
+### Config validation
+
+- **YAML empties:** missing keys use defaults; `null` / blank strings where a value is required are errors.  
+- **`inputs`:** `[]` is an error; omit the key to always run the group.  
+- **`clean` / `timeout`:** `clean: ~` and `timeout: ~` are invalid. Timeout must be a positive Go duration (`200ms`, `1m`); `0` or invalid strings are errors. On timeout the group fails with exit `2`, drift is still computed, and `clean` is not rolled back.  
+- **`outputs`:** entries must not start with `:`; globs follow Git rules (`*`, `?`, `[...]` match `/`).  
+- **Overlap:** two specs (within one file or across `--all`) that can name the same path are a load error; commands do not run. Isolated mode still reads committed specs for overlap. Parse errors are per file; valid outputs from other files still count toward overlap.  
+- **`clean: true`:** removes declared outputs before the command (directories recreated empty, files deleted). Refuses `.`, `..`, absolute paths, paths outside the config directory, symlinks, `.git`, and the config file. A glob matching a directory is an error. Failed commands do not restore a wipe.
 
 ## Security
 
-What a run is allowed to do, and how to report a vulnerability: [SECURITY.md](SECURITY.md).
+Scope of what a run can do, and how to report issues: [SECURITY.md](SECURITY.md).
 
 ## CI
 
-GitHub Actions snippets and per-tool setup: [docs/ci.md](docs/ci.md).
+The composite action installs the release named by `uses:` and runs `genguard check`. It does not install `buf`, `sqlc`, or other generators — add those steps yourself. Snippets and per-tool setup: [docs/ci.md](docs/ci.md).
 
 ## Development
 
 ```bash
-make test
-make lint   # go vet ./...
+make test              # go test ./...
+make lint              # go vet ./...
+make build             # bin/genguard
+make validate-examples # example YAML templates load cleanly
 ```
 
-Tests need `git` and `python3`.
+Tests need `git` and `python3`. Internals: [docs/design.md](docs/design.md).
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

@@ -4,11 +4,9 @@
 
 Groups run in order. Without `--since`, every group runs even when an earlier one fails or drifts. On failure genguard prints a **Summary** (one line per group, with drift kinds), then **Drift** details and diffs. A failed command prints its last 50 lines above that Summary, labeled with the group name (`greeting:`). `--all` uses the config path and the group name (`services/api/genguard.yaml: greeting:`). The summary line names `command failed (exit N)`, or `command failed (exit N): no output` when the command printed nothing. `--verbose` prints the lines as the command runs. A failed command is still diffed: the group counts as an error, and the summary line names the drift it left behind. A `clean` wipe the command never rewrote is left out of that list. Later groups see the working tree as earlier groups left it. When an earlier group fails after `clean`, paths it wiped and a later group leaves untouched stay out of that later group's drift. A later command that writes those paths is checked as usual. Two output specs that can name the same path are a load error, in one file and across `--all`. The commands do not run.
 
-`genguard check --since origin/main` reruns a group that declares `inputs` when those inputs, its outputs, or the config file differ between the working tree and the merge-base of that ref and `HEAD`. It also reruns if a listed file output is absent, if `git diff` against `HEAD` names any of those paths, or if any of those specs has an untracked file. A group with no `inputs` still runs. An unchanged group is `skipped`: its command does not run, and `clean: true` does not delete its outputs. `genguard check --all --since origin/main` uses one merge-base, then the same rule per group. A missing or unrelated ref exits `2` before any group runs.
+Skip logic for `--since`: [README — Since flag](../README.md#since-flag). Use `fetch-depth: 0` (or fetch the base branch) so that ref exists in the checkout.
 
-Exit codes:
-
-A skip does not add a code. A matching run is `0`, including when some groups were skipped. Drift is `1`. A bad `--since` ref, an empty `inputs` list, and a failed command are `2`.
+Exit codes: [README — Commands](../README.md#exit-codes) (`0` match, `1` drift, `2` config/git/command). In CI, an empty `inputs` list in a config is also exit `2`.
 
 | Code | Meaning |
 |---|---|
@@ -122,7 +120,7 @@ Place `genguard.yaml` or `genguard.yml` at the repository root. Paths in `output
 
 ## Monorepo with config per service
 
-`genguard check --all` discovers every config under the repository root, one `genguard.yaml` or `genguard.yml` per directory. It lists the index plus untracked files that are not ignored (`git ls-files`). A gitignored untracked config is omitted. Directories named `.git`, `vendor`, and `node_modules` are skipped. If git cannot open a directory that can hold a config, discovery fails. A passing run prints each config path and a totals line. A config that skipped a group is printed again with that group's lines. Both names in one directory exit `2`. `genguard check --all --since origin/main` applies `--since` to every group. `--isolated` checks the HEAD copy in a throwaway worktree and does not write the checkout. `--all --isolated` lists HEAD (`git ls-tree`): a staged-only config is absent, and a committed config removed from the index is still listed. Each config gets its own worktree. Groups in one file still share that worktree.
+`genguard check --all` discovers every config under the repository root, one `genguard.yaml` or `genguard.yml` per directory. It lists the index plus untracked files that are not ignored (`git ls-files`). A gitignored untracked config is omitted. Directories named `.git`, `vendor`, and `node_modules` are skipped. If git cannot open a directory that can hold a config, discovery fails. A passing run prints each config path and a totals line. A config that skipped a group is printed again with that group's lines. Both names in one directory exit `2`. `genguard check --all --since origin/main` uses the [README skip rules](../README.md#since-flag) on every group. `--isolated` checks the HEAD copy in a throwaway worktree and does not write the checkout. `--all --isolated` lists HEAD (`git ls-tree`): a staged-only config is absent, and a committed config removed from the index is still listed. Each config gets its own worktree. Groups in one file still share that worktree.
 
 ```yaml
       - uses: actions/checkout@v4
